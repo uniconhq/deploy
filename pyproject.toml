@@ -1,0 +1,34 @@
+[project]
+name = "unicon-deploy"
+version = "0.1.0"
+description = "Bootstrap and checks for the Unicon compose stack"
+requires-python = ">=3.14"
+dependencies = ["httpx==0.28.1"]
+
+[project.scripts]
+bootstrap = "bootstrap.main:main"
+
+[dependency-groups]
+dev = ["mypy==2.3.1", "pytest==9.1.1", "ruff==0.16.7", "yamllint==1.38.0"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["bootstrap"]
+
+[tool.ruff]
+line-length = 88
+target-version = "py314"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["bootstrap", "scripts", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

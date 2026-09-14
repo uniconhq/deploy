@@ -1,0 +1,12 @@
+# Written by bootstrap. Holds every secret the stack runs on.
+.env
+# The placeholder-filled copy the compose config check reads.
+.env.check
+
+# uv. uv.lock is committed: CI installs from it with --frozen.
+.venv/
+__pycache__/
+*.pyc
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
