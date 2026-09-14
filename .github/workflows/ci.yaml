@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+
+      - name: ruff
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: mypy
+        run: uv run mypy
+
+      - name: pytest
+        run: uv run pytest
+
+      - name: yamllint
+        run: uv run yamllint .
+
+      # docker compose reads .env, and every secret in it is required. Fill the
+      # template with a placeholder so the files can be validated without one,
+      # into a file of its own so a local run cannot overwrite a real .env.
+      - name: compose config
+        run: |
+          sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)=$/\1=placeholder/' .env.example > .env.check
+          docker compose --env-file .env.check -f compose.yaml config --quiet
+          docker compose --env-file .env.check -f compose.yaml -f compose.dev.yaml config --quiet
