@@ -1,0 +1,301 @@
+# The Unicon stack. Production shape: every image is pinned by tag and nothing
+# is built here. compose.dev.yaml overrides this for local work.
+#
+# Values come from .env, which `uv run bootstrap` writes. Keys marked `:?` have
+# no sensible default and stop compose with a named variable rather than
+# starting a service with an empty password.
+name: unicon
+
+# The keys the backend reads, in one place because two services need them: only
+# the backend's own, not the whole of .env, so nothing here carries the Forgejo
+# administrator password or the Garage RPC secret. Plain ${...} rather than
+# ${...:?}, because compose interpolates every service on every command and
+# bootstrap has to start Postgres before these exist. The backend checks them at
+# boot and refuses to start on a missing one.
+x-backend-env: &backend-env
+  UNICON_PUBLIC_URL: ${UNICON_PUBLIC_URL}
+  UNICON_DATABASE_URL: ${UNICON_DATABASE_URL}
+  UNICON_FORGE_PUBLIC_URL: ${UNICON_FORGE_PUBLIC_URL}
+  UNICON_FORGE_INTERNAL_URL: ${UNICON_FORGE_INTERNAL_URL}
+  UNICON_FORGE_ADMIN_TOKEN: ${UNICON_FORGE_ADMIN_TOKEN}
+  UNICON_FORGE_OAUTH_CLIENT_ID: ${UNICON_FORGE_OAUTH_CLIENT_ID}
+  UNICON_FORGE_OAUTH_CLIENT_SECRET: ${UNICON_FORGE_OAUTH_CLIENT_SECRET}
+  UNICON_WOODPECKER_URL: ${UNICON_WOODPECKER_URL}
+  UNICON_WOODPECKER_TOKEN: ${UNICON_WOODPECKER_TOKEN}
+  UNICON_S3_ENDPOINT: ${UNICON_S3_ENDPOINT}
+  UNICON_S3_REGION: ${UNICON_S3_REGION}
+  UNICON_S3_ACCESS_KEY: ${UNICON_S3_ACCESS_KEY}
+  UNICON_S3_SECRET_KEY: ${UNICON_S3_SECRET_KEY}
+  UNICON_SESSION_SIGNING_KEY: ${UNICON_SESSION_SIGNING_KEY}
+  UNICON_TOKEN_ENCRYPTION_KEY: ${UNICON_TOKEN_ENCRYPTION_KEY}
+  UNICON_COOKIE_SECURE: ${UNICON_COOKIE_SECURE}
+  # Seconds. Half of a pair: the other half is REFRESH_TOKEN_EXPIRATION_TIME in
+  # forgejo/app.ini, and the two have to say the same length of time. A Unicon
+  # session that outlives the Forgejo refresh token behind it is a session that
+  # can no longer act in Forgejo, and the person is signed in to a site that
+  # cannot do anything for them.
+  UNICON_SESSION_HARD_TTL: ${UNICON_SESSION_HARD_TTL}
+  # Closed by default, like a production Forgejo. compose.dev.yaml turns it
+  # on in the same place it opens Forgejo registration, so the two agree.
+  UNICON_FORGE_REGISTRATION_OPEN: ${UNICON_FORGE_REGISTRATION_OPEN:-false}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_SUPERUSER_PASSWORD:?set by bootstrap}
+      POSTGRES_DB: postgres
+      # Read by postgres/init/10-create-databases.sh on the first start.
+      FORGEJO_DB_PASSWORD: ${FORGEJO_DB_PASSWORD:?set by bootstrap}
+      WOODPECKER_DB_PASSWORD: ${WOODPECKER_DB_PASSWORD:?set by bootstrap}
+      UNICON_DB_PASSWORD: ${UNICON_DB_PASSWORD:?set by bootstrap}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      # Over TCP, not the socket. The entrypoint runs a temporary server on the
+      # socket only while it applies postgres/init, so a socket check reports
+      # healthy before the three roles exist and everything that waits on
+      # service_healthy starts too early.
+      test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 30
+      start_period: 20s
+
+  forgejo:
+    image: codeberg.org/forgejo/forgejo:15.0.8
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      # Forgejo asks Garage whether the LFS bucket exists while it boots, so a
+      # plain `up -d` after a reboot must not race it.
+      garage:
+        condition: service_healthy
+    # forgejo/app.ini is the record. Copying it into place on every start means
+    # a hand edit inside a running container is reverted by the next restart.
+    # The setup step of the image then merges the FORGEJO__* variables below
+    # into that copy, so secrets stay out of the committed file.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - |
+        set -e
+        mkdir -p /data/gitea/conf
+        cp /etc/unicon/forgejo/app.ini /data/gitea/conf/app.ini
+        chown 1000:1000 /data/gitea/conf/app.ini
+        chmod 0640 /data/gitea/conf/app.ini
+        exec /usr/bin/entrypoint /usr/bin/s6-svscan /etc/s6
+    environment:
+      USER_UID: "1000"
+      USER_GID: "1000"
+      # The browser-facing URL. People sign into Forgejo directly, so this is
+      # not the in-network address.
+      FORGEJO__server__ROOT_URL: ${FORGEJO_PUBLIC_URL:?set by bootstrap}/
+      # The host out of that URL. Bootstrap derives it, so the two cannot drift.
+      FORGEJO__server__DOMAIN: ${FORGEJO_DOMAIN:?set by bootstrap}
+      FORGEJO__database__PASSWD: ${FORGEJO_DB_PASSWORD:?set by bootstrap}
+      FORGEJO__security__SECRET_KEY: ${FORGEJO_SECRET_KEY:?set by bootstrap}
+      FORGEJO__security__INTERNAL_TOKEN: ${FORGEJO_INTERNAL_TOKEN:?set by bootstrap}
+      FORGEJO__oauth2__JWT_SECRET: ${FORGEJO_OAUTH2_JWT_SECRET:?set by bootstrap}
+      FORGEJO__server__LFS_JWT_SECRET: ${FORGEJO_LFS_JWT_SECRET:?set by bootstrap}
+      # Empty until bootstrap has made the Garage key, which it does before it
+      # starts this service. Compose interpolates the whole file on every
+      # command, so these two cannot demand a value the way the rest do.
+      FORGEJO__lfs__MINIO_ACCESS_KEY_ID: ${FORGEJO_S3_ACCESS_KEY}
+      FORGEJO__lfs__MINIO_SECRET_ACCESS_KEY: ${FORGEJO_S3_SECRET_KEY}
+    volumes:
+      - forgejo-data:/data
+      - ./forgejo/app.ini:/etc/unicon/forgejo/app.ini:ro
+    ports:
+      - "3300:3000"
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 60s
+
+  woodpecker-server:
+    image: woodpeckerci/woodpecker-server:v3.18.1
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      forgejo:
+        condition: service_healthy
+    environment:
+      WOODPECKER_HOST: ${WOODPECKER_PUBLIC_URL:?set by bootstrap}
+      WOODPECKER_FORGEJO: "true"
+      # API calls go over the compose network; the browser is sent to the public
+      # URL instead. Without the second variable Woodpecker would redirect
+      # people to http://forgejo:3000, which no browser can resolve. Note that
+      # the OAuth host is used for the token request as well, so it has to be
+      # reachable from this container too; see compose.dev.yaml.
+      WOODPECKER_FORGEJO_URL: http://forgejo:3000
+      WOODPECKER_EXPERT_FORGE_OAUTH_HOST: ${FORGEJO_PUBLIC_URL:?set by bootstrap}
+      # Empty until bootstrap has created the Forgejo OAuth application, which
+      # it does before it starts this service, for the same reason as the two
+      # Forgejo keys above.
+      WOODPECKER_FORGEJO_CLIENT: ${WOODPECKER_FORGEJO_CLIENT}
+      WOODPECKER_FORGEJO_SECRET: ${WOODPECKER_FORGEJO_SECRET}
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:?set by bootstrap}
+      # Signs the tokens the server hands its agents. Left unset the server
+      # generates one at every start, logs a warning, and every agent has to
+      # re-register; a restart in the middle of a contest would then interrupt
+      # the grading in flight. The agent has no matching variable: it
+      # authenticates with WOODPECKER_AGENT_SECRET and takes a signed token
+      # back.
+      WOODPECKER_GRPC_SECRET: ${WOODPECKER_GRPC_SECRET:?set by bootstrap}
+      # Only accounts named here may sign in; WOODPECKER_OPEN stays off.
+      WOODPECKER_ADMIN: unicon-ci
+      WOODPECKER_OPEN: "false"
+      WOODPECKER_AUTHENTICATE_PUBLIC_REPOS: "true"
+      # Never sqlite3, which is the default. Under concurrent dispatch it
+      # returned HTTP 500 with an empty body and lost between 8 and 51 per cent
+      # of pipelines; Postgres lost none at every concurrency measured
+      # (stack-test-findings.md section 3.1). Serial development traffic never
+      # shows this, which is why it has to be right from the first deployment.
+      WOODPECKER_DATABASE_DRIVER: postgres
+      WOODPECKER_DATABASE_DATASOURCE: postgres://woodpecker:${WOODPECKER_DB_PASSWORD:?set by bootstrap}@postgres:5432/woodpecker?sslmode=disable
+      # Minutes. A grading job still running after half an hour is stuck.
+      WOODPECKER_MAX_PIPELINE_TIMEOUT: "60"
+      WOODPECKER_DEFAULT_PIPELINE_TIMEOUT: "30"
+      WOODPECKER_LOG_LEVEL: info
+    # No healthcheck here: the image declares its own and has no shell to write
+    # a better one with.
+    # No published port here. Woodpecker is an operator's interface, not part of
+    # the app, and a deployment that wants it reachable puts it behind its own
+    # ingress under a name it controls. compose.dev.yaml publishes it on
+    # loopback, which is also what lets bootstrap finish the token dance against
+    # WOODPECKER_PUBLIC_URL from the machine it runs on.
+    volumes:
+      - woodpecker-data:/var/lib/woodpecker
+
+  woodpecker-agent:
+    image: woodpeckerci/woodpecker-agent:v3.18.1
+    restart: unless-stopped
+    depends_on:
+      woodpecker-server:
+        condition: service_healthy
+    environment:
+      WOODPECKER_SERVER: woodpecker-server:9000
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:?set by bootstrap}
+      # Onto the volume below. The default path is /etc/woodpecker, which this
+      # image does not create, so the agent cannot save the identity the server
+      # gave it: every restart registers a new agent and leaves the old row
+      # behind reporting nothing.
+      WOODPECKER_AGENT_CONFIG_FILE: /var/lib/woodpecker/agent.conf
+      WOODPECKER_MAX_WORKFLOWS: "4"
+      WOODPECKER_BACKEND: docker
+      WOODPECKER_LOG_LEVEL: info
+    volumes:
+      - woodpecker-agent-data:/var/lib/woodpecker
+      # The agent starts sibling containers on the host daemon. Anything that
+      # can reach this socket is root on the host, so agents belong on machines
+      # that run nothing else.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  garage:
+    image: dxflrs/garage:v2.4.1
+    restart: unless-stopped
+    # Secrets are passed here rather than written into garage/garage.toml, which
+    # is committed. Garage also refuses to read a secrets file that other users
+    # can read, which a bind mount from Windows always is.
+    environment:
+      GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set by bootstrap}
+      GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set by bootstrap}
+    volumes:
+      - ./garage/garage.toml:/etc/garage.toml:ro
+      - garage-meta:/var/lib/garage/meta
+      - garage-data:/var/lib/garage/data
+    # No published ports. Only the compose network needs S3, and the admin API
+    # is a full-control interface. Bootstrap does not need either: it drives
+    # Garage through the container's own command line. compose.dev.yaml
+    # publishes both on loopback for scripts/check-lfs.py.
+    healthcheck:
+      # Exits non-zero until the cluster layout has been applied, which is what
+      # bootstrap does. A fresh stack is unhealthy here until it is bootstrapped.
+      test: ["CMD", "/garage", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 40
+      start_period: 20s
+
+  proxy:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    # Deliberately no depends_on: the proxy comes up whether or not the app
+    # services are running. See the comment in proxy/nginx.conf.
+    volumes:
+      - ./proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    ports:
+      - "8080:80"
+    healthcheck:
+      # Answered by nginx itself, so it says whether the proxy is up without
+      # depending on the app services it may or may not be able to reach.
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:80/-/proxy"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
+  # Runs the migrations and exits. The backend image does not migrate on its own,
+  # so this has to finish before the API starts; two copies of the API racing
+  # each other through Alembic on a rollout is the failure this avoids.
+  backend-migrate:
+    image: ghcr.io/uniconhq/backend:main
+    profiles: [app]
+    restart: "no"
+    command: ["migrate"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    # Not the whole backend environment. `unicon migrate` reads one setting,
+    # the database URL, and giving a migration job the OAuth client secret and
+    # the token encryption key spreads them over a second container for nothing.
+    environment:
+      UNICON_DATABASE_URL: ${UNICON_DATABASE_URL}
+
+  backend:
+    image: ghcr.io/uniconhq/backend:main
+    profiles: [app]
+    restart: unless-stopped
+    # Not Forgejo. The backend answers /healthz and /readyz with Forgejo down
+    # and degrades /me instead, which is the behaviour a contest needs; waiting
+    # for Forgejo here would mean a slow Forgejo start keeps the whole app off
+    # the air.
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend-migrate:
+        condition: service_completed_successfully
+    environment: *backend-env
+    # No healthcheck here: the backend image declares its own, against
+    # 127.0.0.1:8000/healthz using the interpreter it already ships. Writing one
+    # here would mean guessing which tools that image has.
+
+  frontend:
+    image: ghcr.io/uniconhq/frontend:main
+    profiles: [app]
+    restart: unless-stopped
+    healthcheck:
+      # 8080, not 80: the image runs nginx as an ordinary user, which cannot
+      # bind a privileged port. 127.0.0.1, not localhost: that nginx listens on
+      # IPv4 only, and busybox wget tries ::1 first and does not fall back.
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 15s
+
+volumes:
+  postgres-data:
+  forgejo-data:
+  woodpecker-data:
+  woodpecker-agent-data:
+  garage-meta:
+  garage-data:

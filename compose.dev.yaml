@@ -1,0 +1,83 @@
+# Local development override. Use it together with compose.yaml:
+#
+#   docker compose -f compose.yaml -f compose.dev.yaml up -d
+#
+# It does three things: builds backend and frontend from the sibling checkouts
+# instead of pulling images, publishes the internal services so tools on this
+# machine can reach them, and loosens Forgejo enough that a person can create an
+# account without a mail server.
+#
+# Every port opened here is bound to 127.0.0.1. A published port with no host
+# address listens on every interface, so on a laptop joined to a conference
+# network the database and the object store would be on that network too.
+# Forgejo's port is the exception and stays in compose.yaml unbound: the
+# Woodpecker container reaches it through the Docker host gateway, which is not
+# loopback.
+
+services:
+  postgres:
+    # 55432, not 5432. A developer machine often already runs a PostgreSQL of
+    # its own on 5432, and publishing this one there too does not fail: Windows
+    # and Linux both let the second listener share the address, and then
+    # `psql -h localhost` reaches whichever of the two answers first. A port
+    # nothing else claims is the difference between a confusing result and a
+    # connection refused.
+    ports:
+      - "127.0.0.1:55432:5432"
+
+  garage:
+    # Published for scripts/check-lfs.py, which runs on this machine. Bootstrap
+    # needs neither port: it drives Garage through the container's own command
+    # line. The admin API on 3903 is full control over the store, so in the
+    # production shape it stays inside the network.
+    ports:
+      - "127.0.0.1:3900:3900"
+      - "127.0.0.1:3903:3903"
+
+  forgejo:
+    environment:
+      # Dev only. A production instance decides registration deliberately and
+      # has a mailer, so neither of these belongs in the committed app.ini.
+      FORGEJO__service__DISABLE_REGISTRATION: "false"
+      FORGEJO__service__REGISTER_EMAIL_CONFIRM: "false"
+      FORGEJO__service__REGISTER_MANUAL_CONFIRM: "false"
+      FORGEJO__mailer__ENABLED: "false"
+      FORGEJO__log__LEVEL: Info
+
+  woodpecker-server:
+    # The operator interface, and the URL bootstrap drives to mint the CI token.
+    ports:
+      - "127.0.0.1:8000:8000"
+    # Woodpecker uses the public Forgejo URL for the whole OAuth exchange, the
+    # server-side token request included, so http://localhost:3300 has to mean
+    # something inside this container too. The entry is appended after Docker's
+    # own `127.0.0.1 localhost`, so a connection to localhost tries loopback
+    # first and the host second: Woodpecker still reaches its own port 8000 on
+    # loopback, and reaches Forgejo on the published port. A deployment where
+    # Forgejo has a real name does not need this.
+    extra_hosts:
+      - "localhost:host-gateway"
+
+  # Same build and same tag as backend, so the image is built once and both
+  # services run it.
+  backend-migrate:
+    build:
+      context: ../backend
+    image: unicon/backend:dev
+
+  backend:
+    build:
+      context: ../backend
+    image: unicon/backend:dev
+    environment:
+      # The other half of the Forgejo registration override above: Forgejo takes
+      # sign-ups here, so the landing page may offer Create account.
+      UNICON_FORGE_REGISTRATION_OPEN: "true"
+
+  frontend:
+    build:
+      context: ../frontend
+      # The Forgejo URL is baked into the bundle, for the account page links.
+      args:
+        VITE_FORGE_URL: "${FORGEJO_PUBLIC_URL}"
+    image: unicon/frontend:dev
