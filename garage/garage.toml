@@ -1,0 +1,27 @@
+# Garage, the S3-compatible store behind Forgejo LFS and every large Unicon
+# object. One node, one replica: this is a single-machine deployment, and a
+# second replica on the same disk buys nothing.
+#
+# rpc_secret and the admin token are not here. They come from GARAGE_RPC_SECRET
+# and GARAGE_ADMIN_TOKEN in deploy/.env, because this file is committed.
+#
+# A fresh node has no cluster layout and answers nothing until one is applied.
+# bootstrap does that (garage.py), then creates the buckets and the two keys.
+
+replication_factor = 1
+consistency_mode = "consistent"
+
+metadata_dir = "/var/lib/garage/meta"
+data_dir = "/var/lib/garage/data"
+db_engine = "lmdb"
+
+rpc_bind_addr = "[::]:3901"
+# Single node: the only peer it ever dials is itself.
+rpc_public_addr = "127.0.0.1:3901"
+
+[s3_api]
+s3_region = "garage"
+api_bind_addr = "[::]:3900"
+
+[admin]
+api_bind_addr = "[::]:3903"
