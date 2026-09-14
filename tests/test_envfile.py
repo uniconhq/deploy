@@ -1,0 +1,83 @@
+"""Rendering .env from the template, which is the only list of keys."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+
+from bootstrap import envfile
+
+TEMPLATE = """# A comment
+FILLED=
+KEPT=from the template
+# Another comment
+
+EMPTY_AND_UNKNOWN=
+"""
+
+
+@pytest.fixture
+def template(tmp_path: Path) -> Path:
+    path = tmp_path / ".env.example"
+    path.write_text(TEMPLATE, encoding="utf-8", newline="\n")
+    return path
+
+
+def test_fills_keys_and_keeps_everything_else(template: Path) -> None:
+    rendered = envfile.render(template, {"FILLED": "a value"})
+
+    assert rendered.splitlines() == [
+        "# A comment",
+        "FILLED=a value",
+        "KEPT=from the template",
+        "# Another comment",
+        "",
+        "EMPTY_AND_UNKNOWN=",
+    ]
+
+
+def test_a_value_overrides_a_template_default(template: Path) -> None:
+    rendered = envfile.render(template, {"KEPT": "from .env"})
+
+    assert "KEPT=from .env" in rendered.splitlines()
+
+
+def test_keys_the_template_does_not_mention_are_appended(template: Path) -> None:
+    rendered = envfile.render(template, {"FILLED": "x", "LATER": "y", "EARLIER": "z"})
+
+    assert rendered.splitlines()[-3:] == [
+        envfile.ADDED_OUTSIDE_TEMPLATE,
+        "EARLIER=z",
+        "LATER=y",
+    ]
+
+
+def test_no_marker_when_every_key_is_in_the_template(template: Path) -> None:
+    rendered = envfile.render(template, {"FILLED": "x"})
+
+    assert envfile.ADDED_OUTSIDE_TEMPLATE not in rendered
+
+
+def test_a_missing_template_is_an_error(tmp_path: Path) -> None:
+    with pytest.raises(envfile.MissingTemplate):
+        envfile.render(tmp_path / "absent", {})
+
+
+def test_load_reads_assignments_and_ignores_the_rest(tmp_path: Path) -> None:
+    path = tmp_path / ".env"
+    path.write_text("# comment\n\nA=1\nnot an assignment\nB=has=signs\n", "utf-8")
+
+    assert envfile.load(path) == {"A": "1", "B": "has=signs"}
+
+
+def test_load_of_a_missing_file_is_empty(tmp_path: Path) -> None:
+    assert envfile.load(tmp_path / "absent") == {}
+
+
+def test_write_uses_lf_on_every_platform(tmp_path: Path, template: Path) -> None:
+    path = tmp_path / ".env"
+
+    envfile.write(path, template, {"FILLED": "x"})
+
+    assert b"\r" not in path.read_bytes()
