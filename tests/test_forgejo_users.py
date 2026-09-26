@@ -2,6 +2,9 @@
 
 An empty Forgejo has no administrator and so no token to call the admin API
 with, which is why bootstrap parses a table meant for a person.
+
+USER_LIST is real output from forgejo 15.0.8. The columns are space-padded to
+the widest value, so the gaps between them vary from row to row.
 """
 
 from __future__ import annotations
@@ -11,8 +14,6 @@ from pathlib import Path
 from bootstrap.compose import Compose
 from bootstrap.forgejo import Forgejo
 
-# Real output from forgejo 15.0.8. The columns are space-padded to the widest
-# value, so the gaps between them vary from row to row.
 USER_LIST = """ID   Username        Email                         IsActive IsAdmin 2FA
 1    unicon-backend  unicon-backend@unicon.invalid true     true    false
 2    unicon-ci       unicon-ci@unicon.invalid      true     false   false

@@ -5,7 +5,9 @@ which speaks the v2 admin API over Garage's internal RPC and prints the same
 JSON the HTTP endpoint would return. That way bootstrap needs no published
 port: it works against `-f compose.yaml` alone, where the admin API, a
 full-control interface, stays inside the compose network. The dev override
-still publishes it on loopback for scripts/check-lfs.py.
+still publishes it on loopback for scripts/check-lfs.py. GARAGE_BINARY is the
+single binary in dxflrs/garage, which is both the server and the
+administration client.
 
 A fresh Garage node stores nothing until a layout is applied, and answers its
 own /health with 503 until then, so this is the first thing bootstrap does.
@@ -19,8 +21,6 @@ from typing import Any
 
 from bootstrap.compose import Compose, ComposeFailed
 
-# Where the single binary sits in dxflrs/garage. It is both the server and the
-# administration client.
 GARAGE_BINARY = "/garage"
 
 
