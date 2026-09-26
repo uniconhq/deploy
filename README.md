@@ -90,11 +90,9 @@ $COMPOSE up -d --build frontend
 
 `backend-migrate` runs `unicon migrate` and exits; the backend image does not
 migrate on its own, and `backend` waits for it to finish successfully. Both use
-the same build and the same image tag, so the build happens once. That build
-takes the directory holding every checkout as its context, with
-`backend/Dockerfile` as the Dockerfile, because the backend installs the
-`forge` package from the sibling `forge` checkout; `backend`, `forge` and this
-repo have to sit beside each other.
+the same build and the same image tag, so the build happens once. The build
+takes the `backend` checkout as its context, which has to sit beside this
+repo.
 
 The frontend is a separate line on purpose. Everything else runs without it, and
 the proxy starts whether or not the app services are there, so you can work on
@@ -205,8 +203,8 @@ docker compose --env-file .env.check -f compose.yaml config --quiet
 docker compose --env-file .env.check -f compose.yaml -f compose.dev.yaml config --quiet
 ```
 
-CI runs exactly these, and then boots the whole stack: it checks out `backend`,
-`forge` and `frontend` beside this repo, runs bootstrap against `compose.yaml` and
+CI runs exactly these, and then boots the whole stack: it checks out `backend`
+and `frontend` beside this repo, runs bootstrap against `compose.yaml` and
 `compose.dev.yaml`, starts the `app` profile, and checks that `/readyz`
 answers ready and the frontend serves its page through the proxy on one
 origin. It then runs bootstrap a second time and fails if `.env` changed.
