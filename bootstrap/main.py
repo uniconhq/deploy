@@ -3,10 +3,25 @@
 Garage first, because Forgejo needs an S3 key in its environment before it
 starts or it would store the first LFS objects on local disk and only move to
 Garage after a restart. Forgejo next, because Woodpecker will not start without
-the OAuth client that only a Forgejo administrator can create. Woodpecker last.
+the OAuth client that only a Forgejo administrator can create. Woodpecker last,
+then the proxy, which holds no bootstrap state of its own and is started so
+that one command leaves the stack answering on its public URL.
 
 Every step checks before it creates, and .env is rewritten after each one, so an
 interrupted run can be resumed by running it again.
+
+Four Garage buckets and no other: FORGEJO_LFS_BUCKET for Forgejo, and the three
+in UNICON_BUCKETS for the backend, where unicon-uploads holds what a browser
+uploads before a submit, unicon-results the grading logs, and unicon-exports is
+reserved.
+
+FORGEJO_DATA_VOLUME is the Docker name of the Forgejo volume: the compose
+project name from compose.yaml, then the volume name. It stands for every
+volume in the check for a lost .env, because it is the one a lost .env makes
+unreadable.
+
+GENERATORS lists every key .env holds that is generated here rather than
+discovered from a service. A key already carrying a value is left alone.
 """
 
 from __future__ import annotations
@@ -28,22 +43,14 @@ BACKEND_ACCOUNT = "unicon-backend"
 CI_ACCOUNT = "unicon-ci"
 
 FORGEJO_LFS_BUCKET = "forgejo-lfs"
-# unicon-uploads holds what a browser uploads before a submit, unicon-results
-# the grading logs, unicon-exports is reserved. Four buckets with forgejo-lfs,
-# and no other.
 UNICON_BUCKETS = (
     "unicon-uploads",
     "unicon-results",
     "unicon-exports",
 )
 
-# The Docker name of the Forgejo volume: the compose project name from
-# compose.yaml, then the volume name. It stands for all of them here because it
-# is the one a lost .env makes unreadable.
 FORGEJO_DATA_VOLUME = "unicon_forgejo-data"
 
-# Every key .env holds that is generated here rather than discovered from a
-# service. Keys already carrying a value are left alone.
 GENERATORS: dict[str, Callable[[], str]] = {
     "POSTGRES_SUPERUSER_PASSWORD": secret_values.password,
     "FORGEJO_DB_PASSWORD": secret_values.password,
@@ -92,8 +99,6 @@ def main(argv: list[str] | None = None) -> int:
         envfile.write(env_path, template, values)
 
         _start_woodpecker(compose, values, summary)
-        # The proxy holds no bootstrap state of its own. It is started here only
-        # so that one command leaves the stack answering on its public URL.
         compose.up("proxy")
         envfile.write(env_path, template, values)
 
@@ -175,21 +180,23 @@ def _derive_values(values: dict[str, str]) -> None:
 
     They are written with the generated secrets rather than at the end, so an
     interrupted run still leaves a .env the services can start from.
+
+    FORGEJO_DOMAIN follows FORGEJO_PUBLIC_URL, because Forgejo puts DOMAIN in
+    clone URLs and mail, and a value set twice drifts. UNICON_FORGE_PUBLIC_URL
+    is a copy of the same URL, because the backend sends people to the Forgejo
+    their browser uses: two keys for one URL is two chances to disagree, and
+    the symptom of disagreeing is a login redirect to a host the browser cannot
+    resolve.
     """
     values["UNICON_DATABASE_URL"] = (
         f"postgresql+psycopg://unicon:{values['UNICON_DB_PASSWORD']}"
         f"@postgres:5432/unicon"
     )
-    # Forgejo puts DOMAIN in clone URLs and mail. It has to follow the public
-    # URL, not be set twice and drift from it.
     public_url = values["FORGEJO_PUBLIC_URL"]
     host = urlparse(public_url).hostname
     if not host:
         raise ValueError(f"FORGEJO_PUBLIC_URL has no host: {public_url}")
     values["FORGEJO_DOMAIN"] = host
-    # The backend sends people to the same Forgejo their browser uses. Two keys
-    # for one URL is two chances to disagree, and the symptom of disagreeing is
-    # a login redirect to a host the browser cannot resolve.
     values["UNICON_FORGE_PUBLIC_URL"] = public_url
 
 

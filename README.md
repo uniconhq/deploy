@@ -2,9 +2,10 @@
 
 The Unicon stack, as compose files and the scripts that prepare it. This repo
 produces no image of its own. It holds the configuration for the four pieces
-Unicon does not write (Forgejo, Woodpecker, Garage, Postgres), the reverse proxy
-that puts the backend and the frontend on one origin, and a bootstrap tool that
-turns a fresh stack into one the backend can talk to.
+Unicon does not write (Forgejo, Woodpecker, Garage, Postgres), the files that
+give Forgejo's own account pages the Unicon look, the reverse proxy that puts
+the backend and the frontend on one origin, and a bootstrap tool that turns a
+fresh stack into one the backend can talk to.
 
 | Service | Image | Reached at |
 |---|---|---|
@@ -147,6 +148,31 @@ All of it lands in `.env`, which is git-ignored. `.env.example` lists every key
 with a comment and is the template bootstrap fills, so a key added there appears
 in the next generated `.env`.
 
+## The forge's account pages
+
+Forgejo serves its own sign-in, sign-up, OAuth consent and account settings
+pages, and people see them whenever the app sends them to the forge. What makes
+those pages look like Unicon is under `forgejo/custom/`, which compose mounts
+read-only into Forgejo's custom path, `/data/gitea`:
+
+- `public/assets/img/` holds the Unicon mark as `logo.svg` and `favicon.svg`,
+  the PNG sizes Forgejo wants beside them, and `avatar_default.png`. These are
+  the file names Forgejo looks up itself, so they stand in for its own.
+- `public/assets/css/unicon.css` is one stylesheet. It hides Forgejo's
+  navigation bar and footer and sets Forgejo's colour, radius and font
+  variables to the frontend theme's values, so the forms take the app's look.
+  The font families are named with fallbacks only, and the page fetches
+  nothing from outside.
+- `templates/custom/header.tmpl` is the one template, and it is Forgejo's
+  extension point rather than one of its pages: Forgejo includes it at the end
+  of `<head>`, and it carries the link to the stylesheet.
+
+Forgejo's own templates are not edited. The files live in this repo rather
+than in the Forgejo volume, so an upgrade of the image keeps them, and a change
+to them is a commit here and a restart of the `forgejo` service. The mark is
+the one the frontend draws in `src/ui/brand/`; a change to it is made in both
+places.
+
 ## Checking the large-file path
 
 ```sh
@@ -199,6 +225,7 @@ a share of every submission sent for grading.
 **`forgejo/app.ini` is the record.** Compose copies it into the container on
 every start, so anything changed through Forgejo's web UI is reverted by the
 next deploy. Change Forgejo here, in a commit, or the change does not exist.
+The same holds for `forgejo/custom/`, the look of its account pages.
 
 **Nothing reads Forgejo's database.** Unicon has its own database on the same
 server and talks to Forgejo over its API. Forgejo keeps half its state on disk

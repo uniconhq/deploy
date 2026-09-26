@@ -3,6 +3,13 @@
 The first account has to be made with the command line inside the container,
 because an empty Forgejo has no administrator and therefore no token to call the
 admin API with. Everything after that goes through the API.
+
+Every command line call runs as CONTAINER_USER, the account Forgejo runs as:
+the Forgejo binary refuses to run as root, and compose exec is root by default.
+
+The provisioning token carries all scopes. It creates organisations,
+repositories, teams and protected tags, and administers accounts. It is never
+used to act for a person; that is the person's own OAuth token.
 """
 
 from __future__ import annotations
@@ -14,13 +21,7 @@ import httpx
 
 from bootstrap.compose import Compose
 
-# All scopes. The provisioning token creates organisations, repositories, teams
-# and protected tags, and administers accounts. It is never used to act for a
-# person; that is the person's own OAuth token.
 PROVISIONING_TOKEN_NAME = "unicon-provisioning"
-
-# The Forgejo binary refuses to run as root, and compose exec is root by
-# default, so every command line call has to name the account Forgejo runs as.
 CONTAINER_USER = "git"
 
 
@@ -39,8 +40,6 @@ class Forgejo:
         self._base_url = public_url.rstrip("/")
         self._compose = compose
         self._service = service
-
-    # -- account creation, through the container -----------------------------
 
     def ensure_user(
         self, username: str, password: str, email: str, admin: bool
@@ -100,8 +99,6 @@ class Forgejo:
             if len(fields) >= 2 and fields[1] == username:
                 return True
         return False
-
-    # -- everything else, through the API ------------------------------------
 
     def _client(self, username: str, password: str) -> httpx.Client:
         return httpx.Client(
