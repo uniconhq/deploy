@@ -114,6 +114,11 @@ services:
     volumes:
       - forgejo-data:/data
       - ./forgejo/app.ini:/etc/unicon/forgejo/app.ini:ro
+      # Forgejo's custom path is /data/gitea. The images, the stylesheet and the
+      # one header template that give its account pages the Unicon look are
+      # read from this repo, so an upgrade of the image keeps them.
+      - ./forgejo/custom/public:/data/gitea/public:ro
+      - ./forgejo/custom/templates:/data/gitea/templates:ro
     ports:
       - "3300:3000"
     healthcheck:

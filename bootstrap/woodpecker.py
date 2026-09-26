@@ -38,7 +38,7 @@ class Woodpecker:
         self._forgejo_url = forgejo_public_url.rstrip("/")
 
     def is_answering(self) -> bool:
-        # Woodpecker answers /healthz with 204, not 200.
+        """Whether /healthz answers. Woodpecker answers it with 204, not 200."""
         return httpx.get(f"{self._url}/healthz", timeout=10.0).status_code < 400
 
     def token_is_valid(self, token: str) -> bool:

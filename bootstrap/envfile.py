@@ -4,6 +4,11 @@
 by line, so comments, ordering and the defaults that are checked in all survive,
 and a key added to the example appears in the next generated .env without any
 change here.
+
+A key the template does not mention, whether one the template lost or one a
+person added to .env by hand, is carried across under the
+ADDED_OUTSIDE_TEMPLATE marker rather than dropped: the service that reads it
+would otherwise stop working on the next run, and nothing would say why.
 """
 
 from __future__ import annotations
@@ -13,10 +18,6 @@ from pathlib import Path
 
 _ASSIGNMENT = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)=(.*)$")
 
-# Marks the keys the template does not mention. A key the template lost, or one
-# a person added to .env by hand, is carried across instead of dropped: the
-# service that reads it would otherwise stop working on the next bootstrap run,
-# and nothing would say why.
 ADDED_OUTSIDE_TEMPLATE = "# Added outside the template"
 
 

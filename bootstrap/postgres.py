@@ -20,8 +20,12 @@ ROLES = ("forgejo", "woodpecker", "unicon")
 def sync_role_passwords(
     compose: Compose, service: str, passwords: dict[str, str]
 ) -> None:
-    # Over stdin rather than --command: an argument would show up in the
-    # container process list and in anything that quoted the failing command.
+    """Set every role password from .env.
+
+    The statements go over stdin rather than --command: an argument would show
+    up in the container process list and in anything that quoted the failing
+    command.
+    """
     statements = "".join(
         f"ALTER ROLE {role} WITH PASSWORD '{_quote(passwords[role])}';\n"
         for role in ROLES
