@@ -51,7 +51,9 @@ jobs:
     timeout-minutes: 30
     steps:
       # compose.dev.yaml builds backend and frontend from the sibling checkouts,
-      # so the three repos sit beside each other the way they do on a laptop.
+      # and the backend build takes the directory holding them all as its
+      # context because it installs `forge` from the sibling checkout, so the
+      # four repos sit beside each other the way they do on a laptop.
       - uses: actions/checkout@v7
         with:
           path: deploy
@@ -59,6 +61,10 @@ jobs:
         with:
           repository: uniconhq/backend
           path: backend
+      - uses: actions/checkout@v7
+        with:
+          repository: uniconhq/forge
+          path: forge
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/frontend
