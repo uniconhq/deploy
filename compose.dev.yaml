@@ -60,19 +60,15 @@ services:
       - "localhost:host-gateway"
 
   # Same build and same tag as backend, so the image is built once and both
-  # services run it. The context is the directory that holds every checkout,
-  # not the backend checkout: the backend installs the `forge` package from
-  # the sibling `forge` checkout, which has to be inside the context.
+  # services run it.
   backend-migrate:
     build:
-      context: ..
-      dockerfile: backend/Dockerfile
+      context: ../backend
     image: unicon/backend:dev
 
   backend:
     build:
-      context: ..
-      dockerfile: backend/Dockerfile
+      context: ../backend
     image: unicon/backend:dev
     environment:
       # The other half of the Forgejo registration override above: Forgejo takes
