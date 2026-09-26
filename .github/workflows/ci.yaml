@@ -98,6 +98,10 @@ jobs:
           curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
           curl -fsS http://localhost:8080/openapi.json | grep -q '"openapi"'
 
+      - name: a 500 MB file reaches object storage through the forge
+        working-directory: deploy
+        run: uv run scripts/check-lfs.py --exact
+
       - name: a second bootstrap changes nothing
         working-directory: deploy
         run: |
