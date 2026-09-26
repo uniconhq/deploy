@@ -38,6 +38,10 @@ x-backend-env: &backend-env
   # Closed by default, like a production Forgejo. compose.dev.yaml turns it
   # on in the same place it opens Forgejo registration, so the two agree.
   UNICON_FORGE_REGISTRATION_OPEN: ${UNICON_FORGE_REGISTRATION_OPEN:-false}
+  # Which implementation sits behind the forge port.
+  UNICON_FORGE: ${UNICON_FORGE:-forgejo}
+  # Whether any signed-in user may create an organisation.
+  UNICON_ORG_CREATION_OPEN: ${UNICON_ORG_CREATION_OPEN:-true}
 
 services:
   postgres:
@@ -142,13 +146,15 @@ services:
       # Forgejo keys above.
       WOODPECKER_FORGEJO_CLIENT: ${WOODPECKER_FORGEJO_CLIENT}
       WOODPECKER_FORGEJO_SECRET: ${WOODPECKER_FORGEJO_SECRET}
-      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:?set by bootstrap}
+      # No WOODPECKER_AGENT_SECRET. Without a shared secret a machine becomes
+      # an agent only by presenting a token the server issued for it, so an
+      # agent exists only by enrolment. No agent runs in this file: a grading
+      # machine is a separate host, and compose.dev.yaml may run one on the
+      # laptop under its own token.
       # Signs the tokens the server hands its agents. Left unset the server
       # generates one at every start, logs a warning, and every agent has to
       # re-register; a restart in the middle of a contest would then interrupt
-      # the grading in flight. The agent has no matching variable: it
-      # authenticates with WOODPECKER_AGENT_SECRET and takes a signed token
-      # back.
+      # the grading in flight.
       WOODPECKER_GRPC_SECRET: ${WOODPECKER_GRPC_SECRET:?set by bootstrap}
       # Only accounts named here may sign in; WOODPECKER_OPEN stays off.
       WOODPECKER_ADMIN: unicon-ci
@@ -174,30 +180,6 @@ services:
     # WOODPECKER_PUBLIC_URL from the machine it runs on.
     volumes:
       - woodpecker-data:/var/lib/woodpecker
-
-  woodpecker-agent:
-    image: woodpeckerci/woodpecker-agent:v3.18.1
-    restart: unless-stopped
-    depends_on:
-      woodpecker-server:
-        condition: service_healthy
-    environment:
-      WOODPECKER_SERVER: woodpecker-server:9000
-      WOODPECKER_AGENT_SECRET: ${WOODPECKER_AGENT_SECRET:?set by bootstrap}
-      # Onto the volume below. The default path is /etc/woodpecker, which this
-      # image does not create, so the agent cannot save the identity the server
-      # gave it: every restart registers a new agent and leaves the old row
-      # behind reporting nothing.
-      WOODPECKER_AGENT_CONFIG_FILE: /var/lib/woodpecker/agent.conf
-      WOODPECKER_MAX_WORKFLOWS: "4"
-      WOODPECKER_BACKEND: docker
-      WOODPECKER_LOG_LEVEL: info
-    volumes:
-      - woodpecker-agent-data:/var/lib/woodpecker
-      # The agent starts sibling containers on the host daemon. Anything that
-      # can reach this socket is root on the host, so agents belong on machines
-      # that run nothing else.
-      - /var/run/docker.sock:/var/run/docker.sock
 
   garage:
     image: dxflrs/garage:v2.4.1
@@ -296,6 +278,5 @@ volumes:
   postgres-data:
   forgejo-data:
   woodpecker-data:
-  woodpecker-agent-data:
   garage-meta:
   garage-data:

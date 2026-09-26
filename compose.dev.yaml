@@ -2,10 +2,11 @@
 #
 #   docker compose -f compose.yaml -f compose.dev.yaml up -d
 #
-# It does three things: builds backend and frontend from the sibling checkouts
+# It does four things: builds backend and frontend from the sibling checkouts
 # instead of pulling images, publishes the internal services so tools on this
-# machine can reach them, and loosens Forgejo enough that a person can create an
-# account without a mail server.
+# machine can reach them, loosens Forgejo enough that a person can create an
+# account without a mail server, and can run one CI agent on this machine
+# under the `agent` profile.
 #
 # Every port opened here is bound to 127.0.0.1. A published port with no host
 # address listens on every interface, so on a laptop joined to a conference
@@ -59,15 +60,19 @@ services:
       - "localhost:host-gateway"
 
   # Same build and same tag as backend, so the image is built once and both
-  # services run it.
+  # services run it. The context is the directory that holds every checkout,
+  # not the backend checkout: the backend installs the `forge` package from
+  # the sibling `forge` checkout, which has to be inside the context.
   backend-migrate:
     build:
-      context: ../backend
+      context: ..
+      dockerfile: backend/Dockerfile
     image: unicon/backend:dev
 
   backend:
     build:
-      context: ../backend
+      context: ..
+      dockerfile: backend/Dockerfile
     image: unicon/backend:dev
     environment:
       # The other half of the Forgejo registration override above: Forgejo takes
@@ -81,3 +86,35 @@ services:
       args:
         VITE_FORGE_URL: "${FORGEJO_PUBLIC_URL}"
     image: unicon/frontend:dev
+
+  # One CI agent on the laptop, beside the stack. This is the only place an
+  # agent and the databases share a Docker daemon; a real grading machine is a
+  # separate host. Off unless started with --profile agent, and it needs a
+  # token the server issued: WOODPECKER_DEV_AGENT_TOKEN in .env, taken from
+  # the CI's Agents page under the unicon-ci account.
+  woodpecker-agent:
+    image: woodpeckerci/woodpecker-agent:v3.18.1
+    profiles: [agent]
+    restart: unless-stopped
+    depends_on:
+      woodpecker-server:
+        condition: service_healthy
+    environment:
+      WOODPECKER_SERVER: woodpecker-server:9000
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_DEV_AGENT_TOKEN}
+      # Onto the volume below. The default path is /etc/woodpecker, which this
+      # image does not create, so the agent cannot save the identity the server
+      # gave it: every restart registers a new agent and leaves the old row
+      # behind reporting nothing.
+      WOODPECKER_AGENT_CONFIG_FILE: /var/lib/woodpecker/agent.conf
+      WOODPECKER_MAX_WORKFLOWS: "4"
+      WOODPECKER_BACKEND: docker
+      WOODPECKER_LOG_LEVEL: info
+    volumes:
+      - woodpecker-agent-data:/var/lib/woodpecker
+      # The agent starts sibling containers on the host daemon. Anything that
+      # can reach this socket is root on the host.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+volumes:
+  woodpecker-agent-data:
