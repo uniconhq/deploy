@@ -97,7 +97,7 @@ services:
         condition: service_healthy
     environment:
       WOODPECKER_SERVER: woodpecker-server:9000
-      WOODPECKER_AGENT_SECRET: ${WOODPECKER_DEV_AGENT_TOKEN:?an agent token from the CI's Agents page}
+      WOODPECKER_AGENT_SECRET: ${WOODPECKER_DEV_AGENT_TOKEN}
       # Onto the volume below. The default path is /etc/woodpecker, which this
       # image does not create, so the agent cannot save the identity the server
       # gave it: every restart registers a new agent and leaves the old row
