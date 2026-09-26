@@ -15,6 +15,12 @@ ceiling that works. The two settings to look at first are Forgejo's
 [server] LFS_MAX_FILE_SIZE and, if Forgejo is ever put behind the proxy, the
 proxy body limit. In this stack Forgejo is reached directly, so only the first
 applies.
+
+The request body is streamed in pieces of CHUNK_BYTES. Three raw bytes become
+four base64 characters, so chunking on a multiple of three lets the encoded
+pieces be concatenated without re-encoding anything. LONG_TIMEOUT is generous
+but finite: a push that has made no progress in ten minutes is stuck, and a
+script that hangs forever tells nobody anything.
 """
 
 from __future__ import annotations
@@ -38,11 +44,7 @@ REPO = "lfs-check"
 BLOB_PATH = "blob.bin"
 LFS_BUCKET = "forgejo-lfs"
 
-# Three raw bytes become four base64 characters, so chunking on a multiple of
-# three lets the encoded pieces be concatenated without re-encoding anything.
 CHUNK_BYTES = 3 * 1024 * 1024
-# Generous but finite: a push that has made no progress in ten minutes is stuck,
-# and a script that hangs forever tells nobody anything.
 LONG_TIMEOUT = httpx.Timeout(600.0)
 
 
@@ -157,16 +159,17 @@ class StreamedBlob:
     667 MB, and building that as one string would need it several times over in
     memory before a single byte left the machine. The sha256 is accumulated on
     the way past, so it is available once the request has been sent.
+
+    The random source is seeded from the clock, not from the size. LFS stores
+    an object once per digest, so a fixed seed would make the second run of
+    this script push bytes Garage already has: the bucket would not grow, the
+    growth check would fail, and the script would report a ceiling half the
+    size of the one that works.
     """
 
     def __init__(self, payload: dict[str, Any], size: int) -> None:
         self._payload = payload
         self._size = size
-        # Seeded from the clock, not from the size. LFS stores an object once
-        # per digest, so a fixed seed would make the second run of this script
-        # push bytes Garage already has: the bucket would not grow, the growth
-        # check would fail, and the script would report a ceiling half the size
-        # of the one that actually works.
         self._seed = time.time_ns()
         self._digest = hashlib.sha256()
 

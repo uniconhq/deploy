@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="1000" height="1000" role="img" aria-label="Unicon">
+  <defs>
+    <linearGradient id="uniconSunset" x1="0" y1="1" x2="1" y2="0">
+      <stop offset="0" stop-color="#c9a4e2"/>
+      <stop offset="0.45" stop-color="#f78ca8"/>
+      <stop offset="1" stop-color="#ffc93c"/>
+    </linearGradient>
+  </defs>
+  <path d="M708.22 1000L583.55 875.33L793.1 275.86Q806.37 238.73 820.29 207.56Q834.22 176.39 843.5 161.8Q828.91 171.09 796.42 186.34Q763.93 201.59 729.44 212.2L128.65 420.42L0 291.78L859.42 0L1000 140.58L708.22 1000Z" fill="url(#uniconSunset)"/>
+</svg>
