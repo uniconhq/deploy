@@ -11,7 +11,9 @@ Run it from the deploy directory with the stack up:
     uv run scripts/check-lfs.py --size 64  # smaller, for a quick check
 
 On failure it halves the size and tries again, so the output always names a
-ceiling that works. The two settings to look at first are Forgejo's
+ceiling that works. `--exact` turns that off and fails on the size asked for,
+which is what CI wants: there the point is that one named size still works,
+not that some smaller one does. The two settings to look at first are Forgejo's
 [server] LFS_MAX_FILE_SIZE and, if Forgejo is ever put behind the proxy, the
 proxy body limit. In this stack Forgejo is reached directly, so only the first
 applies.
@@ -57,6 +59,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--size", type=int, default=500, help="megabytes, default 500")
     parser.add_argument("--directory", type=Path, default=Path.cwd())
     parser.add_argument(
+        "--exact", action="store_true", help="fail on that size instead of halving"
+    )
+    parser.add_argument(
         "--garage-admin-url",
         default="http://localhost:3903",
         help="Garage admin API as seen from this machine",
@@ -88,6 +93,8 @@ def main(argv: list[str] | None = None) -> int:
             round_trip(forgejo, garage, size_mb)
         except (CheckFailed, httpx.HTTPError) as failure:
             print(f"   FAILED: {failure}")
+            if options.exact:
+                return 1
             size_mb //= 2
             continue
         print(f"\nlargest size that worked: {size_mb} MB")
