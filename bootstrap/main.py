@@ -28,10 +28,11 @@ BACKEND_ACCOUNT = "unicon-backend"
 CI_ACCOUNT = "unicon-ci"
 
 FORGEJO_LFS_BUCKET = "forgejo-lfs"
+# unicon-uploads holds what a browser uploads before a submit, unicon-results
+# the grading logs, unicon-exports is reserved. Four buckets with forgejo-lfs,
+# and no other.
 UNICON_BUCKETS = (
     "unicon-uploads",
-    "unicon-assets",
-    "unicon-bundles",
     "unicon-results",
     "unicon-exports",
 )
@@ -54,7 +55,6 @@ GENERATORS: dict[str, Callable[[], str]] = {
     "FORGEJO_LFS_JWT_SECRET": secret_values.forgejo_jwt_secret,
     "FORGEJO_BACKEND_PASSWORD": secret_values.password,
     "FORGEJO_CI_PASSWORD": secret_values.password,
-    "WOODPECKER_AGENT_SECRET": secret_values.opaque_token,
     "WOODPECKER_GRPC_SECRET": secret_values.opaque_token,
     "GARAGE_RPC_SECRET": secret_values.garage_rpc_secret,
     "GARAGE_ADMIN_TOKEN": secret_values.opaque_token,
@@ -307,7 +307,7 @@ def _start_woodpecker(
     compose: Compose, values: dict[str, str], summary: Summary
 ) -> None:
     print("starting woodpecker")
-    compose.up("woodpecker-server", "woodpecker-agent")
+    compose.up("woodpecker-server")
 
     woodpecker = Woodpecker(
         values["WOODPECKER_PUBLIC_URL"], values["FORGEJO_PUBLIC_URL"]
