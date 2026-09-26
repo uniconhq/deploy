@@ -11,10 +11,15 @@ turns a fresh stack into one the backend can talk to.
 | `postgres` | `postgres:16-alpine` | `postgres:5432` in the network, `127.0.0.1:55432` in development |
 | `forgejo` | `codeberg.org/forgejo/forgejo:15.0.8` | `http://localhost:3300` in a browser, `http://forgejo:3000` in the network |
 | `woodpecker-server` | `woodpeckerci/woodpecker-server:v3.18.1` | `http://localhost:8000` in development |
-| `woodpecker-agent` | `woodpeckerci/woodpecker-agent:v3.18.1` | |
 | `garage` | `dxflrs/garage:v2.4.1` | `garage:3900` in the network; S3 and admin on `127.0.0.1` in development |
 | `proxy` | `nginx:1.27-alpine` | `http://localhost:8080`, the app |
 | `backend`, `frontend` | built from the siblings in development | behind the proxy |
+
+No grading machine is part of the stack: a machine that runs contestant code
+is a separate host, enrolled at the CI with its own token. The server carries
+no shared agent secret, so a machine that presents no issued token is refused.
+`compose.dev.yaml` can run one agent on the laptop under `--profile agent`,
+with a token from the CI's Agents page in `WOODPECKER_DEV_AGENT_TOKEN`.
 
 ## Running it
 
@@ -127,9 +132,11 @@ site-administrator token must not sit in Woodpecker's database.
 Two Forgejo OAuth applications, one for Unicon and one for Woodpecker. Bootstrap
 talks to Garage through `garage json-api` inside the container, which speaks the
 same admin API over Garage's internal RPC, so no admin port has to be open for
-it. Six Garage buckets: `forgejo-lfs` for Forgejo, and `unicon-uploads`,
-`unicon-assets`, `unicon-bundles`, `unicon-results` and `unicon-exports` for the
-backend, with a separate access key for each side. A Woodpecker API token for
+it. Four Garage buckets: `forgejo-lfs` for Forgejo, and `unicon-uploads` for
+what a browser uploads before a submit, `unicon-results` for grading logs and
+`unicon-exports`, reserved, for the backend, with a separate access key for
+each side. It creates no other bucket, and removes none: a stack bootstrapped
+before this list was cut down keeps whatever it had. A Woodpecker API token for
 `unicon-ci`.
 
 All of it lands in `.env`, which is git-ignored. `.env.example` lists every key
@@ -168,7 +175,14 @@ docker compose --env-file .env.check -f compose.yaml config --quiet
 docker compose --env-file .env.check -f compose.yaml -f compose.dev.yaml config --quiet
 ```
 
-CI runs exactly these.
+CI runs exactly these, and then boots the whole stack: it checks out `backend`
+and `frontend` beside this repo, runs bootstrap against `compose.yaml` and
+`compose.dev.yaml`, starts the `app` profile, and checks that `/readyz`
+answers ready and the frontend serves its page through the proxy on one
+origin. It then runs bootstrap a second time and fails if `.env` changed.
+Every push and pull request runs it, so a change to compose, a config file or
+bootstrap is caught the day it breaks. Later end-to-end tests run on top of
+this job rather than starting a stack of their own.
 
 ## Three rules that are cheap now and expensive later
 

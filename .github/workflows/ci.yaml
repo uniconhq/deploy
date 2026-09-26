@@ -5,6 +5,9 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   check:
     runs-on: ubuntu-latest
@@ -39,3 +42,64 @@ jobs:
           sed -E 's/^([A-Za-z_][A-Za-z0-9_]*)=$/\1=placeholder/' .env.example > .env.check
           docker compose --env-file .env.check -f compose.yaml config --quiet
           docker compose --env-file .env.check -f compose.yaml -f compose.dev.yaml config --quiet
+
+  # The whole stack from nothing: bootstrap, the app profile, and the two
+  # answers a deployment is judged by. Later end-to-end tests run on top of
+  # this job rather than starting a stack of their own.
+  stack:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # compose.dev.yaml builds backend and frontend from the sibling checkouts,
+      # so the three repos sit beside each other the way they do on a laptop.
+      - uses: actions/checkout@v7
+        with:
+          path: deploy
+      - uses: actions/checkout@v7
+        with:
+          repository: uniconhq/backend
+          path: backend
+      - uses: actions/checkout@v7
+        with:
+          repository: uniconhq/frontend
+          path: frontend
+
+      - uses: astral-sh/setup-uv@v10.1.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --frozen
+        working-directory: deploy
+
+      - name: bootstrap a fresh stack
+        working-directory: deploy
+        run: uv run bootstrap
+
+      - name: start the app profile
+        working-directory: deploy
+        run: docker compose -f compose.yaml -f compose.dev.yaml --profile app up -d --build
+
+      - name: the backend is ready and the frontend serves its page
+        working-directory: deploy
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/readyz > readyz.json 2>/dev/null; then break; fi
+            sleep 5
+          done
+          cat readyz.json
+          grep -q '"ready"' readyz.json
+          curl -fsS http://localhost:8080/healthz
+          curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
+          curl -fsS http://localhost:8080/openapi.json | grep -q '"openapi"'
+
+      - name: a second bootstrap changes nothing
+        working-directory: deploy
+        run: |
+          cp .env .env.first
+          uv run bootstrap
+          diff .env.first .env
+
+      - name: logs
+        if: failure()
+        working-directory: deploy
+        run: docker compose -f compose.yaml -f compose.dev.yaml --profile app logs --no-color | tail -300
