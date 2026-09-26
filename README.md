@@ -89,7 +89,11 @@ $COMPOSE up -d --build frontend
 
 `backend-migrate` runs `unicon migrate` and exits; the backend image does not
 migrate on its own, and `backend` waits for it to finish successfully. Both use
-the same build and the same image tag, so the build happens once.
+the same build and the same image tag, so the build happens once. That build
+takes the directory holding every checkout as its context, with
+`backend/Dockerfile` as the Dockerfile, because the backend installs the
+`forge` package from the sibling `forge` checkout; `backend`, `forge` and this
+repo have to sit beside each other.
 
 The frontend is a separate line on purpose. Everything else runs without it, and
 the proxy starts whether or not the app services are there, so you can work on
@@ -135,9 +139,9 @@ same admin API over Garage's internal RPC, so no admin port has to be open for
 it. Four Garage buckets: `forgejo-lfs` for Forgejo, and `unicon-uploads` for
 what a browser uploads before a submit, `unicon-results` for grading logs and
 `unicon-exports`, reserved, for the backend, with a separate access key for
-each side. It creates no other bucket, and removes none: a stack bootstrapped
-before this list was cut down keeps whatever it had. A Woodpecker API token for
-`unicon-ci`.
+each side. It creates no other bucket and removes none. A Woodpecker API token
+for `unicon-ci`. No CI agent: a grading machine enrols itself with a token from
+the CI's Agents page.
 
 All of it lands in `.env`, which is git-ignored. `.env.example` lists every key
 with a comment and is the template bootstrap fills, so a key added there appears
@@ -175,8 +179,8 @@ docker compose --env-file .env.check -f compose.yaml config --quiet
 docker compose --env-file .env.check -f compose.yaml -f compose.dev.yaml config --quiet
 ```
 
-CI runs exactly these, and then boots the whole stack: it checks out `backend`
-and `frontend` beside this repo, runs bootstrap against `compose.yaml` and
+CI runs exactly these, and then boots the whole stack: it checks out `backend`,
+`forge` and `frontend` beside this repo, runs bootstrap against `compose.yaml` and
 `compose.dev.yaml`, starts the `app` profile, and checks that `/readyz`
 answers ready and the frontend serves its page through the proxy on one
 origin. It then runs bootstrap a second time and fails if `.env` changed.
