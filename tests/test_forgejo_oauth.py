@@ -1,21 +1,31 @@
-"""Whether an OAuth application is reused or replaced on a rerun.
+"""Whether an OAuth application is reused or replaced on a rerun, and how the
+API is reached.
 
 Forgejo shows a client secret once. So the only application bootstrap may keep
 is one whose secret .env still holds and whose redirect URI has not moved;
 anything else has to be deleted and made again, which invalidates the old one.
-The Forgejo API is faked here with httpx.MockTransport.
+
+The API is driven with curl inside the container, configured over standard
+input, so the fake here is a Compose whose exec reads that configuration back
+and answers the way Forgejo would.
 """
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
-import httpx
 import pytest
 
 from bootstrap.compose import Compose
-from bootstrap.forgejo import Forgejo, OAuthApplication
+from bootstrap.forgejo import (
+    API_INSIDE_THE_CONTAINER,
+    Forgejo,
+    ForgejoError,
+    OAuthApplication,
+    curl_config,
+)
 
 APPLICATIONS = "/api/v1/user/applications/oauth2"
 REDIRECT = "http://localhost:8080/api/v1/auth/callback"
@@ -23,39 +33,59 @@ REDIRECT = "http://localhost:8080/api/v1/auth/callback"
 KNOWN = OAuthApplication("known-client-id", "known-client-secret")
 
 
-class FakeForge:
-    """The three calls ensure_oauth_application can make, and a record of them."""
+def _read_config(stdin: str) -> dict[str, list[str]]:
+    """The curl configuration bootstrap wrote, as name to values."""
+    fields: dict[str, list[str]] = {}
+    for line in stdin.splitlines():
+        name, _, value = line.partition(" = ")
+        fields.setdefault(name, []).append(json.loads(value) if value else "")
+    return fields
+
+
+class FakeForge(Compose):
+    """A Compose whose every exec is a curl call to a Forgejo that holds the
+    applications given, answering the three calls ensure_oauth_application
+    can make and keeping a record of them.
+    """
 
     def __init__(self, existing: list[dict[str, Any]]) -> None:
+        super().__init__(Path("."), [])
         self.existing = existing
         self.requests: list[tuple[str, str]] = []
+        self.arguments: list[tuple[str, ...]] = []
+        self.configs: list[dict[str, list[str]]] = []
 
-    def handle(self, request: httpx.Request) -> httpx.Response:
-        self.requests.append((request.method, request.url.path))
-        if request.method == "GET":
-            return httpx.Response(200, json=self.existing)
-        if request.method == "DELETE":
-            return httpx.Response(204)
-        return httpx.Response(
-            201, json={"client_id": "fresh-id", "client_secret": "fresh-secret"}
-        )
+    def execute(
+        self,
+        service: str,
+        *arguments: str,
+        user: str | None = None,
+        stdin: str | None = None,
+    ) -> str:
+        self.arguments.append(arguments)
+        assert stdin is not None
+        config = _read_config(stdin)
+        self.configs.append(config)
+        method = config["request"][0]
+        path = config["url"][0].removeprefix(API_INSIDE_THE_CONTAINER)
+        self.requests.append((method, "/api/v1" + path))
+        if method == "GET":
+            return f"{json.dumps(self.existing)}\n200"
+        if method == "DELETE":
+            return "\n204"
+        fresh = {"client_id": "fresh-id", "client_secret": "fresh-secret"}
+        return f"{json.dumps(fresh)}\n201"
 
 
 @pytest.fixture
-def forge(monkeypatch: pytest.MonkeyPatch) -> FakeForge:
-    """Point every httpx.Client bootstrap opens at a fake Forgejo."""
-    fake = FakeForge([])
-    real_client = httpx.Client
-
-    def build(**kwargs: Any) -> httpx.Client:
-        return real_client(**kwargs, transport=httpx.MockTransport(fake.handle))
-
-    monkeypatch.setattr(httpx, "Client", build)
-    return fake
+def forge() -> FakeForge:
+    return FakeForge([])
 
 
-def _ensure(known: OAuthApplication | None) -> tuple[OAuthApplication, bool]:
-    forgejo = Forgejo("http://forgejo.invalid", Compose(Path("."), []), "forgejo")
+def _ensure(
+    forge: FakeForge, known: OAuthApplication | None
+) -> tuple[OAuthApplication, bool]:
+    forgejo = Forgejo(forge, "forgejo")
     return forgejo.ensure_oauth_application(
         "unicon-backend",
         "password",
@@ -75,7 +105,7 @@ def test_an_application_we_still_hold_the_secret_for_is_kept(forge: FakeForge) -
         }
     ]
 
-    application, created = _ensure(KNOWN)
+    application, created = _ensure(forge, KNOWN)
 
     assert (application, created) == (KNOWN, False)
     assert [method for method, _ in forge.requests] == ["GET"]
@@ -91,7 +121,7 @@ def test_an_application_whose_secret_is_lost_is_replaced(forge: FakeForge) -> No
         }
     ]
 
-    application, created = _ensure(None)
+    application, created = _ensure(forge, None)
 
     assert created is True
     assert application == OAuthApplication("fresh-id", "fresh-secret")
@@ -108,7 +138,7 @@ def test_an_application_whose_redirect_moved_is_replaced(forge: FakeForge) -> No
         }
     ]
 
-    _, created = _ensure(KNOWN)
+    _, created = _ensure(forge, KNOWN)
 
     assert created is True
     assert ("DELETE", f"{APPLICATIONS}/1") in forge.requests
@@ -124,7 +154,7 @@ def test_an_application_under_another_client_id_is_replaced(forge: FakeForge) ->
         }
     ]
 
-    _, created = _ensure(KNOWN)
+    _, created = _ensure(forge, KNOWN)
 
     assert created is True
 
@@ -139,7 +169,58 @@ def test_applications_with_another_name_are_left_alone(forge: FakeForge) -> None
         }
     ]
 
-    _, created = _ensure(KNOWN)
+    _, created = _ensure(forge, KNOWN)
 
     assert created is True
     assert [method for method, _ in forge.requests] == ["GET", "POST"]
+
+
+def test_the_api_is_reached_inside_the_container_with_nothing_secret_as_an_argument(
+    forge: FakeForge,
+) -> None:
+    _ensure(forge, None)
+
+    assert all(arguments == ("curl", "--config", "-") for arguments in forge.arguments)
+    assert forge.configs[0]["user"] == ["unicon-backend:password"]
+    assert forge.configs[0]["url"] == [
+        f"{API_INSIDE_THE_CONTAINER}/user/applications/oauth2"
+    ]
+    posted = forge.configs[-1]
+    assert json.loads(posted["data"][0])["redirect_uris"] == [REDIRECT]
+    assert "Content-Type: application/json" in posted["header"]
+
+
+def test_a_token_is_checked_with_the_token_as_a_header_and_nothing_else() -> None:
+    forge = FakeForge([])
+
+    assert Forgejo(forge, "forgejo").token_is_valid("t0k3n") is True
+
+    assert forge.configs[0]["header"] == [
+        "Accept: application/json",
+        "Authorization: token t0k3n",
+    ]
+    assert "user" not in forge.configs[0]
+    assert Forgejo(forge, "forgejo").token_is_valid("") is False
+
+
+def test_a_refusal_names_the_status() -> None:
+    class Refusing(FakeForge):
+        def execute(self, service: str, *arguments: str, **rest: Any) -> str:
+            return '{"message": "no"}\n403'
+
+    with pytest.raises(ForgejoError, match="403"):
+        Forgejo(Refusing([]), "forgejo").mint_access_token("unicon-backend", "pw")
+
+
+def test_every_value_survives_the_curl_configuration_quoting() -> None:
+    config = curl_config(
+        "POST",
+        "/x",
+        auth=("a", 'p"a\\ss\nword'),
+        token=None,
+        body={"name": 'say "hi"\ttab'},
+    )
+
+    assert 'user = "a:p\\"a\\\\ss\\nword"' in config
+    assert 'data = "{\\"name\\": \\"say \\\\\\"hi\\\\\\"\\\\ttab\\"}"' in config
+    assert config.endswith("\n")

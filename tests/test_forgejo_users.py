@@ -42,7 +42,7 @@ class FakeCompose(Compose):
 
 def _forgejo(output: str) -> tuple[Forgejo, FakeCompose]:
     compose = FakeCompose(output)
-    return Forgejo("http://forgejo.invalid", compose, "forgejo"), compose
+    return Forgejo(compose, "forgejo"), compose
 
 
 def test_an_existing_account_is_not_created_again() -> None:

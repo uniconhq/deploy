@@ -13,6 +13,7 @@ would otherwise stop working on the next run, and nothing would say why.
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -66,6 +67,24 @@ def defaults(template: Path) -> dict[str, str]:
 
 
 def write(path: Path, template: Path, values: dict[str, str]) -> None:
-    """Write .env with LF endings, readable only by the person who ran this."""
-    path.write_text(render(template, values), encoding="utf-8", newline="\n")
+    """Write .env with LF endings, readable only by the person who ran this.
+
+    Whole or not at all: the text goes to a file beside it, is flushed to
+    disk, and then takes the name. A run interrupted mid-write therefore
+    leaves the previous .env in place, never a truncated one, which matters
+    because a truncated .env reads as present and would have its lost
+    secrets generated again.
+    """
+    rendered = render(template, values).encode("utf-8")
+    partial = path.with_name(path.name + ".partial")
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    try:
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(rendered)
+            handle.flush()
+            os.fsync(handle.fileno())
+    except BaseException:
+        partial.unlink(missing_ok=True)
+        raise
+    os.replace(partial, path)
     path.chmod(0o600)

@@ -21,6 +21,9 @@ x-backend-env: &backend-env
   UNICON_FORGE_OAUTH_CLIENT_ID: ${UNICON_FORGE_OAUTH_CLIENT_ID}
   UNICON_FORGE_OAUTH_CLIENT_SECRET: ${UNICON_FORGE_OAUTH_CLIENT_SECRET}
   UNICON_WOODPECKER_URL: ${UNICON_WOODPECKER_URL}
+  # The URL the CI knows itself by. It writes its webhooks under it, and the
+  # backend tells the CI's webhook from any other by it.
+  UNICON_WOODPECKER_PUBLIC_URL: ${WOODPECKER_PUBLIC_URL}
   UNICON_WOODPECKER_TOKEN: ${UNICON_WOODPECKER_TOKEN}
   UNICON_S3_ENDPOINT: ${UNICON_S3_ENDPOINT}
   UNICON_S3_REGION: ${UNICON_S3_REGION}
@@ -96,8 +99,8 @@ services:
     environment:
       USER_UID: "1000"
       USER_GID: "1000"
-      # The browser-facing URL. People sign into Forgejo directly, so this is
-      # not the in-network address.
+      # The browser-facing URL: Forgejo's own hostname on the proxy, where
+      # people sign in and keep their account. Not the in-network address.
       FORGEJO__server__ROOT_URL: ${FORGEJO_PUBLIC_URL:?set by bootstrap}/
       # The host out of that URL. Bootstrap derives it, so the two cannot drift.
       FORGEJO__server__DOMAIN: ${FORGEJO_DOMAIN:?set by bootstrap}
@@ -119,8 +122,11 @@ services:
       # read from this repo, so an upgrade of the image keeps them.
       - ./forgejo/custom/public:/data/gitea/public:ro
       - ./forgejo/custom/templates:/data/gitea/templates:ro
-    ports:
-      - "3300:3000"
+    # No published port. People reach Forgejo's sign-in and account pages
+    # through the proxy on FORGEJO_PUBLIC_URL, and nothing else of it is
+    # reachable from outside the compose network: not the web UI, not the
+    # API, not git. Bootstrap drives its API from inside the container.
+    # compose.dev.yaml publishes it on loopback for scripts/check-lfs.py.
     healthcheck:
       test: ["CMD", "curl", "-fsS", "http://localhost:3000/api/healthz"]
       interval: 5s
@@ -217,8 +223,14 @@ services:
     restart: unless-stopped
     # Deliberately no depends_on: the proxy comes up whether or not the app
     # services are running. See the comment in proxy/nginx.conf.
+    # The file is a template: the image fills in ${FORGE_HOST}, the hostname
+    # Forgejo is served under, and the filter keeps it from touching any
+    # other dollar sign in the file, which are all nginx's own.
     volumes:
-      - ./proxy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./proxy/nginx.conf:/etc/nginx/templates/default.conf.template:ro
+    environment:
+      FORGE_HOST: ${FORGEJO_DOMAIN:?set by bootstrap}
+      NGINX_ENVSUBST_FILTER: ^FORGE_HOST$$
     ports:
       - "8080:80"
     healthcheck:
