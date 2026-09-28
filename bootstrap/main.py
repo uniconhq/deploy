@@ -3,9 +3,9 @@
 Garage first, because Forgejo needs an S3 key in its environment before it
 starts or it would store the first LFS objects on local disk and only move to
 Garage after a restart. Forgejo next, because Woodpecker will not start without
-the OAuth client that only a Forgejo administrator can create. Woodpecker last,
-then the proxy, which holds no bootstrap state of its own and is started so
-that one command leaves the stack answering on its public URL.
+the OAuth client that only a Forgejo administrator can create. The proxy next,
+because Forgejo's sign-in pages are reached through it, and minting the
+Woodpecker token signs in there. Woodpecker last.
 
 Every step checks before it creates, and .env is rewritten after each one, so an
 interrupted run can be resumed by running it again.
@@ -15,13 +15,19 @@ in UNICON_BUCKETS for the backend, where unicon-uploads holds what a browser
 uploads before a submit, unicon-results the grading logs, and unicon-exports is
 reserved.
 
-FORGEJO_DATA_VOLUME is the Docker name of the Forgejo volume: the compose
-project name from compose.yaml, then the volume name. It stands for every
-volume in the check for a lost .env, because it is the one a lost .env makes
-unreadable.
-
 GENERATORS lists every key .env holds that is generated here rather than
 discovered from a service. A key already carrying a value is left alone.
+
+UNLOCKS names, for each generated secret that data on disk depends on, the
+volume that data lives in: Forgejo's four secrets decrypt and sign what is in
+forgejo-data, the backend's token key decrypts the credentials in
+postgres-data, and Garage's RPC secret is what the node in garage-meta was
+formed with. A run that finds one of those keys missing while its volume is
+still on the machine stops, because a fresh value would not be a fresh start:
+it would leave data nothing can read. The other generated values are
+re-applied on every run or only invalidate what can be made again, so a
+missing one is simply generated. Volume names are the compose project name
+from compose.yaml, then the volume name.
 """
 
 from __future__ import annotations
@@ -35,7 +41,7 @@ from bootstrap import envfile, postgres, secret_values
 from bootstrap.compose import Compose, ComposeFailed
 from bootstrap.forgejo import Forgejo, ForgejoError, OAuthApplication
 from bootstrap.garage import Garage, GarageError
-from bootstrap.readiness import NotReady, wait_for, wait_for_http
+from bootstrap.readiness import NotReady, wait_for
 from bootstrap.summary import Summary
 from bootstrap.woodpecker import Woodpecker, WoodpeckerError
 
@@ -49,7 +55,16 @@ UNICON_BUCKETS = (
     "unicon-exports",
 )
 
-FORGEJO_DATA_VOLUME = "unicon_forgejo-data"
+COMPOSE_PROJECT = "unicon"
+
+UNLOCKS: dict[str, str] = {
+    "FORGEJO_SECRET_KEY": "forgejo-data",
+    "FORGEJO_INTERNAL_TOKEN": "forgejo-data",
+    "FORGEJO_OAUTH2_JWT_SECRET": "forgejo-data",
+    "FORGEJO_LFS_JWT_SECRET": "forgejo-data",
+    "UNICON_TOKEN_ENCRYPTION_KEY": "postgres-data",
+    "GARAGE_RPC_SECRET": "garage-meta",
+}
 
 GENERATORS: dict[str, Callable[[], str]] = {
     "POSTGRES_SUPERUSER_PASSWORD": secret_values.password,
@@ -71,7 +86,9 @@ GENERATORS: dict[str, Callable[[], str]] = {
 
 
 class LostEnvironment(Exception):
-    """.env is gone while the volumes it unlocks are still on the machine."""
+    """A secret is gone from .env while the volume it unlocks is still on the
+    machine.
+    """
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -84,8 +101,8 @@ def main(argv: list[str] | None = None) -> int:
     values: dict[str, str] = {}
 
     try:
-        _refuse_to_regenerate_over_existing_data(compose, env_path)
         previous = envfile.load(env_path)
+        _refuse_to_regenerate_over_existing_data(compose, env_path, previous)
         values = _starting_values(template, previous)
 
         _generate_missing_secrets(values, summary)
@@ -98,8 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         _start_forgejo(compose, values, summary)
         envfile.write(env_path, template, values)
 
-        _start_woodpecker(compose, values, summary)
         compose.up("proxy")
+        _start_woodpecker(compose, values, summary)
         envfile.write(env_path, template, values)
 
         _restart_backend_if_values_changed(compose, previous, values)
@@ -149,23 +166,35 @@ def _parse_arguments(argv: list[str] | None) -> argparse.Namespace:
     return options
 
 
-def _refuse_to_regenerate_over_existing_data(compose: Compose, env_path: Path) -> None:
-    """Stop rather than generate a second set of secrets for data that exists.
+def _refuse_to_regenerate_over_existing_data(
+    compose: Compose, env_path: Path, previous: dict[str, str]
+) -> None:
+    """Stop rather than generate a secret again for data that exists.
 
     Fresh secrets over a surviving volume are not a fresh start. Forgejo's
     SECRET_KEY decrypts what is already in its database and a new one cannot
     read any of it; the run would look like it succeeded and leave an instance
-    whose stored OAuth secrets and two-factor seeds are gone.
+    whose stored OAuth secrets and two-factor seeds are gone. The check is per
+    key, so a .env that is present but has lost one line, or is empty, is
+    caught the same as a .env that is gone.
     """
-    if env_path.exists() or not compose.volume_exists(FORGEJO_DATA_VOLUME):
+    lost = [key for key in UNLOCKS if not previous.get(key)]
+    if not lost:
         return
-    raise LostEnvironment(
-        f"{env_path} is missing but the volume {FORGEJO_DATA_VOLUME} is still "
-        "here. That volume holds data only the secrets in that file can read, "
-        "and those secrets cannot be generated again. Either put a backed-up "
-        ".env back and run this again, or remove the stack's volumes with "
-        "docker compose down -v and start from empty."
-    )
+    kept: dict[str, bool] = {}
+    for key in lost:
+        volume = UNLOCKS[key]
+        if volume not in kept:
+            kept[volume] = compose.volume_exists(f"{COMPOSE_PROJECT}_{volume}")
+        if kept[volume]:
+            raise LostEnvironment(
+                f"{key} is missing from {env_path} but the volume "
+                f"{COMPOSE_PROJECT}_{volume} is still here. That volume holds "
+                "data only that secret can read, and the secret cannot be "
+                "generated again. Either put a backed-up .env back and run "
+                "this again, or remove the stack's volumes with "
+                "docker compose down -v and start from empty."
+            )
 
 
 def _starting_values(template: Path, previous: dict[str, str]) -> dict[str, str]:
@@ -250,10 +279,9 @@ def _start_storage(compose: Compose, values: dict[str, str], summary: Summary) -
 def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -> None:
     print("starting forgejo")
     compose.up("forgejo")
-    public_url = values["FORGEJO_PUBLIC_URL"]
-    wait_for_http("forgejo", f"{public_url}/api/healthz", timeout_seconds=300.0)
+    wait_for("forgejo", lambda: compose.is_healthy("forgejo"), timeout_seconds=300.0)
 
-    forgejo = Forgejo(public_url, compose, "forgejo")
+    forgejo = Forgejo(compose, "forgejo")
     summary.record(
         f"forgejo account {BACKEND_ACCOUNT}",
         forgejo.ensure_user(

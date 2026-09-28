@@ -38,19 +38,22 @@ class Compose:
     def _run(
         self, description: str, command: Sequence[str], stdin: str | None = None
     ) -> str:
+        """Bytes in and bytes out. A text pipe would turn every line break of
+        what is written to stdin into the platform's own, and on Windows that
+        puts a carriage return at the end of every line curl reads.
+        """
         completed = subprocess.run(
             command,
             cwd=self._project_dir,
-            input=stdin,
+            input=stdin.encode("utf-8") if stdin is not None else None,
             capture_output=True,
-            text=True,
         )
         if completed.returncode != 0:
             raise ComposeFailed(
                 f"docker {description} exited {completed.returncode}\n"
-                f"{completed.stderr.strip()}"
+                f"{completed.stderr.decode('utf-8', 'replace').strip()}"
             )
-        return completed.stdout
+        return completed.stdout.decode("utf-8", "replace")
 
     def up(self, *services: str) -> None:
         self._run(

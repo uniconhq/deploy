@@ -10,10 +10,10 @@ fresh stack into one the backend can talk to.
 | Service | Image | Reached at |
 |---|---|---|
 | `postgres` | `postgres:16-alpine` | `postgres:5432` in the network, `127.0.0.1:55432` in development |
-| `forgejo` | `codeberg.org/forgejo/forgejo:15.0.8` | `http://localhost:3300` in a browser, `http://forgejo:3000` in the network |
+| `forgejo` | `codeberg.org/forgejo/forgejo:15.0.8` | `http://forge.localhost:8080` in a browser, through the proxy; `http://forgejo:3000` in the network; `127.0.0.1:3300` in development for `check-lfs.py` |
 | `woodpecker-server` | `woodpeckerci/woodpecker-server:v3.18.1` | `http://localhost:8000` in development |
 | `garage` | `dxflrs/garage:v2.4.1` | `garage:3900` in the network; S3 and admin on `127.0.0.1` in development |
-| `proxy` | `nginx:1.27-alpine` | `http://localhost:8080`, the app |
+| `proxy` | `nginx:1.27-alpine` | `http://localhost:8080`, the app, and `http://forge.localhost:8080`, the forge's people pages |
 | `backend`, `frontend` | built from the siblings in development | behind the proxy |
 
 No grading machine is part of the stack: a machine that runs contestant code
@@ -35,7 +35,8 @@ That is the whole thing. It generates every secret, writes `.env`, and starts
 the services in the order they need each other: Garage first, because Forgejo
 needs an S3 key before it opens its LFS storage; then Forgejo, because
 Woodpecker will not start without an OAuth client that only a Forgejo
-administrator can create; then Woodpecker and the proxy.
+administrator can create; then the proxy, because the Woodpecker sign-in goes
+through Forgejo's pages on it; then Woodpecker.
 
 Run it again whenever you like. Every step checks before it creates, so a second
 run reports what was already there and creates nothing new. It is not a no-op:
@@ -44,14 +45,19 @@ from `.env`, re-applies the bucket grants, rewrites `.env`, and recreates the
 `backend` container if any `UNICON_*` value changed under it, because a running
 container never re-reads its environment.
 
-**If `.env` is gone, do not just run bootstrap.** It refuses to start when
-`.env` is missing while the stack's volumes are still on the machine, and says
-so. Fresh secrets are not a fresh start: Forgejo's `SECRET_KEY` decrypts what is
-already in its database, including the OAuth client secrets, and a new one
-cannot read any of it. The two ways forward are the two the message names: put
-a backed-up `.env` back, or throw the volumes away with `down -v` and bootstrap
+**If `.env` is gone, or a secret in it is, do not just run bootstrap.** It
+refuses to start when a secret that data on disk depends on is missing while
+the volume holding that data is still on the machine, and names both. Fresh
+secrets are not a fresh start: Forgejo's `SECRET_KEY` decrypts what is
+already in its database, including the OAuth client secrets, the backend's
+token key decrypts the credentials in Postgres, and Garage's RPC secret is
+what its node was formed with; a new value cannot read any of it. The check is
+per key, so a `.env` that lost one line, or is empty, is refused the same as
+one that is gone. The two ways forward are the two the message names: put a
+backed-up `.env` back, or throw the volumes away with `down -v` and bootstrap
 an empty stack. With no volumes present and no `.env`, bootstrap builds
-everything from nothing, which is the ordinary first run.
+everything from nothing, which is the ordinary first run. `.env` is written
+whole or not at all, so an interrupted run never leaves a truncated one.
 
 Afterwards:
 
@@ -62,14 +68,18 @@ docker compose -f compose.yaml -f compose.dev.yaml down -v     # throw it away
 ```
 
 Without `-f compose.dev.yaml` you get the production shape: images by tag,
-nothing published to the host except the app on 8080 and Forgejo on 3300,
-Forgejo with registration closed, and the landing page not offering Create
-account. Bootstrap works in that shape too, because it drives Garage through
-the container's own command line rather than the admin API port. The one thing
-it does need is that `WOODPECKER_PUBLIC_URL` resolves from the machine running
-it: Woodpecker has no way to mint an API token except through its web UI. In
-development the dev override publishes Woodpecker on loopback for exactly that;
-a real deployment has it behind its own ingress under a real name.
+nothing published to the host except the proxy on 8080, Forgejo with
+registration closed, and the landing page not offering Create account.
+Forgejo has no port of its own: people reach its sign-in, sign-up, OAuth and
+account pages through the proxy on `FORGEJO_PUBLIC_URL`, its own hostname,
+and the proxy answers 404 for everything else of it, the web UI, the API,
+token minting and git over HTTP included. Bootstrap works in that shape too,
+because it drives Garage and Forgejo's API through the containers' own
+command lines rather than a published port. The one thing it does need is
+that `WOODPECKER_PUBLIC_URL` resolves from the machine running it: Woodpecker
+has no way to mint an API token except through its web UI. In development the
+dev override publishes Woodpecker on loopback for exactly that; a real
+deployment has it behind its own ingress under a real name.
 
 Every port the dev override opens is bound to `127.0.0.1`, so a laptop on a
 shared network does not put its database and object store on that network.
@@ -119,9 +129,15 @@ which the frontend reads with
 the query string of `/api/v1/auth/callback`, so the login `code` and `state`
 never reach disk.
 
-The app is at `http://localhost:8080`, Forgejo at `http://localhost:3300`. Sign
-in through the app; Forgejo is where the account lives. In development Forgejo
-accepts new registrations with no mail server, so you can make one.
+The app is at `http://localhost:8080`, Forgejo at `http://forge.localhost:8080`,
+on the same proxy under its own hostname, so the two never share cookies. Any
+name under `.localhost` is loopback for browsers and most resolvers, so no
+hosts entry is needed; the Woodpecker container reaches the same name through
+the Docker host gateway for its OAuth token request. Sign in through the app;
+Forgejo is where the account lives. In development Forgejo accepts new
+registrations with no mail server, so you can make one. The dev override also
+publishes Forgejo on `127.0.0.1:3300` for `scripts/check-lfs.py`, which
+drives its API from this machine; nothing else uses that port.
 
 ## What bootstrap made
 
@@ -133,9 +149,10 @@ because Woodpecker insists on a real forge login for its own user and the
 site-administrator token must not sit in Woodpecker's database.
 
 Two Forgejo OAuth applications, one for Unicon and one for Woodpecker. Bootstrap
-talks to Garage through `garage json-api` inside the container, which speaks the
-same admin API over Garage's internal RPC, so no admin port has to be open for
-it. Four Garage buckets: `forgejo-lfs` for Forgejo, and `unicon-uploads` for
+talks to Forgejo's API with the curl inside the Forgejo container, configured
+over standard input so no password or token is ever a command-line argument,
+and to Garage through `garage json-api` inside its container, which speaks the
+same admin API over Garage's internal RPC. Neither needs a port open for it. Four Garage buckets: `forgejo-lfs` for Forgejo, and `unicon-uploads` for
 what a browser uploads before a submit, `unicon-results` for grading logs and
 `unicon-exports`, reserved, for the backend, with a separate access key for
 each side. It creates no other bucket and removes none. A Woodpecker API token
@@ -178,8 +195,9 @@ uv run scripts/check-lfs.py
 ```
 
 This one does use the Garage admin API on `127.0.0.1:3903`, to read the bucket
-size before and after, so it needs `-f compose.dev.yaml` or an equivalent
-publish. It is a check for a person at a keyboard, not part of a deployment.
+size before and after, and Forgejo's API on `127.0.0.1:3300`, so it needs
+`-f compose.dev.yaml` or an equivalent publish. It is a check for a person at
+a keyboard, not part of a deployment.
 
 Commits a 500 MB random file through Forgejo's contents API into a repository
 whose `.gitattributes` sends `*.bin` to LFS, reads it back through `/media`,
@@ -207,7 +225,11 @@ CI runs exactly these, and then boots the whole stack: it checks out `backend`
 and `frontend` beside this repo, runs bootstrap against `compose.yaml` and
 `compose.dev.yaml`, starts the `app` profile, and checks that `/readyz`
 answers ready and the frontend serves its page through the proxy on one
-origin. It then runs bootstrap a second time and fails if `.env` changed.
+origin. It then tries the proxy from outside: the listed paths of both hosts
+answer, an unlisted path on either is 404, Forgejo's API, web UI and git
+endpoints are 404 on the forge host, every answer carries the security
+headers, and no container publishes Forgejo on every interface. It then runs
+bootstrap a second time and fails if `.env` changed.
 Every push and pull request runs it, so a change to compose, a config file or
 bootstrap is caught the day it breaks. Later end-to-end tests run on top of
 this job rather than starting a stack of their own.

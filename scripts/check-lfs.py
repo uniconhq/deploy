@@ -13,10 +13,11 @@ Run it from the deploy directory with the stack up:
 On failure it halves the size and tries again, so the output always names a
 ceiling that works. `--exact` turns that off and fails on the size asked for,
 which is what CI wants: there the point is that one named size still works,
-not that some smaller one does. The two settings to look at first are Forgejo's
-[server] LFS_MAX_FILE_SIZE and, if Forgejo is ever put behind the proxy, the
-proxy body limit. In this stack Forgejo is reached directly, so only the first
-applies.
+not that some smaller one does. The setting to look at first is Forgejo's
+[server] LFS_MAX_FILE_SIZE. The proxy routes none of Forgejo's API, so this
+script reaches it on the loopback port compose.dev.yaml publishes, the way it
+reaches Garage's admin API; it is a check for a person at a keyboard, not part
+of a deployment.
 
 The request body is streamed in pieces of CHUNK_BYTES. Three raw bytes become
 four base64 characters, so chunking on a multiple of three lets the encoded
@@ -66,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
         default="http://localhost:3903",
         help="Garage admin API as seen from this machine",
     )
+    parser.add_argument(
+        "--forge-url",
+        default="http://localhost:3300",
+        help="Forgejo as seen from this machine: the loopback port of compose.dev.yaml",
+    )
     options = parser.parse_args(argv)
 
     values = envfile.load(options.directory / ".env")
@@ -74,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     forgejo = httpx.Client(
-        base_url=f"{values['FORGEJO_PUBLIC_URL'].rstrip('/')}/api/v1",
+        base_url=f"{options.forge_url.rstrip('/')}/api/v1",
         headers={"Authorization": f"token {values['UNICON_FORGE_ADMIN_TOKEN']}"},
         timeout=LONG_TIMEOUT,
     )

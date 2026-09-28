@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -81,3 +82,34 @@ def test_write_uses_lf_on_every_platform(tmp_path: Path, template: Path) -> None
     envfile.write(path, template, {"FILLED": "x"})
 
     assert b"\r" not in path.read_bytes()
+
+
+def test_write_replaces_the_file_whole_and_leaves_no_partial_behind(
+    tmp_path: Path, template: Path
+) -> None:
+    path = tmp_path / ".env"
+    envfile.write(path, template, {"FILLED": "first"})
+
+    envfile.write(path, template, {"FILLED": "second"})
+
+    assert "FILLED=second" in path.read_text(encoding="utf-8").splitlines()
+    assert sorted(entry.name for entry in tmp_path.iterdir()) == [
+        ".env",
+        ".env.example",
+    ]
+
+
+def test_a_write_that_fails_keeps_the_previous_file(
+    tmp_path: Path, template: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = tmp_path / ".env"
+    envfile.write(path, template, {"FILLED": "first"})
+
+    def refuse(*arguments: object, **options: object) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(os, "replace", refuse)
+    with pytest.raises(OSError):
+        envfile.write(path, template, {"FILLED": "second"})
+
+    assert "FILLED=first" in path.read_text(encoding="utf-8").splitlines()
