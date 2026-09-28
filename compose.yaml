@@ -244,16 +244,20 @@ services:
 
   # Runs the migrations and exits. The backend image does not migrate on its own,
   # so this has to finish before the API starts; two copies of the API racing
-  # each other through Alembic on a rollout is the failure this avoids.
+  # each other through Alembic on a rollout is the failure this avoids. The
+  # migrations belong to the forge package, which the backend image installs
+  # with its `unicon-forge` command on PATH, so this runs that command rather
+  # than the backend's own.
   backend-migrate:
     image: ghcr.io/uniconhq/backend:main
     profiles: [app]
     restart: "no"
+    entrypoint: ["unicon-forge"]
     command: ["migrate"]
     depends_on:
       postgres:
         condition: service_healthy
-    # Not the whole backend environment. `unicon migrate` reads one setting,
+    # Not the whole backend environment. `unicon-forge migrate` reads one setting,
     # the database URL, and giving a migration job the OAuth client secret and
     # the token encryption key spreads them over a second container for nothing.
     environment:
