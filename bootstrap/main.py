@@ -308,6 +308,7 @@ def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -
             BACKEND_ACCOUNT, values["FORGEJO_BACKEND_PASSWORD"]
         )
         summary.record("forgejo provisioning token", created=True)
+    values["UNICON_FORGE_PLATFORM_ACCOUNT"] = BACKEND_ACCOUNT
 
     unicon_app, created = forgejo.ensure_oauth_application(
         BACKEND_ACCOUNT,

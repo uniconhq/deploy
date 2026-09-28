@@ -144,7 +144,9 @@ drives its API from this machine; nothing else uses that port.
 
 Two Forgejo accounts. `unicon-backend` is a site administrator and holds the
 provisioning token: the backend uses it to create organisations, repositories,
-teams and protected tags, and never to act for a person. `unicon-ci` is an
+teams and protected tags, and never to act for a person.
+`UNICON_FORGE_PLATFORM_ACCOUNT` names it to the backend, which reserves the
+protected tags for that one account. `unicon-ci` is an
 ordinary account that Woodpecker signs in as. Two accounts rather than one,
 because Woodpecker insists on a real forge login for its own user and the
 site-administrator token must not sit in Woodpecker's database.
