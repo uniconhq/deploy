@@ -11,9 +11,10 @@
 # Every port opened here is bound to 127.0.0.1. A published port with no host
 # address listens on every interface, so on a laptop joined to a conference
 # network the database and the object store would be on that network too.
-# Forgejo's port is the exception and stays in compose.yaml unbound: the
-# Woodpecker container reaches it through the Docker host gateway, which is not
-# loopback.
+#
+# Forgejo is at http://forge.localhost:8080 in a browser, through the proxy,
+# the same as in production. Browsers and most resolvers answer any name under
+# .localhost with loopback, so no hosts entry is needed.
 
 services:
   postgres:
@@ -36,6 +37,11 @@ services:
       - "127.0.0.1:3903:3903"
 
   forgejo:
+    # Loopback only, for scripts/check-lfs.py, which drives the API from this
+    # machine. Nothing else uses it: the browser goes through the proxy, and
+    # bootstrap drives the API from inside the container.
+    ports:
+      - "127.0.0.1:3300:3000"
     environment:
       # Dev only. A production instance decides registration deliberately and
       # has a mailer, so neither of these belongs in the committed app.ini.
@@ -50,14 +56,11 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     # Woodpecker uses the public Forgejo URL for the whole OAuth exchange, the
-    # server-side token request included, so http://localhost:3300 has to mean
-    # something inside this container too. The entry is appended after Docker's
-    # own `127.0.0.1 localhost`, so a connection to localhost tries loopback
-    # first and the host second: Woodpecker still reaches its own port 8000 on
-    # loopback, and reaches Forgejo on the published port. A deployment where
-    # Forgejo has a real name does not need this.
+    # server-side token request included, so forge.localhost has to mean
+    # something inside this container too: the host, whose port 8080 is the
+    # proxy. A deployment where Forgejo has a real name does not need this.
     extra_hosts:
-      - "localhost:host-gateway"
+      - "forge.localhost:host-gateway"
 
   # Same build and same tag as backend, so the image is built once and both
   # services run it.
