@@ -98,7 +98,8 @@ $COMPOSE up -d --build backend-migrate backend
 $COMPOSE up -d --build frontend
 ```
 
-`backend-migrate` runs `unicon migrate` and exits; the backend image does not
+`backend-migrate` runs `unicon-forge migrate`, the forge package's command,
+from the backend image, and exits; the backend image does not
 migrate on its own, and `backend` waits for it to finish successfully. Both use
 the same build and the same image tag, so the build happens once. The build
 takes the `backend` checkout as its context, which has to sit beside this
