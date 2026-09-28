@@ -93,6 +93,52 @@ jobs:
           curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
           curl -fsS http://localhost:8080/openapi.json | grep -q '"openapi"'
 
+      # What the proxy exposes and nothing more. The forge host answers its
+      # sign-in and account pages; its web UI, its API, token minting and git
+      # over HTTP are 404. The app host serves its listed routes and refuses
+      # the rest. Both carry the security headers on every answer.
+      - name: only the listed paths are reachable
+        working-directory: deploy
+        run: |
+          app="http://localhost:8080"
+          forge="http://forge.localhost:8080"
+          resolve="--resolve forge.localhost:8080:127.0.0.1"
+          status() { curl -s -o /dev/null -w '%{http_code}' $resolve "$1"; }
+          expect() {
+            got="$(status "$2")"
+            if [ "$got" != "$1" ]; then echo "$2 answered $got, expected $1"; exit 1; fi
+            echo "$1 $2"
+          }
+          expect 200 "$app/"
+          expect 200 "$app/login"
+          expect 200 "$app/account"
+          expect 404 "$app/some/unlisted/path"
+          expect 404 "$app/.env"
+          expect 404 "$app/index.html"
+          expect 200 "$forge/user/login"
+          expect 200 "$forge/assets/css/unicon.css"
+          expect 303 "$forge/user/settings"
+          expect 303 "$forge/login/oauth/authorize"
+          expect 404 "$forge/user/settings/applications"
+          expect 404 "$forge/user/settings/keys"
+          expect 404 "$forge/api/v1/version"
+          expect 404 "$forge/api/swagger"
+          expect 404 "$forge/explore"
+          expect 404 "$forge/unicon"
+          expect 404 "$forge/unicon/x.git/info/refs?service=git-receive-pack"
+          expect 404 "$forge/unicon/x.git/info/refs?service=git-upload-pack"
+          curl -fsS $resolve "$forge/user/login" | grep -q unicon.css
+          for url in "$app/" "$forge/user/login" "$app/nothing-here"; do
+            curl -s -D - -o /dev/null $resolve "$url" > headers.txt
+            grep -qi '^x-content-type-options: nosniff' headers.txt
+            grep -qi '^x-frame-options: deny' headers.txt
+            grep -qi "^content-security-policy: frame-ancestors 'none'" headers.txt
+            grep -qi '^referrer-policy: same-origin' headers.txt
+          done
+          if docker ps --format '{{.Ports}}' | grep -q '0.0.0.0:3300'; then
+            echo "Forgejo is published on every interface"; exit 1
+          fi
+
       - name: a 500 MB file reaches object storage through the forge
         working-directory: deploy
         run: uv run scripts/check-lfs.py --exact
