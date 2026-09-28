@@ -35,7 +35,8 @@ That is the whole thing. It generates every secret, writes `.env`, and starts
 the services in the order they need each other: Garage first, because Forgejo
 needs an S3 key before it opens its LFS storage; then Forgejo, because
 Woodpecker will not start without an OAuth client that only a Forgejo
-administrator can create; then Woodpecker and the proxy.
+administrator can create; then the proxy, because the Woodpecker sign-in goes
+through Forgejo's pages on it; then Woodpecker.
 
 Run it again whenever you like. Every step checks before it creates, so a second
 run reports what was already there and creates nothing new. It is not a no-op:

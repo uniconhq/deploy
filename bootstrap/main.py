@@ -3,9 +3,9 @@
 Garage first, because Forgejo needs an S3 key in its environment before it
 starts or it would store the first LFS objects on local disk and only move to
 Garage after a restart. Forgejo next, because Woodpecker will not start without
-the OAuth client that only a Forgejo administrator can create. Woodpecker last,
-then the proxy, which holds no bootstrap state of its own and is started so
-that one command leaves the stack answering on its public URL.
+the OAuth client that only a Forgejo administrator can create. The proxy next,
+because Forgejo's sign-in pages are reached through it, and minting the
+Woodpecker token signs in there. Woodpecker last.
 
 Every step checks before it creates, and .env is rewritten after each one, so an
 interrupted run can be resumed by running it again.
@@ -115,8 +115,8 @@ def main(argv: list[str] | None = None) -> int:
         _start_forgejo(compose, values, summary)
         envfile.write(env_path, template, values)
 
-        _start_woodpecker(compose, values, summary)
         compose.up("proxy")
+        _start_woodpecker(compose, values, summary)
         envfile.write(env_path, template, values)
 
         _restart_backend_if_values_changed(compose, previous, values)
