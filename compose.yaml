@@ -117,6 +117,18 @@ services:
       # command, so these two cannot demand a value the way the rest do.
       FORGEJO__lfs__MINIO_ACCESS_KEY_ID: ${FORGEJO_S3_ACCESS_KEY}
       FORGEJO__lfs__MINIO_SECRET_ACCESS_KEY: ${FORGEJO_S3_SECRET_KEY}
+      # The mail server the confirmation and password-reset mail goes through,
+      # from .env. MAIL_ENABLED and MAIL_PROTOCOL are bootstrap's: the mailer
+      # is on exactly when MAIL_SMTP_ADDR is set, and it always encrypts, TLS
+      # from the start on 465 and STARTTLS required on any other port, so the
+      # mail server's password never crosses the network in the clear.
+      FORGEJO__mailer__ENABLED: ${MAIL_ENABLED:-false}
+      FORGEJO__mailer__PROTOCOL: ${MAIL_PROTOCOL:-smtp+starttls}
+      FORGEJO__mailer__SMTP_ADDR: ${MAIL_SMTP_ADDR:-}
+      FORGEJO__mailer__SMTP_PORT: ${MAIL_SMTP_PORT:-587}
+      FORGEJO__mailer__USER: ${MAIL_SMTP_USER:-}
+      FORGEJO__mailer__PASSWD: ${MAIL_SMTP_PASSWORD:-}
+      FORGEJO__mailer__FROM: ${MAIL_FROM:-}
     volumes:
       - forgejo-data:/data
       - ./forgejo/app.ini:/etc/unicon/forgejo/app.ini:ro
