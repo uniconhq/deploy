@@ -4,9 +4,10 @@
 #
 # It does four things: builds backend and frontend from the sibling checkouts
 # instead of pulling images, publishes the internal services so tools on this
-# machine can reach them, loosens Forgejo enough that a person can create an
-# account without a mail server, and can run one CI agent on this machine
-# under the `agent` profile.
+# machine can reach them, opens Forgejo's sign-up and catches its mail in
+# Mailpit, so a person can make an account and confirm its address from
+# http://localhost:8025, and can run one CI agent on this machine under the
+# `agent` profile.
 #
 # Every port opened here is bound to 127.0.0.1. A published port with no host
 # address listens on every interface, so on a laptop joined to a conference
@@ -43,13 +44,29 @@ services:
     ports:
       - "127.0.0.1:3300:3000"
     environment:
-      # Dev only. A production instance decides registration deliberately and
-      # has a mailer, so neither of these belongs in the committed app.ini.
+      # Dev only. A production instance decides sign-up deliberately, with a
+      # mail server of its own in .env. Here sign-up is open and every mail
+      # goes to Mailpit, so an address is confirmed the same way as in
+      # production, by the link in the mail.
       FORGEJO__service__DISABLE_REGISTRATION: "false"
-      FORGEJO__service__REGISTER_EMAIL_CONFIRM: "false"
       FORGEJO__service__REGISTER_MANUAL_CONFIRM: "false"
-      FORGEJO__mailer__ENABLED: "false"
+      FORGEJO__mailer__ENABLED: "true"
+      # Plain SMTP to Mailpit, on the compose network and holding no password.
+      FORGEJO__mailer__PROTOCOL: smtp
+      FORGEJO__mailer__SMTP_ADDR: mailpit
+      FORGEJO__mailer__SMTP_PORT: "1025"
+      FORGEJO__mailer__USER: ""
+      FORGEJO__mailer__PASSWD: ""
+      FORGEJO__mailer__FROM: "Unicon <forgejo@forge.localhost>"
       FORGEJO__log__LEVEL: Info
+
+  # Every mail Forgejo sends in development: sign-up confirmations and
+  # password resets, read at http://localhost:8025. It delivers nothing.
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8025:8025"
 
   woodpecker-server:
     # The operator interface, and the URL bootstrap drives to mint the CI token.
