@@ -123,10 +123,13 @@ curl -i http://localhost:8080/-/proxy       # 204, nginx itself
 curl http://localhost:8080/openapi.json     # what the frontend generates from
 ```
 
-One origin holds all of it: the frontend on `/`, the API on `/api/`, the health
-endpoints, `/-/proxy` for the proxy's own healthcheck, and `/openapi.json`,
-which the frontend reads with
-`pnpm gen:api --from http://localhost:8080/openapi.json`. The access log drops
+One origin holds all of it: the frontend on `/` and its pages, every organiser
+page under `/orgs`, the API on `/api/`, the health endpoints, `/-/proxy` for the
+proxy's own healthcheck, and `/openapi.json`, which the frontend reads with
+`pnpm gen:api --from http://localhost:8080/openapi.json`. The one API path the
+proxy refuses is `/api/v1/events/`: the forge pushes an org's events to the
+backend inside the stack, at `UNICON_INTERNAL_URL`, and nothing outside has a
+reason to call it. The access log drops
 the query string of `/api/v1/auth/callback`, so the login `code` and `state`
 never reach disk.
 
@@ -162,14 +165,34 @@ each side. It creates no other bucket and removes none. A Woodpecker API token
 for `unicon-ci`. No CI agent: a grading machine enrols itself with a token from
 the CI's Agents page.
 
+One workflow at the forge. Bootstrap makes the platform org `unicon`, owned by
+`unicon-backend`, and in it the public repository `unicon/classic.workflow`
+with the topic `unicon-workflow`, holding `workflow.yaml` and `README.md` from
+`workflows/classic/` in one commit, tagged `v1`. That is the built-in workflow
+`unicon/classic@v1`: compile, run on every testcase, diff against the answer.
+It is seeded now because a task's first save has to find a workflow the
+organiser can read, or nothing can be published. The primitives it names and
+the image digests behind them arrive with the first grading, feature 6; until
+then a save can read the workflow and nothing can run it. A repository that
+already has a commit is left as it is, so a later change to the definition is
+a new version, never a rewrite of `v1`.
+
 All of it lands in `.env`, which is git-ignored. `.env.example` lists every key
 with a comment and is the template bootstrap fills, so a key added there appears
-in the next generated `.env`.
+in the next generated `.env`. Two of its keys are settings rather than
+secrets, with defaults bootstrap writes as they are: `UNICON_INTERNAL_URL`,
+`http://backend:8000`, is where the forge reaches Unicon inside the stack,
+which is where every org's event push points and why `forgejo/app.ini` allows
+the host `backend` for webhooks; `UNICON_ORG_CREATION_OPEN`, `true`, lets any
+signed-in person create an org, and a deployment open to strangers sets it to
+`false` and creates orgs with `unicon create-org`.
 
 ## The forge's account pages
 
 Forgejo serves its own sign-in, sign-up, OAuth consent and account settings
-pages, and people see them whenever the app sends them to the forge. What makes
+pages, and people see them whenever the app sends them to the forge. Someone
+the operator made with `unicon create-account` also meets its page for
+changing the first password, at their first sign-in. What makes
 those pages look like Unicon is under `forgejo/custom/`, which compose mounts
 read-only into Forgejo's custom path, `/data/gitea`:
 

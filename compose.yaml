@@ -17,6 +17,9 @@ x-backend-env: &backend-env
   UNICON_DATABASE_URL: ${UNICON_DATABASE_URL}
   UNICON_FORGE_PUBLIC_URL: ${UNICON_FORGE_PUBLIC_URL}
   UNICON_FORGE_INTERNAL_URL: ${UNICON_FORGE_INTERNAL_URL}
+  # The backend's own address inside the stack, where the forge's org event
+  # push is aimed. forgejo/app.ini allows the host `backend` for it.
+  UNICON_INTERNAL_URL: ${UNICON_INTERNAL_URL}
   UNICON_FORGE_ADMIN_TOKEN: ${UNICON_FORGE_ADMIN_TOKEN}
   # The account the admin token belongs to, the one account protected tags are
   # reserved for.
@@ -40,6 +43,9 @@ x-backend-env: &backend-env
   # Closed by default, like a production Forgejo. compose.dev.yaml turns it
   # on in the same place it opens Forgejo registration, so the two agree.
   UNICON_FORGE_REGISTRATION_OPEN: ${UNICON_FORGE_REGISTRATION_OPEN:-false}
+  # Any signed-in person may create an org. A deployment open to strangers
+  # turns it off and creates orgs with `unicon create-org`.
+  UNICON_ORG_CREATION_OPEN: ${UNICON_ORG_CREATION_OPEN:-true}
   # Which implementation sits behind the forge port.
   UNICON_FORGE: ${UNICON_FORGE:-forgejo}
 

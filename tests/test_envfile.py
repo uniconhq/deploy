@@ -113,3 +113,16 @@ def test_a_write_that_fails_keeps_the_previous_file(
         envfile.write(path, template, {"FILLED": "second"})
 
     assert "FILLED=first" in path.read_text(encoding="utf-8").splitlines()
+
+
+def test_a_key_the_template_gained_since_env_was_written_takes_its_default(
+    template: Path,
+) -> None:
+    """A rerun over an older .env carries the new key at the template's
+    default, and a value the older .env holds wins over the template's."""
+    from bootstrap.main import _starting_values
+
+    values = _starting_values(template, {"FILLED": "kept", "KEPT": "from .env"})
+
+    assert values == {"FILLED": "kept", "KEPT": "from .env"}
+    assert _starting_values(template, {}) == {"KEPT": "from the template"}
