@@ -70,6 +70,11 @@ docker compose -f compose.yaml -f compose.dev.yaml down -v     # throw it away
 Without `-f compose.dev.yaml` you get the production shape: images by tag,
 nothing published to the host except the proxy on 8080, Forgejo with
 registration closed, and the landing page not offering Create account.
+Opening sign-up there takes a mail server in `.env` (`MAIL_SMTP_ADDR` and the
+rest): everyone who signs themselves up confirms their address by the link
+in a mail, a contest's email pattern trusts only confirmed addresses, and
+Forgejo drops the confirmation without a word when it cannot send mail, so
+bootstrap refuses `UNICON_FORGE_REGISTRATION_OPEN=true` without one.
 Forgejo has no port of its own: people reach its sign-in, sign-up, OAuth and
 account pages through the proxy on `FORGEJO_PUBLIC_URL`, its own hostname,
 and the proxy answers 404 for everything else of it, the web UI, the API,
@@ -124,7 +129,8 @@ curl http://localhost:8080/openapi.json     # what the frontend generates from
 ```
 
 One origin holds all of it: the frontend on `/` and its pages, every organiser
-page under `/orgs`, the API on `/api/`, the health endpoints, `/-/proxy` for the
+page under `/orgs`, a contest's page and its tasks' pages under `/contests/`,
+the API on `/api/`, the health endpoints, `/-/proxy` for the
 proxy's own healthcheck, and `/openapi.json`, which the frontend reads with
 `pnpm gen:api --from http://localhost:8080/openapi.json`. The one API path the
 proxy refuses is `/api/v1/events/`: the forge pushes an org's events to the
@@ -138,8 +144,9 @@ on the same proxy under its own hostname, so the two never share cookies. Any
 name under `.localhost` is loopback for browsers and most resolvers, so no
 hosts entry is needed; the Woodpecker container reaches the same name through
 the Docker host gateway for its OAuth token request. Sign in through the app;
-Forgejo is where the account lives. In development Forgejo accepts new
-registrations with no mail server, so you can make one. The dev override also
+Forgejo is where the account lives. In development Forgejo takes new
+sign-ups and sends its mail to Mailpit, which delivers nothing: the
+confirmation link for an account you make is at http://localhost:8025. The dev override also
 publishes Forgejo on `127.0.0.1:3300` for `scripts/check-lfs.py`, which
 drives its API from this machine; nothing else uses that port.
 
