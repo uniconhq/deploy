@@ -112,7 +112,7 @@ class Forgejo:
     def token_is_valid(self, token: str) -> bool:
         if not token:
             return False
-        status, _ = self._api("GET", "/user", token=token)
+        status, _ = self.api("GET", "/user", token=token)
         return status == 200
 
     def mint_access_token(self, username: str, password: str) -> str:
@@ -123,15 +123,15 @@ class Forgejo:
         rather than the run failing.
         """
         auth = (username, password)
-        for token in _ok(self._api("GET", f"/users/{username}/tokens", auth=auth)):
+        for token in _ok(self.api("GET", f"/users/{username}/tokens", auth=auth)):
             if token["name"] == PROVISIONING_TOKEN_NAME:
                 _ok(
-                    self._api(
+                    self.api(
                         "DELETE", f"/users/{username}/tokens/{token['id']}", auth=auth
                     )
                 )
         created = _ok(
-            self._api(
+            self.api(
                 "POST",
                 f"/users/{username}/tokens",
                 auth=auth,
@@ -155,9 +155,7 @@ class Forgejo:
         and recreated.
         """
         auth = (owner, owner_password)
-        for application in _ok(
-            self._api("GET", "/user/applications/oauth2", auth=auth)
-        ):
+        for application in _ok(self.api("GET", "/user/applications/oauth2", auth=auth)):
             if application["name"] != name:
                 continue
             if (
@@ -167,14 +165,14 @@ class Forgejo:
             ):
                 return known, False
             _ok(
-                self._api(
+                self.api(
                     "DELETE",
                     f"/user/applications/oauth2/{application['id']}",
                     auth=auth,
                 )
             )
         created = _ok(
-            self._api(
+            self.api(
                 "POST",
                 "/user/applications/oauth2",
                 auth=auth,
@@ -187,7 +185,7 @@ class Forgejo:
         )
         return OAuthApplication(created["client_id"], created["client_secret"]), True
 
-    def _api(
+    def api(
         self,
         method: str,
         path: str,

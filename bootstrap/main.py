@@ -10,6 +10,11 @@ Woodpecker token signs in there. Woodpecker last.
 Every step checks before it creates, and .env is rewritten after each one, so an
 interrupted run can be resumed by running it again.
 
+After the accounts and the OAuth applications, the forge is seeded with the
+built-in workflow unicon/classic@v1 (workflows.py): a task's first save has to
+find a workflow the organiser can read, and until the primitives arrive with
+feature 6 this is the one thing at the forge a task can name.
+
 Four Garage buckets and no other: FORGEJO_LFS_BUCKET for Forgejo, and the three
 in UNICON_BUCKETS for the backend, where unicon-uploads holds what a browser
 uploads before a submit, unicon-results the grading logs, and unicon-exports is
@@ -44,6 +49,15 @@ from bootstrap.garage import Garage, GarageError
 from bootstrap.readiness import NotReady, wait_for
 from bootstrap.summary import Summary
 from bootstrap.woodpecker import Woodpecker, WoodpeckerError
+from bootstrap.workflows import (
+    CLASSIC,
+    CLASSIC_REPO,
+    CLASSIC_VERSION,
+    PLATFORM_ORG,
+    WORKFLOW_TOPIC,
+    Workflows,
+    seed_files,
+)
 
 BACKEND_ACCOUNT = "unicon-backend"
 CI_ACCOUNT = "unicon-ci"
@@ -114,6 +128,8 @@ def main(argv: list[str] | None = None) -> int:
 
         _start_forgejo(compose, values, summary)
         envfile.write(env_path, template, values)
+
+        _seed_workflows(compose, options.directory, values, summary)
 
         compose.up("proxy")
         _start_woodpecker(compose, values, summary)
@@ -337,6 +353,37 @@ def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -
     values["WOODPECKER_FORGEJO_CLIENT"] = woodpecker_app.client_id
     values["WOODPECKER_FORGEJO_SECRET"] = woodpecker_app.client_secret
     summary.record("forgejo oauth application Woodpecker", created)
+
+
+def _seed_workflows(
+    compose: Compose, directory: Path, values: dict[str, str], summary: Summary
+) -> None:
+    """The platform org and the built-in workflow unicon/classic@v1 in it."""
+    forgejo = Forgejo(compose, "forgejo")
+    workflows = Workflows(forgejo, values["UNICON_FORGE_ADMIN_TOKEN"])
+    summary.record(
+        f"forgejo organisation {PLATFORM_ORG}", workflows.ensure_platform_org()
+    )
+    workflow = f"{PLATFORM_ORG}/{CLASSIC}"
+    summary.record(
+        f"workflow {workflow} repository",
+        workflows.ensure_repository(PLATFORM_ORG, CLASSIC_REPO),
+    )
+    head, created = workflows.ensure_first_commit(
+        PLATFORM_ORG,
+        CLASSIC_REPO,
+        seed_files(directory, CLASSIC),
+        message=f"Seed {workflow}@{CLASSIC_VERSION}",
+    )
+    summary.record(f"workflow {workflow} files", created)
+    summary.record(
+        f"workflow {workflow} mark {WORKFLOW_TOPIC}",
+        workflows.ensure_mark(PLATFORM_ORG, CLASSIC_REPO, WORKFLOW_TOPIC),
+    )
+    summary.record(
+        f"workflow {workflow} version {CLASSIC_VERSION}",
+        workflows.ensure_version(PLATFORM_ORG, CLASSIC_REPO, CLASSIC_VERSION, head),
+    )
 
 
 def _start_woodpecker(
