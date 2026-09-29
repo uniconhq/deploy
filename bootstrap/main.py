@@ -227,7 +227,11 @@ def _derive_values(values: dict[str, str]) -> None:
     interrupted run still leaves a .env the services can start from.
 
     FORGEJO_DOMAIN follows FORGEJO_PUBLIC_URL, because Forgejo puts DOMAIN in
-    clone URLs and mail, and a value set twice drifts. UNICON_FORGE_PUBLIC_URL
+    clone URLs and mail, and a value set twice drifts. MAIL_ENABLED follows
+    MAIL_SMTP_ADDR, so Forgejo's mailer is on exactly when there is a server
+    to send through, and MAIL_PROTOCOL follows MAIL_SMTP_PORT, so the mail
+    is always encrypted: TLS from the start on 465, STARTTLS required on any
+    other port. UNICON_FORGE_PUBLIC_URL
     is a copy of the same URL, because the backend sends people to the Forgejo
     their browser uses: two keys for one URL is two chances to disagree, and
     the symptom of disagreeing is a login redirect to a host the browser cannot
@@ -243,6 +247,27 @@ def _derive_values(values: dict[str, str]) -> None:
         raise ValueError(f"FORGEJO_PUBLIC_URL has no host: {public_url}")
     values["FORGEJO_DOMAIN"] = host
     values["UNICON_FORGE_PUBLIC_URL"] = public_url
+    values["MAIL_ENABLED"] = "true" if values.get("MAIL_SMTP_ADDR") else "false"
+    values["MAIL_PROTOCOL"] = (
+        "smtps" if values.get("MAIL_SMTP_PORT") == "465" else "smtp+starttls"
+    )
+    refuse_sign_up_without_mail(values)
+
+
+def refuse_sign_up_without_mail(values: dict[str, str]) -> None:
+    """Stop when sign-up is open and there is no mail server. Forgejo turns
+    its address confirmation off without a word when it cannot send mail, and
+    a contest's email_pattern would then let in anyone who types an address.
+    """
+    if values.get("UNICON_FORGE_REGISTRATION_OPEN") == "true" and not values.get(
+        "MAIL_SMTP_ADDR"
+    ):
+        raise ValueError(
+            "UNICON_FORGE_REGISTRATION_OPEN is true but MAIL_SMTP_ADDR is empty. "
+            "People who sign themselves up confirm their address by mail, and "
+            "without a mail server Forgejo would confirm nobody. Set the MAIL_* "
+            "values in .env, or keep sign-up closed."
+        )
 
 
 def _generate_missing_secrets(values: dict[str, str], summary: Summary) -> None:
