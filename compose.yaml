@@ -48,6 +48,25 @@ x-backend-env: &backend-env
   UNICON_ORG_CREATION_OPEN: ${UNICON_ORG_CREATION_OPEN:-true}
   # Which implementation sits behind the forge port.
   UNICON_FORGE: ${UNICON_FORGE:-forgejo}
+  # Object storage: Garage inside the network, the access key bootstrap made
+  # for the backend, and the two buckets it uses. What a browser uploads
+  # before a submit goes to the first, the grading logs to the second, both
+  # through presigned URLs the proxy passes to Garage untouched.
+  UNICON_S3_ENDPOINT: ${UNICON_S3_ENDPOINT}
+  UNICON_S3_REGION: ${UNICON_S3_REGION}
+  UNICON_S3_ACCESS_KEY: ${UNICON_S3_ACCESS_KEY}
+  UNICON_S3_SECRET_KEY: ${UNICON_S3_SECRET_KEY}
+  UNICON_S3_UPLOADS_BUCKET: ${UNICON_S3_UPLOADS_BUCKET}
+  UNICON_S3_RESULTS_BUCKET: ${UNICON_S3_RESULTS_BUCKET}
+  # Where a grading machine reaches the platform: the envelope, the callback
+  # and the log upload. The public URL unless .env says otherwise;
+  # compose.dev.yaml points it at the proxy's name on this network, which the
+  # dev agent's steps join.
+  UNICON_MACHINE_URL: ${UNICON_MACHINE_URL:-${UNICON_PUBLIC_URL}}
+  # The harness every plan runs, and the image the CI checks the task and the
+  # submission out with, both by digest from the image manifest (images.json).
+  UNICON_HARNESS_IMAGE: ${UNICON_HARNESS_IMAGE}
+  UNICON_CLONE_IMAGE: ${UNICON_CLONE_IMAGE}
 
 services:
   postgres:
@@ -193,7 +212,30 @@ services:
       # shows this, which is why it has to be right from the first deployment.
       WOODPECKER_DATABASE_DRIVER: postgres
       WOODPECKER_DATABASE_DATASOURCE: postgres://woodpecker:${WOODPECKER_DB_PASSWORD:?set by bootstrap}@postgres:5432/woodpecker?sslmode=disable
-      # Minutes. A grading job still running after half an hour is stuck.
+      # Every run asks the backend what it is, and nothing else does: the
+      # configuration extension is exclusive, so Woodpecker never reads a
+      # pipeline file from a repository, and a repository with one in it runs
+      # nothing of it. The backend answers only for a grading it dispatched,
+      # checking the server's signature on the request. `private` lets the
+      # server call an address inside this network; the default refuses it
+      # and Woodpecker then answers the dispatch with an empty 204.
+      WOODPECKER_CONFIG_EXTENSION_ENDPOINT: ${UNICON_INTERNAL_URL:-http://backend:8000}/api/v1/ci/config
+      WOODPECKER_CONFIG_EXTENSION_EXCLUSIVE: "true"
+      WOODPECKER_EXTENSIONS_ALLOWED_HOSTS: private
+      # The one image a clone step may hand the repository credential to:
+      # the platform's clone image, by the digest bootstrap took from the
+      # image manifest. A step on this list gets the credential without the
+      # repository being trusted with it, which is how a task repository
+      # clones with `security` trust off. An entry with a digest matches that
+      # digest alone. Setting the list replaces Woodpecker's own, so its git
+      # plugin, which no grading run uses, is lent nothing: every run's two
+      # checkouts are the clone image, named in the extension's answer.
+      WOODPECKER_PLUGINS_TRUSTED_CLONE: ${UNICON_CLONE_IMAGE}
+      # Minutes. The forge's clock is built on the default: a run gets 30
+      # minutes (RUN_TIMEOUT in the forge package), of which it allows the
+      # checkouts 4 and the reports 1, and caps a harness's wall time at the
+      # 25 left. A grading run still going after that is stuck. Change the two
+      # together.
       WOODPECKER_MAX_PIPELINE_TIMEOUT: "60"
       WOODPECKER_DEFAULT_PIPELINE_TIMEOUT: "30"
       WOODPECKER_LOG_LEVEL: info

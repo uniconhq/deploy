@@ -48,14 +48,20 @@ jobs:
   # this job rather than starting a stack of their own.
   stack:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       # compose.dev.yaml builds backend and frontend from the sibling
-      # checkouts, so the three repos sit beside each other the way they do on
-      # a laptop.
+      # checkouts, with the forge checkout handed to the backend's build as
+      # the context `forge`, and scripts/build-images.py builds the grading
+      # images from the runner and the three primitives, so the repos sit
+      # beside each other the way they do on a laptop.
       - uses: actions/checkout@v7
         with:
           path: deploy
+      - uses: actions/checkout@v7
+        with:
+          repository: uniconhq/forge
+          path: forge
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/backend
@@ -64,6 +70,22 @@ jobs:
         with:
           repository: uniconhq/frontend
           path: frontend
+      - uses: actions/checkout@v7
+        with:
+          repository: uniconhq/runner
+          path: runner
+      - uses: actions/checkout@v7
+        with:
+          repository: uniconhq/primitive-compile
+          path: primitive-compile
+      - uses: actions/checkout@v7
+        with:
+          repository: uniconhq/primitive-sandbox-run
+          path: primitive-sandbox-run
+      - uses: actions/checkout@v7
+        with:
+          repository: uniconhq/primitive-diff-check
+          path: primitive-diff-check
 
       - uses: astral-sh/setup-uv@v10.1.0
         with:
@@ -71,6 +93,12 @@ jobs:
 
       - run: uv sync --frozen
         working-directory: deploy
+
+      # Into a registry on localhost, for real digests; images.local.json
+      # then tells bootstrap what to seed the forge with.
+      - name: build the grading images
+        working-directory: deploy
+        run: uv run scripts/build-images.py
 
       - name: bootstrap a fresh stack
         working-directory: deploy
@@ -120,6 +148,10 @@ jobs:
           expect 404 "$app/contests"
           expect 404 "$app/contestsx"
           expect 404 "$app/api/v1/events/forge/acme"
+          expect 404 "$app/api/v1/ci/config"
+          expect 404 "$app/unicon-uploads/uploads/x"
+          expect 404 "$app/unicon-results/logs/x"
+          expect 404 "$app/forgejo-lfs/lfs/x"
           expect 404 "$app/some/unlisted/path"
           expect 404 "$app/.env"
           expect 404 "$app/index.html"
@@ -148,18 +180,103 @@ jobs:
             echo "Forgejo is published on every interface"; exit 1
           fi
 
+      # The extension refuses every method from outside, and object storage
+      # takes only the writes it is routed for. A write with no signature
+      # reaches Garage and is refused there with 403.
+      - name: the machine paths take only what they are for
+        working-directory: deploy
+        run: |
+          app="http://localhost:8080"
+          expect() {
+            got="$(curl -s -o /dev/null -w '%{http_code}' -X "$2" "$3")"
+            if [ "$got" != "$1" ]; then echo "$2 $3 answered $got, expected $1"; exit 1; fi
+            echo "$1 $2 $3"
+          }
+          expect 404 POST "$app/api/v1/ci/config"
+          expect 403 PUT "$app/unicon-uploads/uploads/x"
+          expect 403 PUT "$app/unicon-results/logs/x"
+          expect 404 POST "$app/unicon-results/logs/x"
+          expect 404 DELETE "$app/unicon-uploads/uploads/x"
+
+      # The development git listener every grading step has as its HTTP
+      # proxy. A checkout's reads of the forge's host reach Forgejo, which
+      # asks for the credential; a push, the API, a path that only turns into
+      # a checkout path once nginx resolves it, and every other host are 404.
+      - name: a step's HTTP proxy passes checkout reads and nothing else
+        working-directory: deploy
+        run: |
+          forge="http://forge.localhost:8080"
+          repo="$forge/unicon/classic.workflow.git"
+          expect() {
+            want="$1"; shift
+            got="$(docker compose -f compose.yaml -f compose.dev.yaml exec -T proxy \
+              curl -s -o /dev/null -w '%{http_code}' --path-as-is -x http://127.0.0.1:3128 "$@")"
+            if [ "$got" != "$want" ]; then echo "$* answered $got, expected $want"; exit 1; fi
+            echo "$want $*"
+          }
+          expect 401 "$repo/info/refs?service=git-upload-pack"
+          expect 404 "$repo/info/refs?service=git-receive-pack"
+          expect 404 -X POST "$repo/git-receive-pack"
+          expect 404 -X PUT "$repo/info/lfs/objects/$(printf '0%.0s' $(seq 64))"
+          expect 404 "$forge/api/v1/version"
+          expect 404 "$forge/api/v1/users/../../../unicon/classic.workflow.git/info/refs?service=git-upload-pack"
+          expect 404 "$forge/unicon/x.git/info/lfs/objects/batch/../../../../api/v1/version"
+          expect 404 "http://forgejo:3000/api/v1/version"
+          expect 404 -X POST "http://backend:8000/api/v1/ci/config"
+          expect 404 "http://woodpecker-server:8000/api/agents"
+
+      # The grading machine of the dev overlay: the agent bootstrap enrolled
+      # connects with the token it wrote, as a global agent that takes
+      # pool=platform runs.
+      - name: the dev agent connects
+        working-directory: deploy
+        run: |
+          docker compose -f compose.yaml -f compose.dev.yaml --profile agent up -d woodpecker-agent
+          token="$(grep '^UNICON_WOODPECKER_TOKEN=' .env | cut -d= -f2-)"
+          connected='
+          import json, sys
+          laptop = [a for a in json.load(open("agents.json")) if a["name"] == "laptop"]
+          ok = bool(laptop) and laptop[0]["last_contact"] > 0 and laptop[0]["org_id"] == -1
+          sys.exit(0 if ok and laptop[0]["custom_labels"].get("pool") == "platform" else 1)
+          '
+          for _ in $(seq 1 30); do
+            curl -fsS -H "Authorization: Bearer $token" http://localhost:8000/api/agents > agents.json
+            if python3 -c "$connected"; then echo "laptop connected"; exit 0; fi
+            sleep 2
+          done
+          echo "the dev agent never connected"; exit 1
+
+      # A browser from a new org to two verdicts: the organiser pages, the
+      # contestant's registration and approval, the submit panel, and a real
+      # grading run on the dev agent for the sample solution and a wrong one.
+      - name: submit and grade from the browser
+        working-directory: deploy
+        env:
+          UNICON_E2E_URL: http://localhost:8080
+        run: |
+          uv run playwright install --with-deps chromium
+          uv run pytest tests/e2e -v
+
       - name: a 500 MB file reaches object storage through the forge
         working-directory: deploy
         run: uv run scripts/check-lfs.py --exact
 
+      # Nothing is made the second time: no secret, no version, no agent.
+      # Its summary lists what was already there, the primitives and the
+      # workflow at v1 among them.
       - name: a second bootstrap changes nothing
         working-directory: deploy
         run: |
           cp .env .env.first
-          uv run bootstrap
+          uv run bootstrap | tee second-run.txt
           diff .env.first .env
+          grep -q '^created: 0,' second-run.txt
+          for name in unicon/compile unicon/sandbox-run unicon/diff-check; do
+            grep -q "present  primitive $name version v1" second-run.txt
+          done
+          grep -q 'present  workflow unicon/classic version v1$' second-run.txt
 
       - name: logs
         if: failure()
         working-directory: deploy
-        run: docker compose -f compose.yaml -f compose.dev.yaml --profile app logs --no-color | tail -300
+        run: docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color | tail -300

@@ -1,4 +1,4 @@
-"""Minting the Woodpecker API token for unicon-ci.
+"""Minting the Woodpecker API token for unicon-ci, and enrolling the dev agent.
 
 Woodpecker has no way to create a token except through its web UI, and the three
 steps this does are all forced (stack-test-findings.md 3.4):
@@ -15,10 +15,26 @@ issued this account stays valid until `DELETE /api/user/token` rotates the
 account's hash and invalidates all of them at once. So a token .env already
 holds is checked first and kept, and a run that cannot see a working one mints
 another instead of leaving a trail of live credentials behind it.
+
+With that token, which is an administrator's, it also enrols the development
+agent: `POST /api/agents` makes a global agent and answers with its token,
+which is what the agent connects with. Unlike the API token, an agent's token
+can be read back, so a run that finds the agent by name reuses it, the one
+whose token .env already holds when there are several.
+
+An agent row outlives the machine behind it, and one that declares the label
+grading runs ask for takes them again the moment anything connects with its
+token. So after enrolling, every other agent that declares that label or
+carries the development agent's name, and has not been heard from for an
+hour, is deleted. One still reporting is left and named, since something is
+running it.
 """
 
 from __future__ import annotations
 
+import time
+from dataclasses import dataclass
+from typing import Any
 from urllib.parse import urljoin
 
 import httpx
@@ -26,10 +42,24 @@ import httpx
 from bootstrap.htmlform import hidden_inputs
 
 _MAX_REDIRECTS = 12
+_AGENT_PAGE = 50
+SILENT_AGENT_SECONDS = 3600
 
 
 class WoodpeckerError(Exception):
     """The token dance did not end with a usable token."""
+
+
+@dataclass(frozen=True)
+class OtherAgents:
+    """What `remove_other_agents` found besides the kept agent: the names of
+    the silent ones it deleted, of the ones still reporting it left, and of
+    the silent ones the CI would not delete.
+    """
+
+    removed: tuple[str, ...]
+    reporting: tuple[str, ...]
+    refused: tuple[str, ...]
 
 
 class Woodpecker:
@@ -50,6 +80,103 @@ class Woodpecker:
             timeout=30.0,
         )
         return response.status_code == 200
+
+    def agents(self, token: str) -> list[dict[str, Any]]:
+        """Every agent the CI knows, global and per org, tokens included."""
+        headers = {"Authorization": f"Bearer {token}"}
+        found: list[dict[str, Any]] = []
+        page = 1
+        while True:
+            response = httpx.get(
+                f"{self._url}/api/agents",
+                params={"page": page, "perPage": _AGENT_PAGE},
+                headers=headers,
+                timeout=30.0,
+            )
+            if response.status_code != 200:
+                raise WoodpeckerError(
+                    f"GET /api/agents returned {response.status_code}"
+                )
+            listed = response.json() or []
+            found += listed
+            if len(listed) < _AGENT_PAGE:
+                return found
+            page += 1
+
+    def ensure_agent(self, token: str, name: str, known: str = "") -> tuple[str, bool]:
+        """The token of the global agent `name`, and whether this run
+        created the agent.
+
+        An agent the server knows by that name is kept, and its token read
+        back: Woodpecker returns an agent's token to an administrator, so a
+        lost .env costs nothing here. Of several by that name, the one whose
+        token is `known`, the one .env holds, is kept. A new one is made as a
+        global agent, which takes work from every org, the way a platform
+        machine does.
+        """
+        named = [
+            agent
+            for agent in self.agents(token)
+            if agent.get("name") == name and agent.get("token")
+        ]
+        for agent in named:
+            if known and agent["token"] == known:
+                return str(agent["token"]), False
+        if named:
+            return str(named[0]["token"]), False
+        response = httpx.post(
+            f"{self._url}/api/agents",
+            json={"name": name, "no_schedule": False},
+            headers={"Authorization": f"Bearer {token}"},
+            timeout=30.0,
+        )
+        created = response.json() if response.status_code in (200, 201) else {}
+        if not created.get("token"):
+            raise WoodpeckerError(f"POST /api/agents returned {response.status_code}")
+        return str(created["token"]), True
+
+    def remove_other_agents(
+        self,
+        token: str,
+        kept: str,
+        name: str,
+        label: tuple[str, str],
+        now: float | None = None,
+    ) -> OtherAgents:
+        """Delete every agent but the one holding the token `kept` that
+        carries the name `name` or declares the label `label`, and has not
+        been heard from for `SILENT_AGENT_SECONDS`: a leftover of an earlier
+        run or test that would take grading runs again the moment anything
+        connected with its token. An agent never heard from counts from when
+        it was made.
+        """
+        clock = time.time() if now is None else now
+        key, value = label
+        removed: list[str] = []
+        reporting: list[str] = []
+        refused: list[str] = []
+        for agent in self.agents(token):
+            labels = agent.get("custom_labels") or {}
+            if agent.get("token") == kept:
+                continue
+            if agent.get("name") != name and labels.get(key) != value:
+                continue
+            heard = max(
+                int(agent.get("last_contact") or 0), int(agent.get("created") or 0)
+            )
+            if clock - heard < SILENT_AGENT_SECONDS:
+                reporting.append(str(agent.get("name")))
+                continue
+            response = httpx.delete(
+                f"{self._url}/api/agents/{agent['id']}",
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=30.0,
+            )
+            if response.status_code < 300:
+                removed.append(str(agent.get("name")))
+            else:
+                refused.append(str(agent.get("name")))
+        return OtherAgents(tuple(removed), tuple(reporting), tuple(refused))
 
     def mint_token(self, username: str, password: str) -> str:
         with httpx.Client(follow_redirects=False, timeout=60.0) as browser:
