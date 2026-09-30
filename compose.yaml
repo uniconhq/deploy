@@ -281,13 +281,15 @@ services:
     # Deliberately no depends_on: the proxy comes up whether or not the app
     # services are running. See the comment in proxy/nginx.conf.
     # The file is a template: the image fills in ${FORGE_HOST}, the hostname
-    # Forgejo is served under, and the filter keeps it from touching any
-    # other dollar sign in the file, which are all nginx's own.
+    # Forgejo is served under, and ${APP_URL}, where the forge's sign-out sends
+    # the browser back to, and the filter keeps it from touching any other
+    # dollar sign in the file, which are all nginx's own.
     volumes:
       - ./proxy/nginx.conf:/etc/nginx/templates/default.conf.template:ro
     environment:
       FORGE_HOST: ${FORGEJO_DOMAIN:?set by bootstrap}
-      NGINX_ENVSUBST_FILTER: ^FORGE_HOST$$
+      APP_URL: ${UNICON_PUBLIC_URL:?set by bootstrap}
+      NGINX_ENVSUBST_FILTER: ^(FORGE_HOST|APP_URL)$$
     ports:
       - "8080:80"
     healthcheck:

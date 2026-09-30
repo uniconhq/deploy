@@ -8,7 +8,9 @@ The contestant registers, the organiser approves them from the contestants
 table, and the contestant submits the task's sample solution and then a
 wrong one from the submit panel. The first comes back `accepted` and the
 second `wrong_answer`, graded by the real CI, a real grading machine and the
-primitives at the forge.
+primitives at the forge. Then the contestant signs out, and signing in again
+asks Forgejo for their password: signing out of the app signed the browser
+out of Forgejo too.
 
 It runs against a stack that is already up with both profiles, `app` and
 `agent`, and is skipped unless `UNICON_E2E_URL` names the app, for example
@@ -268,3 +270,18 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
     assert verdict_of(contestant, 1) == "ACCEPTED"
     submit(contestant, 2, WRONG)
     assert verdict_of(contestant, 2) == "WRONG ANSWER"
+
+    contestant.get_by_role("button", name="Account menu").click()
+    with contestant.expect_response(
+        lambda answer: (
+            answer.url == f"{APP}/" and answer.request.is_navigation_request()
+        )
+    ):
+        contestant.get_by_role("menuitem", name="Sign out").click()
+    contestant.wait_for_load_state()
+    contestant.goto(f"{APP}/login?next=%2F")
+    contestant.get_by_role("main").get_by_role(
+        "link", name=re.compile("sign in", re.I)
+    ).first.click()
+    contestant.wait_for_url(re.compile(r"/user/login"))
+    expect(contestant.locator('input[name="password"]')).to_be_visible()
