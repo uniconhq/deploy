@@ -11,9 +11,20 @@ Every step checks before it creates, and .env is rewritten after each one, so an
 interrupted run can be resumed by running it again.
 
 After the accounts and the OAuth applications, the forge is seeded with the
-built-in workflow unicon/classic@v1 (workflows.py): a task's first save has to
-find a workflow the organiser can read, and until the primitives arrive with
-feature 6 this is the one thing at the forge a task can name.
+platform org and what is in it: the three primitives, mirrored from their
+repositories with the image digests of the image manifest written in
+(primitives.py, images.py), and the built-in workflow unicon/classic@v1 that
+wires them together (workflows.py). A task's first save has to find a
+workflow and its primitives the organiser can read, or nothing can be
+published. The manifest also gives the harness, clone and socket filter
+images, which go into .env for the services that run them.
+
+On a development stack, the one whose compose files include compose.dev.yaml,
+bootstrap also enrols the one CI agent that overlay can run and writes its
+token to .env, with the group that owns the Docker socket on this machine,
+which the overlay's socket filter joins, and deletes any other agent that
+would take a grading run and has gone silent. Only there does --rewrite-v1 rewrite
+the built-in v1 versions in place instead of leaving them.
 
 Four Garage buckets and no other: FORGEJO_LFS_BUCKET for Forgejo, and the three
 in UNICON_BUCKETS for the backend, where unicon-uploads holds what a browser
@@ -42,20 +53,21 @@ from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
 
-from bootstrap import envfile, postgres, secret_values
+import httpx
+
+from bootstrap import envfile, images, postgres, primitives, secret_values
 from bootstrap.compose import Compose, ComposeFailed
 from bootstrap.forgejo import Forgejo, ForgejoError, OAuthApplication
 from bootstrap.garage import Garage, GarageError
+from bootstrap.images import Manifest
+from bootstrap.platform_repos import PLATFORM_ORG, Outcome, PlatformRepos, publish
 from bootstrap.readiness import NotReady, wait_for
 from bootstrap.summary import Summary
 from bootstrap.woodpecker import Woodpecker, WoodpeckerError
 from bootstrap.workflows import (
     CLASSIC,
     CLASSIC_REPO,
-    CLASSIC_VERSION,
-    PLATFORM_ORG,
     WORKFLOW_TOPIC,
-    Workflows,
     seed_files,
 )
 
@@ -63,13 +75,28 @@ BACKEND_ACCOUNT = "unicon-backend"
 CI_ACCOUNT = "unicon-ci"
 
 FORGEJO_LFS_BUCKET = "forgejo-lfs"
+UPLOADS_BUCKET = "unicon-uploads"
+RESULTS_BUCKET = "unicon-results"
 UNICON_BUCKETS = (
-    "unicon-uploads",
-    "unicon-results",
+    UPLOADS_BUCKET,
+    RESULTS_BUCKET,
     "unicon-exports",
 )
 
 COMPOSE_PROJECT = "unicon"
+DEVELOPMENT_OVERLAY = "compose.dev.yaml"
+DEV_AGENT = "laptop"
+GRADING_LABEL = ("pool", "platform")
+SOCKET_PROBE_IMAGE = "busybox:1.37.0"
+
+GRADING_SERVICES: dict[str, tuple[str, ...]] = {
+    "socket-filter": (
+        "UNICON_FILTER_IMAGE",
+        "UNICON_FILTER_IMAGES",
+        "DOCKER_SOCKET_GID",
+    ),
+    "woodpecker-agent": ("WOODPECKER_DEV_AGENT_TOKEN",),
+}
 
 UNLOCKS: dict[str, str] = {
     "FORGEJO_SECRET_KEY": "forgejo-data",
@@ -110,17 +137,24 @@ def main(argv: list[str] | None = None) -> int:
     template = options.directory / ".env.example"
     env_path = options.directory / ".env"
     compose = Compose(options.directory, options.file)
+    development = is_development(options.file)
 
     summary = Summary()
     values: dict[str, str] = {}
 
     try:
+        refuse_rewrite_outside_development(options.rewrite_v1, development)
+        manifest = images.load(images.choose(options.directory, options.images))
+        print(f"images from {manifest.path.name}")
+
         previous = envfile.load(env_path)
         _refuse_to_regenerate_over_existing_data(compose, env_path, previous)
         values = _starting_values(template, previous)
 
         _generate_missing_secrets(values, summary)
-        _derive_values(values)
+        _derive_values(values, manifest)
+        if development:
+            values["DOCKER_SOCKET_GID"] = compose.socket_group(SOCKET_PROBE_IMAGE)
         envfile.write(env_path, template, values)
 
         _start_storage(compose, values, summary)
@@ -129,13 +163,21 @@ def main(argv: list[str] | None = None) -> int:
         _start_forgejo(compose, values, summary)
         envfile.write(env_path, template, values)
 
-        _seed_workflows(compose, options.directory, values, summary)
+        _seed_platform(
+            compose, options.directory, manifest, values, summary, options.rewrite_v1
+        )
+        envfile.write(env_path, template, values)
 
         compose.up("proxy")
         _start_woodpecker(compose, values, summary)
+        if development:
+            _enrol_dev_agent(values, summary)
+            _pull_grading_images(compose, values, summary)
         envfile.write(env_path, template, values)
 
         _restart_backend_if_values_changed(compose, previous, values)
+        if development:
+            _recreate_grading_services(compose, previous, values)
     except (
         ComposeFailed,
         ForgejoError,
@@ -145,6 +187,7 @@ def main(argv: list[str] | None = None) -> int:
         WoodpeckerError,
         ValueError,
         OSError,
+        httpx.HTTPError,
     ) as failure:
         print(f"bootstrap failed: {failure}")
         return 1
@@ -176,10 +219,48 @@ def _parse_arguments(argv: list[str] | None) -> argparse.Namespace:
         default=Path.cwd(),
         help="the deploy directory. Default: the working directory",
     )
+    parser.add_argument(
+        "--images",
+        type=Path,
+        default=None,
+        help=(
+            f"the image manifest. Default: {images.LOCAL_MANIFEST} when a local "
+            f"build wrote it, otherwise {images.RELEASE_MANIFEST}"
+        ),
+    )
+    parser.add_argument(
+        "--rewrite-v1",
+        action="store_true",
+        help=(
+            "development stacks only: rewrite v1 of the built-in workflow and of "
+            "each primitive in place to what is here now, instead of leaving it "
+            "or making a new version"
+        ),
+    )
     options = parser.parse_args(argv)
     if options.file is None:
         options.file = ["compose.yaml", "compose.dev.yaml"]
     return options
+
+
+def is_development(files: list[str]) -> bool:
+    """Whether the compose files are a development stack's: the dev overlay
+    is one of them.
+    """
+    return any(Path(file).name == DEVELOPMENT_OVERLAY for file in files)
+
+
+def refuse_rewrite_outside_development(rewrite: bool, development: bool) -> None:
+    """A version is frozen. Rewriting one in place is allowed on a
+    development stack, where nothing published outlives a reset, and nowhere
+    else, whatever the flag says.
+    """
+    if rewrite and not development:
+        raise ValueError(
+            f"--rewrite-v1 rewrites published versions and is only for a "
+            f"development stack, one started with {DEVELOPMENT_OVERLAY}. A "
+            "changed definition on any other stack is a new version."
+        )
 
 
 def _refuse_to_regenerate_over_existing_data(
@@ -220,7 +301,7 @@ def _starting_values(template: Path, previous: dict[str, str]) -> dict[str, str]
     return values
 
 
-def _derive_values(values: dict[str, str]) -> None:
+def _derive_values(values: dict[str, str], manifest: Manifest) -> None:
     """Values that are a restatement of another one, recomputed every run.
 
     They are written with the generated secrets rather than at the end, so an
@@ -236,6 +317,10 @@ def _derive_values(values: dict[str, str]) -> None:
     their browser uses: two keys for one URL is two chances to disagree, and
     the symptom of disagreeing is a login redirect to a host the browser cannot
     resolve.
+
+    The two bucket names are the ones bootstrap makes, and the three images
+    are the image manifest's, so none of them can be set to something that is
+    not there.
     """
     values["UNICON_DATABASE_URL"] = (
         f"postgresql+psycopg://unicon:{values['UNICON_DB_PASSWORD']}"
@@ -251,6 +336,11 @@ def _derive_values(values: dict[str, str]) -> None:
     values["MAIL_PROTOCOL"] = (
         "smtps" if values.get("MAIL_SMTP_PORT") == "465" else "smtp+starttls"
     )
+    values["UNICON_S3_UPLOADS_BUCKET"] = UPLOADS_BUCKET
+    values["UNICON_S3_RESULTS_BUCKET"] = RESULTS_BUCKET
+    values["UNICON_HARNESS_IMAGE"] = manifest.harness
+    values["UNICON_CLONE_IMAGE"] = manifest.clone
+    values["UNICON_FILTER_IMAGE"] = manifest.socket_filter
     refuse_sign_up_without_mail(values)
 
 
@@ -380,35 +470,88 @@ def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -
     summary.record("forgejo oauth application Woodpecker", created)
 
 
-def _seed_workflows(
-    compose: Compose, directory: Path, values: dict[str, str], summary: Summary
+def _seed_platform(
+    compose: Compose,
+    directory: Path,
+    manifest: Manifest,
+    values: dict[str, str],
+    summary: Summary,
+    rewrite_v1: bool,
 ) -> None:
-    """The platform org and the built-in workflow unicon/classic@v1 in it."""
-    forgejo = Forgejo(compose, "forgejo")
-    workflows = Workflows(forgejo, values["UNICON_FORGE_ADMIN_TOKEN"])
-    summary.record(
-        f"forgejo organisation {PLATFORM_ORG}", workflows.ensure_platform_org()
+    """The platform org, the primitives the manifest pins and the built-in
+    workflow unicon/classic@v1, in that order, since the workflow names the
+    primitives. Then every image the primitives' versions name, which is the
+    socket filter's list.
+    """
+    repos = PlatformRepos(
+        Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]
     )
+    summary.record(f"forgejo organisation {PLATFORM_ORG}", repos.ensure_platform_org())
+
+    if not manifest.primitives:
+        print(
+            f"note: {manifest.path.name} pins no primitive, so none is seeded and "
+            "nothing can be graded yet. On a development machine, "
+            "scripts/build-images.py builds them from the sibling checkouts."
+        )
+    for release in manifest.primitives:
+        primitive = f"{PLATFORM_ORG}/{release.name}"
+        repo = primitives.repository(release.name)
+        summary.record(
+            f"primitive {primitive} repository",
+            repos.ensure_repository(PLATFORM_ORG, repo),
+        )
+        version, outcome = primitives.mirror(repos, release, rewrite_first=rewrite_v1)
+        _record_version(summary, f"primitive {primitive}", version, outcome)
+        summary.record(
+            f"primitive {primitive} mark {primitives.PRIMITIVE_TOPIC}",
+            repos.ensure_mark(PLATFORM_ORG, repo, primitives.PRIMITIVE_TOPIC),
+        )
+
     workflow = f"{PLATFORM_ORG}/{CLASSIC}"
     summary.record(
         f"workflow {workflow} repository",
-        workflows.ensure_repository(PLATFORM_ORG, CLASSIC_REPO),
+        repos.ensure_repository(PLATFORM_ORG, CLASSIC_REPO),
     )
-    head, created = workflows.ensure_first_commit(
+    files = seed_files(directory, CLASSIC)
+    version, outcome = publish(
+        repos,
         PLATFORM_ORG,
         CLASSIC_REPO,
-        seed_files(directory, CLASSIC),
-        message=f"Seed {workflow}@{CLASSIC_VERSION}",
+        lambda _: files,
+        message=lambda version: f"Seed {workflow}@{version}",
+        next_version_on_change=False,
+        rewrite_first=rewrite_v1,
     )
-    summary.record(f"workflow {workflow} files", created)
+    _record_version(summary, f"workflow {workflow}", version, outcome)
+    if outcome is Outcome.KEPT_DIFFERENT:
+        print(
+            f"note: workflows/{CLASSIC}/ differs from {workflow}@{version} at the "
+            "forge, which is kept as it is. On a development stack, "
+            "--rewrite-v1 rewrites it."
+        )
     summary.record(
         f"workflow {workflow} mark {WORKFLOW_TOPIC}",
-        workflows.ensure_mark(PLATFORM_ORG, CLASSIC_REPO, WORKFLOW_TOPIC),
+        repos.ensure_mark(PLATFORM_ORG, CLASSIC_REPO, WORKFLOW_TOPIC),
     )
-    summary.record(
-        f"workflow {workflow} version {CLASSIC_VERSION}",
-        workflows.ensure_version(PLATFORM_ORG, CLASSIC_REPO, CLASSIC_VERSION, head),
+
+    values["UNICON_FILTER_IMAGES"] = ",".join(
+        primitives.images_at_forge(
+            repos, [release.name for release in manifest.primitives]
+        )
     )
+
+
+def _record_version(
+    summary: Summary, what: str, version: str, outcome: Outcome
+) -> None:
+    """One summary line for a version. A rewritten version counts as made,
+    and one kept although it differs says so.
+    """
+    label = f"{what} version {version}"
+    if outcome in (Outcome.REWRITTEN, Outcome.KEPT_DIFFERENT):
+        label += f" ({outcome.value})"
+    summary.record(label, outcome in (Outcome.CREATED, Outcome.REWRITTEN))
 
 
 def _start_woodpecker(
@@ -431,6 +574,52 @@ def _start_woodpecker(
     summary.record("woodpecker api token", created=True)
 
 
+def _enrol_dev_agent(values: dict[str, str], summary: Summary) -> None:
+    """The one CI agent the dev overlay runs on this machine, enrolled at the
+    CI as a global agent the way a platform machine is, with its token in
+    .env for compose.dev.yaml to hand it. Every other agent that would take a
+    grading run and has gone silent is deleted, so a development stack's
+    gradings land on the laptop's agent and nowhere else.
+    """
+    woodpecker = Woodpecker(
+        values["WOODPECKER_PUBLIC_URL"], values["FORGEJO_PUBLIC_URL"]
+    )
+    admin = values["UNICON_WOODPECKER_TOKEN"]
+    token, created = woodpecker.ensure_agent(
+        admin, DEV_AGENT, values.get("WOODPECKER_DEV_AGENT_TOKEN", "")
+    )
+    values["WOODPECKER_DEV_AGENT_TOKEN"] = token
+    summary.record(f"woodpecker agent {DEV_AGENT}", created)
+
+    others = woodpecker.remove_other_agents(admin, token, DEV_AGENT, GRADING_LABEL)
+    for name in others.removed:
+        print(f"removed woodpecker agent {name}, silent for over an hour")
+    for name in others.reporting:
+        print(
+            f"note: woodpecker agent {name} also takes grading runs and is still "
+            "reporting to the CI; it is left as it is"
+        )
+    for name in others.refused:
+        print(f"note: the CI would not delete the silent woodpecker agent {name}")
+
+
+def _pull_grading_images(
+    compose: Compose, values: dict[str, str], summary: Summary
+) -> None:
+    """Put on this machine every image a grading step may run: the images the
+    socket filter lets a step start from. The filter refuses a pull, so a
+    grading machine has to hold them before a run needs one; on a platform
+    machine the worker does this at enrolment, and on the laptop it is this
+    step. The harness and clone images are the CI's own steps, which the agent
+    pulls itself.
+    """
+    for reference in filter(None, values.get("UNICON_FILTER_IMAGES", "").split(",")):
+        summary.record(
+            f"grading image {reference.rpartition('/')[2]}",
+            compose.ensure_image(reference),
+        )
+
+
 def _restart_backend_if_values_changed(
     compose: Compose, previous: dict[str, str], values: dict[str, str]
 ) -> None:
@@ -439,12 +628,16 @@ def _restart_backend_if_values_changed(
     Compose passes the UNICON_* keys in as environment variables and a running
     container never re-reads them, so a re-minted token would sit in .env while
     the backend kept presenting the revoked one. Woodpecker needs no such step:
-    everything it reads is written before this run starts it.
+    everything it reads is written before this run starts it. The socket
+    filter's keys are the filter's, not the backend's.
     """
+    filter_keys = {key for keys in GRADING_SERVICES.values() for key in keys}
     changed = sorted(
         key
         for key, value in values.items()
-        if key.startswith("UNICON_") and previous.get(key) != value
+        if key.startswith("UNICON_")
+        and key not in filter_keys
+        and previous.get(key) != value
     )
     if not changed:
         return
@@ -453,6 +646,23 @@ def _restart_backend_if_values_changed(
         return
     compose.up("backend")
     print(f"recreated backend for: {', '.join(changed)}")
+
+
+def _recreate_grading_services(
+    compose: Compose, previous: dict[str, str], values: dict[str, str]
+) -> None:
+    """Hand the dev overlay's agent and socket filter the values this run
+    changed under them, for the reason the backend gets its own: a running
+    container keeps the environment it started with. Neither runs unless
+    someone started the `agent` profile, and one that is not running is left
+    as it is: it reads the new values when it is next started.
+    """
+    for service, keys in GRADING_SERVICES.items():
+        changed = [key for key in keys if previous.get(key) != values.get(key)]
+        if not changed or not compose.is_running(service):
+            continue
+        compose.up(service)
+        print(f"recreated {service} for: {', '.join(changed)}")
 
 
 def _known_application(

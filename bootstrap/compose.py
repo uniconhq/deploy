@@ -19,6 +19,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+DOCKER_SOCKET = "/var/run/docker.sock"
+
 
 class ComposeFailed(Exception):
     """A docker compose command exited non-zero."""
@@ -86,6 +88,10 @@ class Compose:
             return bool(row.get("Health") == "healthy")
         return False
 
+    def is_running(self, service: str) -> bool:
+        """Whether this service has a running container."""
+        return bool(self._ps(service, include_stopped=False))
+
     def container_exists(self, service: str) -> bool:
         """Whether this service has a container, running or stopped.
 
@@ -101,6 +107,49 @@ class Compose:
             "volume ls", ["docker", "volume", "ls", "--format", "{{.Name}}"]
         )
         return name in listing.split()
+
+    def ensure_image(self, reference: str) -> bool:
+        """Pull an image this daemon does not hold yet, by its reference, and
+        say whether it had to. An image already here is not pulled again, so a
+        machine that has every image makes no call to a registry.
+        """
+        present = subprocess.run(
+            ["docker", "image", "inspect", "--format", "{{.Id}}", reference],
+            cwd=self._project_dir,
+            capture_output=True,
+        )
+        if present.returncode == 0:
+            return False
+        self._run("pull of a grading image", ["docker", "pull", "--quiet", reference])
+        return True
+
+    def socket_group(self, image: str) -> str:
+        """The group id that owns the Docker socket, as a container on this
+        daemon sees it: 0 on Docker Desktop, the docker group on Linux. A
+        container that runs as an ordinary user reaches the socket only as a
+        member of that group.
+        """
+        output = self._run(
+            "run stat of the docker socket",
+            [
+                "docker",
+                "run",
+                "--rm",
+                "--network",
+                "none",
+                "--volume",
+                f"{DOCKER_SOCKET}:{DOCKER_SOCKET}",
+                image,
+                "stat",
+                "-c",
+                "%g",
+                DOCKER_SOCKET,
+            ],
+        )
+        group = output.strip()
+        if not group.isdigit():
+            raise ComposeFailed(f"the docker socket's group is not a number: {group}")
+        return group
 
     def _ps(self, service: str, include_stopped: bool) -> list[dict[str, Any]]:
         arguments = ["ps", "--format", "json"]
