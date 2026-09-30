@@ -347,8 +347,12 @@ its digest, and bootstrap then leaves its primitive as it is.
   connects, and it takes containers only from the images in
   `UNICON_FILTER_IMAGES`, compared exactly with the `image` lines of the
   primitives at the forge; with no primitive seeded that list is empty and
-  the filter refuses to start. It is healthy once a ping through its own
-  socket reaches the daemon, and the agent starts only then.
+  the filter refuses to start. It never pulls an image, so every one of those
+  images has to be on the machine before a run needs it: on a development
+  stack bootstrap pulls each one this Docker does not hold yet, and on a
+  platform machine the worker does it when the machine is enrolled. It is
+  healthy once a ping through its own socket reaches the daemon, and the
+  agent starts only then.
 - `grading-volumes`, which hands `unicon-filter` to uid 10002, the filter's
   account, and exits.
 
