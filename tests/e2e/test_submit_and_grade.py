@@ -272,13 +272,9 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
     assert verdict_of(contestant, 2) == "WRONG ANSWER"
 
     contestant.get_by_role("button", name="Account menu").click()
-    with contestant.expect_response(
-        lambda answer: (
-            answer.url == f"{APP}/" and answer.request.is_navigation_request()
-        )
-    ):
+    with contestant.expect_event("load"):
         contestant.get_by_role("menuitem", name="Sign out").click()
-    contestant.wait_for_load_state()
+    assert contestant.url == f"{APP}/"
     contestant.goto(f"{APP}/login?next=%2F")
     contestant.get_by_role("main").get_by_role(
         "link", name=re.compile("sign in", re.I)
