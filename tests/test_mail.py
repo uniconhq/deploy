@@ -6,10 +6,22 @@ address and a contest's email pattern would let anyone in.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from bootstrap import main
+from bootstrap.images import Manifest
 
+DIGEST = "@sha256:" + "0" * 64
+MANIFEST = Manifest(
+    path=Path("images.json"),
+    images={
+        name: f"ghcr.io/uniconhq/{name}{DIGEST}"
+        for name in ("harness", "clone", "socket-filter")
+    },
+    primitives=(),
+)
 BASE = {
     "UNICON_DB_PASSWORD": "x",
     "FORGEJO_PUBLIC_URL": "https://forge.example.org",
@@ -24,8 +36,8 @@ def test_the_mailer_follows_the_mail_server() -> None:
         "MAIL_ENABLED": "false",
     }
 
-    main._derive_values(without)
-    main._derive_values(with_server)
+    main._derive_values(without, MANIFEST)
+    main._derive_values(with_server, MANIFEST)
 
     assert without["MAIL_ENABLED"] == "false"
     assert with_server["MAIL_ENABLED"] == "true"
@@ -38,20 +50,23 @@ def test_the_mailer_follows_the_mail_server() -> None:
 def test_mail_is_always_encrypted(port: str, protocol: str) -> None:
     values = {**BASE, "MAIL_SMTP_ADDR": "smtp.example.org", "MAIL_SMTP_PORT": port}
 
-    main._derive_values(values)
+    main._derive_values(values, MANIFEST)
 
     assert values["MAIL_PROTOCOL"] == protocol
 
 
 def test_open_sign_up_without_a_mail_server_is_refused() -> None:
     with pytest.raises(ValueError, match="MAIL_SMTP_ADDR is empty"):
-        main._derive_values({**BASE, "UNICON_FORGE_REGISTRATION_OPEN": "true"})
+        main._derive_values(
+            {**BASE, "UNICON_FORGE_REGISTRATION_OPEN": "true"}, MANIFEST
+        )
 
     main._derive_values(
         {
             **BASE,
             "UNICON_FORGE_REGISTRATION_OPEN": "true",
             "MAIL_SMTP_ADDR": "smtp.example.org",
-        }
+        },
+        MANIFEST,
     )
-    main._derive_values({**BASE, "UNICON_FORGE_REGISTRATION_OPEN": "false"})
+    main._derive_values({**BASE, "UNICON_FORGE_REGISTRATION_OPEN": "false"}, MANIFEST)
