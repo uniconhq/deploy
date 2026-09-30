@@ -6,8 +6,9 @@
 # instead of pulling images, publishes the internal services so tools on this
 # machine can reach them, opens Forgejo's sign-up and catches its mail in
 # Mailpit, so a person can make an account and confirm its address from
-# http://localhost:8025, and can run one CI agent on this machine under the
-# `agent` profile.
+# http://localhost:8025, and can run one grading machine on this laptop under
+# the `agent` profile: a CI agent, the socket filter beside it, and the shared
+# store for large task files.
 #
 # Every port opened here is bound to 127.0.0.1. A published port with no host
 # address listens on every interface, so on a laptop joined to a conference
@@ -68,6 +69,18 @@ services:
     ports:
       - "127.0.0.1:8025:8025"
 
+  proxy:
+    # The development git listener on 3128, unpublished: see
+    # proxy/dev-git-door.conf and WOODPECKER_BACKEND_HTTP_PROXY below.
+    volumes:
+      - ./proxy/dev-git-door.conf:/etc/nginx/templates/dev-git-door.conf.template:ro
+    # The one service on the grading network, where the dev agent's step
+    # containers are: they reach the platform and the git listener here and
+    # nothing else of the stack.
+    networks:
+      - default
+      - grading
+
   woodpecker-server:
     # The operator interface, and the URL bootstrap drives to mint the CI token.
     ports:
@@ -78,22 +91,48 @@ services:
     # proxy. A deployment where Forgejo has a real name does not need this.
     extra_hosts:
       - "forge.localhost:host-gateway"
+    environment:
+      # How the laptop's grading machine clones. A run's checkout uses the
+      # URL Forgejo reports, on forge.localhost, and the CI lends its
+      # credential for that name only; inside a step container the name is
+      # the container itself, because curl sends every .localhost name to
+      # loopback. So every step gets the proxy's development git listener,
+      # proxy/dev-git-door.conf, as its HTTP proxy, which passes a
+      # checkout's reads to Forgejo and nothing else. Every other address a
+      # step calls goes direct: the harness reaches the platform at
+      # http://proxy, and at the Docker host when the forge's live tests run
+      # the platform there.
+      WOODPECKER_BACKEND_HTTP_PROXY: http://proxy:3128
+      WOODPECKER_BACKEND_NO_PROXY: proxy,host.docker.internal
 
   # Same build and same tag as backend, so the image is built once and both
-  # services run it.
+  # services run it. The forge checkout beside it is handed to the build as
+  # the named context `forge`: while the backend develops against ../forge by
+  # path, that is where its forge package comes from; while it pins a
+  # release, the package comes from the wheel and the copy goes unused.
   backend-migrate:
     build:
       context: ../backend
+      additional_contexts:
+        forge: ../forge
     image: unicon/backend:dev
 
   backend:
     build:
       context: ../backend
+      additional_contexts:
+        forge: ../forge
     image: unicon/backend:dev
     environment:
       # The other half of the Forgejo registration override above: Forgejo takes
       # sign-ups here, so the landing page may offer Create account.
       UNICON_FORGE_REGISTRATION_OPEN: "true"
+      # The dev agent's steps join the grading network, where the proxy is,
+      # so the harness reaches the platform at the proxy's name on it: the
+      # envelope and the callback under /api/, the log upload under
+      # /unicon-results/, both signed for this host. localhost would be the
+      # step container itself.
+      UNICON_MACHINE_URL: http://proxy
 
   frontend:
     build:
@@ -103,11 +142,13 @@ services:
         VITE_FORGE_URL: "${FORGEJO_PUBLIC_URL}"
     image: unicon/frontend:dev
 
-  # One CI agent on the laptop, beside the stack. This is the only place an
-  # agent and the databases share a Docker daemon; a real grading machine is a
-  # separate host. Off unless started with --profile agent, and it needs a
-  # token the server issued: WOODPECKER_DEV_AGENT_TOKEN in .env, taken from
-  # the CI's Agents page under the unicon-ci account.
+  # One grading machine on the laptop, beside the stack: the CI agent and the
+  # socket filter, off unless started with --profile agent. This is the only
+  # place an agent and the databases share a Docker daemon; a real grading
+  # machine is a separate host. The agent dials out to the server like any
+  # other machine, with a token the server issued for it: bootstrap enrols it
+  # as the global agent `laptop` and writes WOODPECKER_DEV_AGENT_TOKEN, so run
+  # bootstrap before starting the profile.
   woodpecker-agent:
     image: woodpeckerci/woodpecker-agent:v3.18.1
     profiles: [agent]
@@ -115,9 +156,15 @@ services:
     depends_on:
       woodpecker-server:
         condition: service_healthy
+      socket-filter:
+        condition: service_healthy
     environment:
       WOODPECKER_SERVER: woodpecker-server:9000
       WOODPECKER_AGENT_SECRET: ${WOODPECKER_DEV_AGENT_TOKEN}
+      WOODPECKER_HOSTNAME: laptop
+      # A grading run carries the label pool=platform, which only the
+      # platform's own machines declare.
+      WOODPECKER_AGENT_LABELS: pool=platform
       # Onto the volume below. The default path is /etc/woodpecker, which this
       # image does not create, so the agent cannot save the identity the server
       # gave it: every restart registers a new agent and leaves the old row
@@ -125,12 +172,100 @@ services:
       WOODPECKER_AGENT_CONFIG_FILE: /var/lib/woodpecker/agent.conf
       WOODPECKER_MAX_WORKFLOWS: "4"
       WOODPECKER_BACKEND: docker
+      # Every step container joins the grading network as well as its own,
+      # which holds the proxy and no other service of the stack: the clone
+      # steps reach Forgejo through its git listener and the harness reaches
+      # the platform at http://proxy, and neither can reach the database, the
+      # object store's admin API, the CI's API or anything else inside.
+      WOODPECKER_BACKEND_DOCKER_NETWORK: unicon-grading
       WOODPECKER_LOG_LEVEL: info
     volumes:
       - woodpecker-agent-data:/var/lib/woodpecker
-      # The agent starts sibling containers on the host daemon. Anything that
-      # can reach this socket is root on the host.
+      # The agent starts the step containers on the host daemon. Anything that
+      # can reach this socket is root on the host, which is why the harness
+      # step never gets it: it gets the filter's.
       - /var/run/docker.sock:/var/run/docker.sock
+
+  # The socket filter, the one thing between the harness and Docker. It holds
+  # the real socket and serves its own at /run/unicon/docker.sock in the
+  # volume unicon-filter, which the CI mounts read-only into the harness step,
+  # so no harness can put a socket of its own in the filter's place; the
+  # filter exits should that ever happen, and restarts. It lets
+  # through only what running a plan takes: containers from the images in
+  # UNICON_FILTER_IMAGES, every image any version of a primitive at the forge
+  # names, which bootstrap writes; sandboxed, without a network, and only the
+  # ones it made itself. It needs no network of its own.
+  socket-filter:
+    # From the image manifest, by digest. Empty until bootstrap has run, and
+    # then the agent profile does not start: compose says this service has no
+    # image.
+    image: ${UNICON_FILTER_IMAGE}
+    profiles: [agent]
+    restart: unless-stopped
+    network_mode: none
+    # The filter tells one run's harness from another's by the process that
+    # connects: the kernel names it, its cgroup names its container, and the
+    # daemon says which grading that container is and which volume it has at
+    # /woodpecker. Reading another container's process needs the host's
+    # process namespace.
+    pid: host
+    # The image runs as an ordinary user, which reaches the real socket as a
+    # member of the group that owns it. Bootstrap reads that group from the
+    # socket.
+    group_add:
+      - "${DOCKER_SOCKET_GID:-0}"
+    depends_on:
+      grading-volumes:
+        condition: service_completed_successfully
+    environment:
+      UNICON_FILTER_IMAGES: ${UNICON_FILTER_IMAGES}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - unicon-filter:/run/unicon
+    healthcheck:
+      # A ping through the filter's own socket, which it passes to the daemon:
+      # healthy means it listens and the daemon answers it.
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import socket; s = socket.socket(socket.AF_UNIX);
+          s.settimeout(5); s.connect('/run/unicon/docker.sock');
+          s.sendall(b'GET /_ping HTTP/1.1\r\nHost: filter\r\n\r\n');
+          assert s.recv(64).startswith(b'HTTP/1.1 200')
+      interval: 10s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  # Hands the filter's socket volume to the account the socket filter runs
+  # as, uid 10002, which no harness or step runs as: a volume made by an
+  # earlier stack may belong to another account, and the filter could not
+  # make its socket in it. Runs at every start of the profile and exits.
+  grading-volumes:
+    image: busybox:1.37.0
+    profiles: [agent]
+    restart: "no"
+    network_mode: none
+    command: ["chown", "10002:10002", "/run/unicon"]
+    volumes:
+      - unicon-filter:/run/unicon
+
+networks:
+  # Where the dev agent's step containers are, beside the proxy. A fixed
+  # name, since the agent's setting above names it.
+  grading:
+    name: unicon-grading
 
 volumes:
   woodpecker-agent-data:
+  # A fixed name, not the compose project's prefixed one: the grading
+  # pipeline names this volume itself, read-only as
+  # unicon-filter:/run/unicon:ro on the harness step, and a pipeline's volume
+  # is a plain Docker volume name. The large files of task checkouts are kept
+  # in one volume per org, unicon-lfs-<org>, which the pipeline names and
+  # Docker makes on first use; the clone image runs as root, so it needs no
+  # preparing here.
+  unicon-filter:
+    name: unicon-filter
