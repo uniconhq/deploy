@@ -2,6 +2,9 @@
 .env
 # The placeholder-filled copy the compose config check reads.
 .env.check
+# Written by scripts/build-images.py: this machine's own images, by digest
+# in the registry on localhost.
+images.local.json
 
 # uv. uv.lock is committed: CI installs from it with --frozen.
 .venv/
