@@ -391,7 +391,11 @@ door on the forge's public host, which is feature 12.
 ## The forge's account pages
 
 Forgejo serves its own sign-in, sign-up, OAuth consent and account settings
-pages, and people see them whenever the app sends them to the forge. Someone
+pages, and people see them whenever the app sends them to the forge. Signing
+out of the app ends at the proxy's `/-/sign-out` on the forge's host, which
+clears Forgejo's `session` and `persistent` cookies and sends the browser back to
+the app, so a sign-out leaves nobody signed in to Forgejo either; Forgejo takes
+a sign-out of its own only as a form post with its own token. Someone
 the operator made with `unicon create-account` also meets its page for
 changing the first password, at their first sign-in. What makes
 those pages look like Unicon is under `forgejo/custom/`, which compose mounts
