@@ -1,0 +1,31 @@
+{
+  "images": {
+    "harness": "ghcr.io/uniconhq/harness@sha256:2f73048019369c3ce58c9165e8ca2f45dbdc6815792ca2eb88c922896f7d8400",
+    "clone": "ghcr.io/uniconhq/clone@sha256:8968497186f0e9d578a8a5202688cfb644161fcf6fb3365192ac627b031578a4",
+    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:b390b2f3b92751a24d340ce952f901c49908e04a250baa121b42d6297aa99cc5",
+    "worker": "ghcr.io/uniconhq/worker@sha256:79cb9915888fd2df755b018c8657e55ad6e0810f5a49a216f863fd16b2469ce6"
+  },
+  "primitives": {
+    "compile": {
+      "image": "ghcr.io/uniconhq/primitive-compile@sha256:5a3cbdfee08e341c2367dbbef5a7c17dee8de348124679c07485cf56fd008b94",
+      "source": {
+        "github": "uniconhq/primitive-compile",
+        "tag": "v1.0.0"
+      }
+    },
+    "sandbox-run": {
+      "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:43b21483a295976de723dd4262246c8e3cb22fd0c70111e78d56855d19c79862",
+      "source": {
+        "github": "uniconhq/primitive-sandbox-run",
+        "tag": "v1.0.0"
+      }
+    },
+    "diff-check": {
+      "image": "ghcr.io/uniconhq/primitive-diff-check@sha256:c1d880dc9e6c9f3807ea0eb847b7a4f62ceced1bdfaa317e90c9ff3bc5c1b205",
+      "source": {
+        "github": "uniconhq/primitive-diff-check",
+        "tag": "v1.0.0"
+      }
+    }
+  }
+}
