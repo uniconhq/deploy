@@ -5,6 +5,11 @@
  * stylesheets set on :root. The values are the frontend theme's
  * (src/theme/theme.ts): fonts are named with fallbacks and nothing is fetched
  * from outside.
+ *
+ * The rungs follow Forgejo's own meaning in each scheme: a `light` rung is
+ * nearer the page's background and a `dark` rung nearer its text, so in the
+ * dark scheme the light rungs darken towards the background and the dark
+ * rungs lighten towards white. Forgejo fills highlights with them.
  */
 
 :root {
@@ -79,20 +84,20 @@
     --color-primary-contrast: #141414;
     --color-primary-hover: #f9a6bd;
     --color-primary-active: #ee6f90;
-    --color-primary-dark-1: #ee6f90;
-    --color-primary-dark-2: #e0537a;
-    --color-primary-dark-3: #c4426a;
-    --color-primary-dark-4: #a8446c;
-    --color-primary-dark-5: #7d2440;
-    --color-primary-dark-6: #7d2440;
-    --color-primary-dark-7: #7d2440;
-    --color-primary-light-1: #f9a6bd;
-    --color-primary-light-2: #fbc0d1;
-    --color-primary-light-3: #ffe0e9;
-    --color-primary-light-4: #fff1f5;
-    --color-primary-light-5: #fff1f5;
-    --color-primary-light-6: #fff1f5;
-    --color-primary-light-7: #fff1f5;
+    --color-primary-dark-1: #f9a6bd;
+    --color-primary-dark-2: #fbc0d1;
+    --color-primary-dark-3: #ffe0e9;
+    --color-primary-dark-4: #fff1f5;
+    --color-primary-dark-5: #fff1f5;
+    --color-primary-dark-6: #fff1f5;
+    --color-primary-dark-7: #fff1f5;
+    --color-primary-light-1: #ee6f90;
+    --color-primary-light-2: #e0537a;
+    --color-primary-light-3: #c4426a;
+    --color-primary-light-4: #a8446c;
+    --color-primary-light-5: #7d2440;
+    --color-primary-light-6: #4a1526;
+    --color-primary-light-7: #2a0f16;
     --color-primary-alpha-10: rgba(247, 140, 168, 0.1);
     --color-primary-alpha-20: rgba(247, 140, 168, 0.2);
     --color-primary-alpha-30: rgba(247, 140, 168, 0.3);
@@ -142,20 +147,20 @@
   --color-primary-contrast: #141414;
   --color-primary-hover: #f9a6bd;
   --color-primary-active: #ee6f90;
-  --color-primary-dark-1: #ee6f90;
-  --color-primary-dark-2: #e0537a;
-  --color-primary-dark-3: #c4426a;
-  --color-primary-dark-4: #a8446c;
-  --color-primary-dark-5: #7d2440;
-  --color-primary-dark-6: #7d2440;
-  --color-primary-dark-7: #7d2440;
-  --color-primary-light-1: #f9a6bd;
-  --color-primary-light-2: #fbc0d1;
-  --color-primary-light-3: #ffe0e9;
-  --color-primary-light-4: #fff1f5;
-  --color-primary-light-5: #fff1f5;
-  --color-primary-light-6: #fff1f5;
-  --color-primary-light-7: #fff1f5;
+  --color-primary-dark-1: #f9a6bd;
+  --color-primary-dark-2: #fbc0d1;
+  --color-primary-dark-3: #ffe0e9;
+  --color-primary-dark-4: #fff1f5;
+  --color-primary-dark-5: #fff1f5;
+  --color-primary-dark-6: #fff1f5;
+  --color-primary-dark-7: #fff1f5;
+  --color-primary-light-1: #ee6f90;
+  --color-primary-light-2: #e0537a;
+  --color-primary-light-3: #c4426a;
+  --color-primary-light-4: #a8446c;
+  --color-primary-light-5: #7d2440;
+  --color-primary-light-6: #4a1526;
+  --color-primary-light-7: #2a0f16;
   --color-primary-alpha-10: rgba(247, 140, 168, 0.1);
   --color-primary-alpha-20: rgba(247, 140, 168, 0.2);
   --color-primary-alpha-30: rgba(247, 140, 168, 0.3);
@@ -301,6 +306,29 @@ body {
 .ui.selection.active.dropdown {
   border-color: var(--color-primary);
   box-shadow: 0 0 0 2px var(--color-primary-alpha-30);
+}
+
+/*
+ * A field the browser filled in itself keeps the field's own colours rather
+ * than Forgejo's tinted highlight, so a saved password reads the same as a
+ * typed one in either scheme.
+ */
+input:-webkit-autofill,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:active,
+.ui.form .field.field input:-webkit-autofill,
+.ui.form .field.field input:-webkit-autofill:focus,
+.ui.form .field.field input:-webkit-autofill:hover,
+.ui.form .field.field input:-webkit-autofill:active {
+  -webkit-text-fill-color: var(--color-input-text);
+  caret-color: var(--color-input-text);
+  box-shadow: 0 0 0 100px var(--color-input-background) inset !important;
+  border-color: var(--color-input-border) !important;
+}
+
+.ui.form .field.field input:-webkit-autofill:focus {
+  border-color: var(--color-primary) !important;
 }
 
 .ui.form .error input:not([type="checkbox"]):not([type="radio"]),
