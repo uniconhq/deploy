@@ -449,7 +449,8 @@ organiser and a contestant with `unicon create-account` and signs both in
 through Forgejo's pages. The organiser creates an org, a contest and a task
 from the organiser pages, saves `task.yaml` so the task publishes (with a
 looser submission rate than the starter's one per 30 seconds, so the second
-submit is not refused), and saves `contest.yaml` so the contest is published
+submit is not refused), checks that making the task added it to
+`contest.yaml`'s tasks, and saves `contest.yaml` so the contest is published
 and running. The contestant registers, the organiser approves them from the
 contestants table, and the contestant submits the sample solution and then a
 wrong one from the submit panel; the test expects `ACCEPTED` and then
