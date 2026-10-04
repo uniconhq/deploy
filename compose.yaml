@@ -6,58 +6,57 @@
 # starting a service with an empty password.
 name: unicon
 
-# The keys the backend reads, in one place because two services need them: only
-# the backend's own, not the whole of .env, so nothing here carries the Forgejo
-# administrator password or the Garage RPC secret. Plain ${...} rather than
-# ${...:?}, because compose interpolates every service on every command and
-# bootstrap has to start Postgres before these exist. The backend checks them at
-# boot and refuses to start on a missing one.
+# The backend's environment, in one place because two services need it: only
+# the backend's own keys, not the whole of .env, so nothing here carries the
+# Forgejo administrator password or the Garage RPC secret. The addresses of the
+# other services on the compose network, the bucket names and the account
+# bootstrap makes are written here as they are; the rest comes from .env.
+# Plain ${...} rather than ${...:?}, because compose interpolates every service
+# on every command and bootstrap has to start Postgres before these exist. The
+# backend checks them at boot and refuses to start on a missing one.
 x-backend-env: &backend-env
+  # The backend marks its cookies Secure exactly when this is https.
   UNICON_PUBLIC_URL: ${UNICON_PUBLIC_URL}
-  UNICON_DATABASE_URL: ${UNICON_DATABASE_URL}
-  UNICON_FORGE_PUBLIC_URL: ${UNICON_FORGE_PUBLIC_URL}
-  UNICON_FORGE_INTERNAL_URL: ${UNICON_FORGE_INTERNAL_URL}
+  UNICON_DATABASE_URL: &database-url postgresql+psycopg://unicon:${UNICON_DB_PASSWORD}@postgres:5432/unicon
+  # The backend sends people to the same Forgejo their browser uses, and
+  # reaches it itself over the compose network.
+  UNICON_FORGE_PUBLIC_URL: ${FORGEJO_PUBLIC_URL}
+  UNICON_FORGE_INTERNAL_URL: http://forgejo:3000
   # The backend's own address inside the stack, where the forge's org event
   # push is aimed. forgejo/app.ini allows the host `backend` for it.
-  UNICON_INTERNAL_URL: ${UNICON_INTERNAL_URL}
+  UNICON_INTERNAL_URL: http://backend:8000
   UNICON_FORGE_ADMIN_TOKEN: ${UNICON_FORGE_ADMIN_TOKEN}
-  # The account the admin token belongs to, the one account protected tags are
-  # reserved for.
-  UNICON_FORGE_PLATFORM_ACCOUNT: ${UNICON_FORGE_PLATFORM_ACCOUNT}
+  # The account bootstrap makes and the admin token belongs to, the one
+  # account protected tags are reserved for.
+  UNICON_FORGE_PLATFORM_ACCOUNT: unicon-backend
   UNICON_FORGE_OAUTH_CLIENT_ID: ${UNICON_FORGE_OAUTH_CLIENT_ID}
   UNICON_FORGE_OAUTH_CLIENT_SECRET: ${UNICON_FORGE_OAUTH_CLIENT_SECRET}
-  UNICON_WOODPECKER_URL: ${UNICON_WOODPECKER_URL}
+  UNICON_WOODPECKER_URL: http://woodpecker-server:8000
   # The URL the CI knows itself by. It writes its webhooks under it, and the
   # backend tells the CI's webhook from any other by it.
   UNICON_WOODPECKER_PUBLIC_URL: ${WOODPECKER_PUBLIC_URL}
   UNICON_WOODPECKER_TOKEN: ${UNICON_WOODPECKER_TOKEN}
   UNICON_SESSION_SIGNING_KEY: ${UNICON_SESSION_SIGNING_KEY}
   UNICON_TOKEN_ENCRYPTION_KEY: ${UNICON_TOKEN_ENCRYPTION_KEY}
-  UNICON_COOKIE_SECURE: ${UNICON_COOKIE_SECURE}
-  # Seconds. Half of a pair: the other half is REFRESH_TOKEN_EXPIRATION_TIME in
-  # forgejo/app.ini, and the two have to say the same length of time. A Unicon
-  # session that outlives the Forgejo refresh token behind it is a session that
-  # can no longer act in Forgejo, and the person is signed in to a site that
-  # cannot do anything for them.
+  # Seconds. Forgejo's refresh token lives as long, from the same key: see
+  # FORGEJO__oauth2__REFRESH_TOKEN_EXPIRATION_TIME below.
   UNICON_SESSION_HARD_TTL: ${UNICON_SESSION_HARD_TTL}
-  # Closed by default, like a production Forgejo. compose.dev.yaml turns it
-  # on in the same place it opens Forgejo registration, so the two agree.
+  # Whether the landing page offers Create account. Bootstrap writes it from
+  # SIGN_UP_OPEN, beside Forgejo's own switch, so the two agree.
   UNICON_FORGE_REGISTRATION_OPEN: ${UNICON_FORGE_REGISTRATION_OPEN:-false}
   # Any signed-in person may create an org. A deployment open to strangers
   # turns it off and creates orgs with `unicon create-org`.
   UNICON_ORG_CREATION_OPEN: ${UNICON_ORG_CREATION_OPEN:-true}
-  # Which implementation sits behind the forge port.
-  UNICON_FORGE: ${UNICON_FORGE:-forgejo}
-  # Object storage: Garage inside the network, the access key bootstrap made
-  # for the backend, and the two buckets it uses. What a browser uploads
-  # before a submit goes to the first, the grading logs to the second, both
-  # through presigned URLs the proxy passes to Garage untouched.
-  UNICON_S3_ENDPOINT: ${UNICON_S3_ENDPOINT}
-  UNICON_S3_REGION: ${UNICON_S3_REGION}
+  # Object storage: Garage inside the network, in the region garage/garage.toml
+  # names, the access key bootstrap made for the backend, and the two buckets
+  # bootstrap makes. What a browser uploads before a submit goes to the first,
+  # the grading logs to the second, both through presigned URLs the proxy
+  # passes to Garage untouched.
+  UNICON_S3_ENDPOINT: http://garage:3900
+  UNICON_S3_REGION: garage
   UNICON_S3_ACCESS_KEY: ${UNICON_S3_ACCESS_KEY}
   UNICON_S3_SECRET_KEY: ${UNICON_S3_SECRET_KEY}
-  UNICON_S3_UPLOADS_BUCKET: ${UNICON_S3_UPLOADS_BUCKET}
-  UNICON_S3_RESULTS_BUCKET: ${UNICON_S3_RESULTS_BUCKET}
+  UNICON_S3_RESULTS_BUCKET: unicon-results
   # Where a grading machine reaches the platform: the envelope, the callback
   # and the log upload. The public URL unless .env says otherwise;
   # compose.dev.yaml points it at the proxy's name on this network, which the
@@ -131,6 +130,12 @@ services:
       FORGEJO__security__INTERNAL_TOKEN: ${FORGEJO_INTERNAL_TOKEN:?set by bootstrap}
       FORGEJO__oauth2__JWT_SECRET: ${FORGEJO_OAUTH2_JWT_SECRET:?set by bootstrap}
       FORGEJO__server__LFS_JWT_SECRET: ${FORGEJO_LFS_JWT_SECRET:?set by bootstrap}
+      # Whether people may sign themselves up, and how long a refresh token
+      # lives, in hours. Bootstrap derives both, from SIGN_UP_OPEN and from
+      # UNICON_SESSION_HARD_TTL, which also reach the backend above, so
+      # Forgejo and Unicon cannot disagree about either.
+      FORGEJO__service__DISABLE_REGISTRATION: ${FORGEJO_DISABLE_REGISTRATION:?set by bootstrap}
+      FORGEJO__oauth2__REFRESH_TOKEN_EXPIRATION_TIME: ${FORGEJO_REFRESH_TOKEN_HOURS:?set by bootstrap}
       # Empty until bootstrap has made the Garage key, which it does before it
       # starts this service. Compose interpolates the whole file on every
       # command, so these two cannot demand a value the way the rest do.
@@ -219,7 +224,7 @@ services:
       # checking the server's signature on the request. `private` lets the
       # server call an address inside this network; the default refuses it
       # and Woodpecker then answers the dispatch with an empty 204.
-      WOODPECKER_CONFIG_EXTENSION_ENDPOINT: ${UNICON_INTERNAL_URL:-http://backend:8000}/api/v1/ci/config
+      WOODPECKER_CONFIG_EXTENSION_ENDPOINT: http://backend:8000/api/v1/ci/config
       WOODPECKER_CONFIG_EXTENSION_EXCLUSIVE: "true"
       WOODPECKER_EXTENSIONS_ALLOWED_HOSTS: private
       # The one image a clone step may hand the repository credential to:
@@ -320,7 +325,7 @@ services:
     # the database URL, and giving a migration job the OAuth client secret and
     # the token encryption key spreads them over a second container for nothing.
     environment:
-      UNICON_DATABASE_URL: ${UNICON_DATABASE_URL}
+      UNICON_DATABASE_URL: *database-url
 
   backend:
     image: ghcr.io/uniconhq/backend:main

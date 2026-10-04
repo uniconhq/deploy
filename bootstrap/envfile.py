@@ -8,7 +8,9 @@ change here.
 A key the template does not mention, whether one the template lost or one a
 person added to .env by hand, is carried across under the
 ADDED_OUTSIDE_TEMPLATE marker rather than dropped: the service that reads it
-would otherwise stop working on the next run, and nothing would say why.
+would otherwise stop working on the next run, and nothing would say why. The
+keys bootstrap knows nothing reads, RETIRED in bootstrap/main.py, never reach
+this module: bootstrap leaves them out of the values it writes.
 """
 
 from __future__ import annotations

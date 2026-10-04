@@ -15,7 +15,8 @@ fresh stack into one the backend can talk to.
 | `garage` | `dxflrs/garage:v2.4.1` | `garage:3900` in the network; S3 and admin on `127.0.0.1` in development |
 | `proxy` | `nginx:1.27-alpine` | `http://localhost:8080`, the app, and `http://forge.localhost:8080`, the forge's people pages |
 | `backend`, `frontend` | built from the siblings in development | behind the proxy |
-| `woodpecker-agent`, `socket-filter` | development only, under `--profile agent` | nothing; the agent dials out to the server |
+| `mailpit` | `axllent/mailpit:v1.31.3`, development only | `http://localhost:8025`, the mail Forgejo sends |
+| `woodpecker-agent`, `socket-filter`, `grading-volumes` | development only, under `--profile agent` | nothing; the agent dials out to the server |
 
 No grading machine is part of the stack: a machine that runs contestant code
 is a separate host, enrolled at the CI with its own token. The server carries
@@ -45,8 +46,13 @@ Run it again whenever you like. Every step checks before it creates, so a second
 run reports what was already there and creates nothing new. It is not a no-op:
 it re-applies the three database role passwords and both Forgejo bot passwords
 from `.env`, re-applies the bucket grants, rewrites `.env`, and recreates the
-`backend` container if any `UNICON_*` value changed under it, because a running
-container never re-reads its environment.
+`backend` container if any value it reads changed under it, a `UNICON_*` key
+or the public URL of Forgejo or the CI, because a running container never
+re-reads its environment. On a development stack it recreates the agent and
+the socket filter the same way when they are running and a value of theirs
+changed. The rewrite drops the keys bootstrap knows nothing reads, ones an
+earlier bootstrap wrote, and names them; a key it does not know, such as one
+added by hand, is kept at the end under a comment of its own.
 
 **If `.env` is gone, or a secret in it is, do not just run bootstrap.** It
 refuses to start when a secret that data on disk depends on is missing while
@@ -71,13 +77,28 @@ docker compose -f compose.yaml -f compose.dev.yaml down -v     # throw it away
 ```
 
 Without `-f compose.dev.yaml` you get the production shape: images by tag,
-nothing published to the host except the proxy on 8080, Forgejo with
-registration closed, and the landing page not offering Create account.
-Opening sign-up there takes a mail server in `.env` (`MAIL_SMTP_ADDR` and the
-rest): everyone who signs themselves up confirms their address by the link
-in a mail, a contest's email pattern trusts only confirmed addresses, and
-Forgejo drops the confirmation without a word when it cannot send mail, so
-bootstrap refuses `UNICON_FORGE_REGISTRATION_OPEN=true` without one.
+nothing published to the host except the proxy on 8080, and sign-up closed.
+`SIGN_UP_OPEN` in `.env` is the one switch for people making their own
+accounts: bootstrap writes Forgejo's `DISABLE_REGISTRATION`, which takes or
+refuses a sign-up, and the backend's `UNICON_FORGE_REGISTRATION_OPEN`, which
+decides whether the landing page offers Create account, from it on every run,
+so the two always agree. Empty means closed, and open on a development stack.
+Opening sign-up in the production shape takes a mail server in `.env`
+(`MAIL_SMTP_ADDR` and the rest): everyone who signs themselves up confirms
+their address by the link in a mail, a contest's email pattern trusts only
+confirmed addresses, and Forgejo drops the confirmation without a word when
+it cannot send mail, so bootstrap refuses `SIGN_UP_OPEN=true` without one.
+The proxy slows form posts to the forge's pages per client address, 30 a
+minute: when a crowd arrives at once from one network, the first 20 posts
+over that pass at once, the next 40 wait their turn, and only after those is
+a post refused with a page asking to wait a minute. Loading a page is never
+slowed.
+
+`UNICON_SESSION_HARD_TTL`, how long a Unicon session lives, is likewise the
+one length for both sides: bootstrap writes Forgejo's refresh-token lifetime
+from it, in hours, rounded up, so a session never outlives the Forgejo
+refresh token it acts with.
+
 Forgejo has no port of its own: people reach its sign-in, sign-up, OAuth and
 account pages through the proxy on `FORGEJO_PUBLIC_URL`, its own hostname,
 and the proxy answers 404 for everything else of it, the web UI, the API,
@@ -138,10 +159,10 @@ The frontend is a separate line on purpose. Everything else runs without it, and
 the proxy starts whether or not the app services are there, so you can work on
 one repo with the rest of the stack up. Start it whenever it builds.
 
-The Forgejo URL is compiled into the frontend bundle, for the account page
-links, so a production image has to be built with `--build-arg` setting
-`VITE_FORGE_URL` to the real Forgejo URL. The dev override passes
-`FORGEJO_PUBLIC_URL` for it.
+The frontend image holds nothing about the deployment. Where Forgejo is, for
+the sign-in, account and sign-out links, it asks the backend at
+`GET /api/v1/auth/forge-url`, which answers `FORGEJO_PUBLIC_URL`; so the
+published image runs on any stack as it is.
 
 Then:
 
@@ -149,31 +170,40 @@ Then:
 curl http://localhost:8080/api/v1/time      # {"now": "..."}
 curl -i http://localhost:8080/readyz        # 200 once Postgres answers
 curl -i http://localhost:8080/-/proxy       # 204, nginx itself
-curl http://localhost:8080/openapi.json     # what the frontend generates from
 ```
 
 One origin holds all of it: the frontend on `/` and its pages, every organiser
 page under `/orgs`, a contest's page and its tasks' pages under `/contests/`,
-the API on `/api/`, the health endpoints, `/-/proxy` for the
-proxy's own healthcheck, and `/openapi.json`, which the frontend reads with
-`pnpm gen:api --from http://localhost:8080/openapi.json`. Two API paths are
+the API on `/api/`, the health endpoints, and `/-/proxy` for the
+proxy's own healthcheck. The backend's API document, `/openapi.json`, is
+answered 404: the frontend generates its client from the copy committed in
+the backend's repository. Two API paths are
 refused: `/api/v1/events/`, where the forge pushes an org's events, and
 `/api/v1/ci/`, the CI's configuration extension. Both are called inside the
-stack, at `UNICON_INTERNAL_URL`, and nothing outside has a reason to call
+stack, at `http://backend:8000`, and nothing outside has a reason to call
 them. A grading machine's two calls, a grading's envelope and its callback
 under `/api/v1/gradings/`, go to the backend with the rest of `/api/`. The
 access log drops the query string of `/api/v1/auth/callback`, so the login
 `code` and `state` never reach disk.
 
-Two object storage paths go to Garage, each for the writes it exists for:
-`/unicon-uploads/` takes POST and PUT, a browser's upload before a submit,
-and `/unicon-results/` takes PUT, a grading machine's run log. Each request
-carries a presigned signature the backend made for the host it handed out,
-`UNICON_PUBLIC_URL` for a browser and `UNICON_MACHINE_URL` for a machine, so
-the proxy passes the Host header through as it came, and Garage, which reads
-the bucket from the path, checks the signature that was made. Nothing else of
-Garage is reachable, reads and listings included. An upload is on the app's
-own origin, so it needs no CORS.
+One object storage path goes to Garage, for the one write that comes from
+outside: `/unicon-results/` takes PUT, a grading machine's run log. The
+request carries a presigned signature the backend made for
+`UNICON_MACHINE_URL`, so the proxy passes the Host header through as it came,
+and Garage, which reads the bucket from the path, checks the signature that
+was made. Nothing else of Garage is reachable, reads and listings included.
+
+What people upload does not come this way. `/-/uploads/<id>` takes PUT, one
+file, and before nginx reads a byte of the body it asks the backend whether
+that upload may start (`auth_request`). The backend answers, for the owner's
+own waiting upload of exactly that length, with where at the forge the bytes
+go and the credential to present there, and nginx streams the body to
+Forgejo's large-file endpoint with that credential in place of whatever the
+browser sent and the app's cookie dropped. Forgejo hashes the body as it
+stores it and refuses anything that is not what the address names. Its
+refusals name the object store's address in them, so every answer but a
+success and the size refusal becomes a bare 403. The door is on the app's own
+origin, so it needs no CORS and the session cookie goes with it.
 
 The app is at `http://localhost:8080`, Forgejo at `http://forge.localhost:8080`,
 on the same proxy under its own hostname, so the two never share cookies. Any
@@ -181,7 +211,8 @@ name under `.localhost` is loopback for browsers and most resolvers, so no
 hosts entry is needed; the Woodpecker container reaches the same name through
 the Docker host gateway for its OAuth token request. Sign in through the app;
 Forgejo is where the account lives. In development Forgejo takes new
-sign-ups and sends its mail to Mailpit, which delivers nothing: the
+sign-ups unless `.env` says `SIGN_UP_OPEN=false`, and sends its mail to
+Mailpit, which delivers nothing: the
 confirmation link for an account you make is at http://localhost:8025. The dev override also
 publishes Forgejo on `127.0.0.1:3300` for `scripts/check-lfs.py`, which
 drives its API from this machine; nothing else uses that port.
@@ -189,10 +220,11 @@ drives its API from this machine; nothing else uses that port.
 ## What bootstrap made
 
 Two Forgejo accounts. `unicon-backend` is a site administrator and holds the
-provisioning token: the backend uses it to create organisations, repositories,
-teams and protected tags, and never to act for a person.
-`UNICON_FORGE_PLATFORM_ACCOUNT` names it to the backend, which reserves the
-protected tags for that one account. `unicon-ci` is an
+admin token, `UNICON_FORGE_ADMIN_TOKEN`: the backend uses it to create
+organisations, repositories, teams and protected tags, and never to act for a
+person.
+`compose.yaml` names it to the backend as `UNICON_FORGE_PLATFORM_ACCOUNT`, and
+the backend reserves the protected tags for that one account. `unicon-ci` is an
 ordinary account that Woodpecker signs in as. Two accounts rather than one,
 because Woodpecker insists on a real forge login for its own user and the
 site-administrator token must not sit in Woodpecker's database.
@@ -201,10 +233,10 @@ Two Forgejo OAuth applications, one for Unicon and one for Woodpecker. Bootstrap
 talks to Forgejo's API with the curl inside the Forgejo container, configured
 over standard input so no password or token is ever a command-line argument,
 and to Garage through `garage json-api` inside its container, which speaks the
-same admin API over Garage's internal RPC. Neither needs a port open for it. Four Garage buckets: `forgejo-lfs` for Forgejo, and `unicon-uploads` for
-what a browser uploads before a submit, `unicon-results` for grading logs and
-`unicon-exports`, reserved, for the backend, with a separate access key for
-each side. It creates no other bucket and removes none. A Woodpecker API token
+same admin API over Garage's internal RPC. Neither needs a port open for it. Two Garage buckets: `forgejo-lfs` for
+Forgejo, which holds every file a person uploads, and `unicon-results` for
+the backend, which holds grading logs, with a separate access key for each
+side. It creates no other bucket and removes none. A Woodpecker API token
 for `unicon-ci`.
 
 Three primitives and one workflow at the forge, in the platform org
@@ -259,14 +291,20 @@ grading runs, from the image manifest: `UNICON_HARNESS_IMAGE` and
 overlay runs and the images it lets containers be made from, which is every
 image any version of a primitive at the forge names. `.env.example` lists every key
 with a comment and is the template bootstrap fills, so a key added there appears
-in the next generated `.env`. Three of its keys are settings rather than
-secrets, with defaults bootstrap writes as they are: `UNICON_INTERNAL_URL`,
-`http://backend:8000`, is where the forge reaches Unicon inside the stack,
+in the next generated `.env`. The rest of what the backend reads,
+`compose.yaml` writes itself: the database URL, from `UNICON_DB_PASSWORD`; the
+Forgejo a browser uses, from `FORGEJO_PUBLIC_URL`; the two bucket names and
+the platform account, which are what bootstrap makes; and the addresses inside
+the stack, Forgejo at `http://forgejo:3000`, the CI at
+`http://woodpecker-server:8000`, Garage at `http://garage:3900` in the region
+`garage/garage.toml` names, and the backend itself at `http://backend:8000`,
 which is where every org's event push and the CI's configuration extension
-point, and why `forgejo/app.ini` allows the host `backend` for webhooks;
-`UNICON_ORG_CREATION_OPEN`, `true`, lets any signed-in person create an org,
-and a deployment open to strangers sets it to `false` and creates orgs with
-`unicon create-org`; `UNICON_MACHINE_URL`, empty, is where a grading machine
+point, and why `forgejo/app.ini` allows the host `backend` for webhooks. The
+backend marks its cookies Secure exactly when `UNICON_PUBLIC_URL` is https.
+Two more keys of `.env` are settings rather than secrets, with defaults
+bootstrap writes as they are: `UNICON_ORG_CREATION_OPEN`, `true`, lets any signed-in
+person create an org, and a deployment open to strangers sets it to `false`
+and creates orgs with `unicon create-org`; `UNICON_MACHINE_URL`, empty, is where a grading machine
 reaches the platform, `UNICON_PUBLIC_URL` when empty, and `compose.dev.yaml`
 sets it to `http://proxy` for the agent it runs, whose steps reach the
 proxy on the grading network.
@@ -308,7 +346,7 @@ Today it pins runner `v0.3.0` and the three primitives, `compile`,
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
 four from `../runner`, each primitive from `../primitive-<name>`, as they are
-on disk, committed or not. It runs `registry:2` on `127.0.0.1:5000` in a
+on disk, committed or not. It runs `registry:2.8.3` on `127.0.0.1:5000` in a
 container of its own, `unicon-registry`, outside the compose stack and with
 its images in the volume `unicon-registry`, pushes each image there to learn
 its digest, and writes `images.local.json` in the same shape, with each
@@ -405,13 +443,21 @@ read-only into Forgejo's custom path, `/data/gitea`:
   the PNG sizes Forgejo wants beside them, and `avatar_default.png`. These are
   the file names Forgejo looks up itself, so they stand in for its own.
 - `public/assets/css/unicon.css` is one stylesheet. It hides Forgejo's
-  navigation bar and footer and sets Forgejo's colour, radius and font
-  variables to the frontend theme's values, so the forms take the app's look.
+  navigation bar and footer, hides every item of the settings menu but the
+  three pages the proxy routes, Profile, Account and Security, so a page a
+  later Forgejo adds stays hidden too, and sets Forgejo's colour, radius and
+  font variables to the frontend theme's values, so the forms take the app's
+  look.
   The font families are named with fallbacks only, and the page fetches
   nothing from outside.
 - `templates/custom/header.tmpl` is the one template, and it is Forgejo's
   extension point rather than one of its pages: Forgejo includes it at the end
   of `<head>`, and it carries the link to the stylesheet.
+
+`forgejo/app.ini` turns off what those pages would offer and nothing here
+supports: deleting the account, which is Unicon's flow, SSH and GPG keys,
+since git is closed to people (`USER_DISABLED_FEATURES`), and the package
+registry. Forgejo then refuses them itself, not only the proxy.
 
 Forgejo's own templates are not edited. The files live in this repo rather
 than in the Forgejo volume, so an upgrade of the image keeps them, and a change
@@ -434,7 +480,8 @@ Commits a 500 MB random file through Forgejo's contents API into a repository
 whose `.gitattributes` sends `*.bin` to LFS, reads it back through `/media`,
 compares the sha256, and confirms the bytes arrived in the Garage bucket rather
 than on the Forgejo container disk. If a size fails it halves and tries again,
-so the output names a ceiling that works.
+so the output names a ceiling that works. `--exact` fails on the size asked
+for, which is how CI runs it.
 
 ## Submit and grade from the browser
 
@@ -447,7 +494,7 @@ UNICON_E2E_URL=http://localhost:8080 uv run pytest tests/e2e
 stack, both profiles up, from a new org to two verdicts. It makes an
 organiser and a contestant with `unicon create-account` and signs both in
 through Forgejo's pages. The organiser creates an org, a contest and a task
-from the organiser pages, saves `task.yaml` so the task publishes (with a
+from the organiser pages, opening each one's page as soon as it is made, saves `task.yaml` so the task publishes (with a
 looser submission rate than the starter's one per 30 seconds, so the second
 submit is not refused), checks that making the task added it to
 `contest.yaml`'s tasks, and saves `contest.yaml` so the contest is published
@@ -456,6 +503,8 @@ contestants table, and the contestant submits the sample solution and then a
 wrong one from the submit panel; the test expects `ACCEPTED` and then
 `WRONG ANSWER` in their submissions list. Both are graded by the real CI on
 the dev agent, through the socket filter, with the primitives at the forge.
+Last, the contestant signs out, and signing in again asks Forgejo for their
+password: signing out of the app signed the browser out of Forgejo too.
 Every name carries a random suffix, so it runs again on the same stack
 without clearing anything; it takes about a minute. Without `UNICON_E2E_URL`
 it is skipped, so `uv run pytest` stays a unit run. `UNICON_E2E_COMPOSE` is
@@ -466,14 +515,14 @@ In CI it runs in the stack job, on the freshly bootstrapped stack, once the
 dev agent has connected. That job builds everything from the `main` branch
 of each sibling, so it passes only once each of these is on its `main`:
 
-- `forge`: the submit, dispatch, extension, envelope and callback services
+- `forge`: the submit, grading, extension, envelope and callback services
   (feature 6), which the backend image builds against through the `forge`
   context while it develops by path, or through the release it pins;
 - `backend`: the upload, submission, grading and machine routes, and the
   `Dockerfile` with the `forge` stage;
 - `frontend`: the submit panel and the submissions list;
 - `runner`: the harness, the clone image and the socket filter at contract
-  version 3;
+  version 4;
 - `primitive-compile`, `primitive-sandbox-run` and `primitive-diff-check`:
   their first versions, each with a `Dockerfile` at the root.
 
@@ -506,11 +555,14 @@ answer carries the security headers, and no container publishes Forgejo on
 every interface. From inside the proxy it checks that the development git
 listener passes a checkout's reads of the forge's host and answers 404 to a
 push, the forge's API, a path that only becomes a checkout path once
-resolved, and every other host. It then runs bootstrap a second time and fails if `.env`
+resolved, and every other host. It checks that sign-up is open on both
+sides, Forgejo's form and the backend's Create account link. It then runs bootstrap a second time and fails if `.env`
 changed or the run made anything, and checks that the three primitives and the
 workflow are at the forge at `v1`. Between the two it starts the `agent`
-profile, waits for the dev agent to connect, and runs the browser test
-below.
+profile, waits for the dev agent to connect, runs the browser test above,
+and runs `scripts/check-lfs.py --exact` for one 500 MB file. Last, it sends a burst of sign-in posts and expects some through and
+some refused with 429, then sets `SIGN_UP_OPEN=false`, runs bootstrap again
+and checks that both sides have closed.
 Every push and pull request runs it, so a change to compose, a config file or
 bootstrap is caught the day it breaks. Later end-to-end tests run on top of
 this job rather than starting a stack of their own.

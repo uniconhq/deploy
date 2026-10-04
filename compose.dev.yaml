@@ -4,11 +4,12 @@
 #
 # It does four things: builds backend and frontend from the sibling checkouts
 # instead of pulling images, publishes the internal services so tools on this
-# machine can reach them, opens Forgejo's sign-up and catches its mail in
-# Mailpit, so a person can make an account and confirm its address from
-# http://localhost:8025, and can run one grading machine on this laptop under
-# the `agent` profile: a CI agent, the socket filter beside it, and the shared
-# store for large task files.
+# machine can reach them, catches Forgejo's mail in Mailpit, so a person can
+# make an account and confirm its address from http://localhost:8025, and can
+# run one grading machine on this laptop under the `agent` profile: a CI
+# agent, the socket filter beside it, and the shared store for large task
+# files. Sign-up is open on a stack started with this file unless .env says
+# SIGN_UP_OPEN=false; bootstrap decides it, not this file.
 #
 # Every port opened here is bound to 127.0.0.1. A published port with no host
 # address listens on every interface, so on a laptop joined to a conference
@@ -45,11 +46,9 @@ services:
     ports:
       - "127.0.0.1:3300:3000"
     environment:
-      # Dev only. A production instance decides sign-up deliberately, with a
-      # mail server of its own in .env. Here sign-up is open and every mail
-      # goes to Mailpit, so an address is confirmed the same way as in
-      # production, by the link in the mail.
-      FORGEJO__service__DISABLE_REGISTRATION: "false"
+      # Dev only. A production instance sends mail through a server of its
+      # own in .env. Here every mail goes to Mailpit, so an address is
+      # confirmed the same way as in production, by the link in the mail.
       FORGEJO__service__REGISTER_MANUAL_CONFIRM: "false"
       FORGEJO__mailer__ENABLED: "true"
       # Plain SMTP to Mailpit, on the compose network and holding no password.
@@ -124,9 +123,6 @@ services:
         forge: ../forge
     image: unicon/backend:dev
     environment:
-      # The other half of the Forgejo registration override above: Forgejo takes
-      # sign-ups here, so the landing page may offer Create account.
-      UNICON_FORGE_REGISTRATION_OPEN: "true"
       # The dev agent's steps join the grading network, where the proxy is,
       # so the harness reaches the platform at the proxy's name on it: the
       # envelope and the callback under /api/, the log upload under
@@ -137,9 +133,6 @@ services:
   frontend:
     build:
       context: ../frontend
-      # The Forgejo URL is baked into the bundle, for the account page links.
-      args:
-        VITE_FORGE_URL: "${FORGEJO_PUBLIC_URL}"
     image: unicon/frontend:dev
 
   # One grading machine on the laptop, beside the stack: the CI agent and the
