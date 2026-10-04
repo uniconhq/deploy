@@ -138,14 +138,16 @@ def test_the_local_manifest_is_read_when_a_build_wrote_one(tmp_path: Path) -> No
     assert images.choose(tmp_path, Path("other.json")) == tmp_path / "other.json"
 
 
-def test_env_gets_the_manifest_images_and_the_bucket_names() -> None:
+def test_env_gets_the_manifest_images() -> None:
     manifest = images.load(DEPLOY / images.RELEASE_MANIFEST)
-    values = {"UNICON_DB_PASSWORD": "x", "FORGEJO_PUBLIC_URL": "http://f.localhost"}
+    values = {
+        "UNICON_DB_PASSWORD": "x",
+        "FORGEJO_PUBLIC_URL": "http://f.localhost",
+        "UNICON_SESSION_HARD_TTL": "2592000",
+    }
 
-    main._derive_values(values, manifest)
+    main._derive_values(values, manifest, development=False)
 
     assert values["UNICON_HARNESS_IMAGE"] == manifest.harness
     assert values["UNICON_CLONE_IMAGE"] == manifest.clone
     assert values["UNICON_FILTER_IMAGE"] == manifest.socket_filter
-    assert values["UNICON_S3_UPLOADS_BUCKET"] == "unicon-uploads"
-    assert values["UNICON_S3_RESULTS_BUCKET"] == "unicon-results"

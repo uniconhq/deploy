@@ -209,6 +209,16 @@
   display: none;
 }
 
+/*
+ * The settings menu lists every page Forgejo has, and the proxy routes three
+ * of them (proxy/nginx.conf): Profile, Account and Security. Every other item
+ * is hidden by default rather than by name, so a page a later Forgejo adds to
+ * the menu stays hidden too, the same way the proxy answers 404 for it.
+ */
+.user.settings .flex-container-nav .menu > a.item:not([href="/user/settings"]):not([href="/user/settings/account"]):not([href="/user/settings/security"]) {
+  display: none;
+}
+
 .full.height {
   padding-bottom: 0;
 }

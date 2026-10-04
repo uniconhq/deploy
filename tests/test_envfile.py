@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import os
+import re
 from pathlib import Path
 
 import pytest
 
 from bootstrap import envfile
+
+DEPLOY = Path(__file__).resolve().parent.parent
 
 TEMPLATE = """# A comment
 FILLED=
@@ -126,3 +129,42 @@ def test_a_key_the_template_gained_since_env_was_written_takes_its_default(
 
     assert values == {"FILLED": "kept", "KEPT": "from .env"}
     assert _starting_values(template, {}) == {"KEPT": "from the template"}
+
+
+def test_a_rerun_drops_the_keys_nothing_reads(template: Path) -> None:
+    """An older .env that still holds a retired key, set by hand or by an
+    earlier bootstrap, loses it on the next run instead of carrying it under
+    the added-outside-the-template marker."""
+    from bootstrap.main import RETIRED, _starting_values
+
+    previous = {key: "stale" for key in RETIRED} | {"FILLED": "kept"}
+
+    values = _starting_values(template, previous)
+
+    assert values == {"FILLED": "kept", "KEPT": "from the template"}
+    assert envfile.ADDED_OUTSIDE_TEMPLATE not in envfile.render(template, values)
+
+
+def test_no_retired_key_is_in_the_template_or_the_compose_files() -> None:
+    from bootstrap.main import RETIRED
+
+    template = envfile.load(DEPLOY / ".env.example")
+    assert RETIRED.isdisjoint(template)
+    for name in ("compose.yaml", "compose.dev.yaml"):
+        text = (DEPLOY / name).read_text(encoding="utf-8")
+        read = set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)", text))
+        assert RETIRED.isdisjoint(read), name
+
+
+def test_compose_names_what_bootstrap_makes() -> None:
+    """compose.yaml writes the bucket name and the platform account into the
+    backend's environment itself, so they have to be the ones bootstrap
+    makes. The backend has one bucket: what people upload goes through the
+    upload door into the one Forgejo owns."""
+    from bootstrap import main
+
+    text = (DEPLOY / "compose.yaml").read_text(encoding="utf-8")
+
+    assert "UNICON_S3_UPLOADS_BUCKET" not in text
+    assert f"UNICON_S3_RESULTS_BUCKET: {main.RESULTS_BUCKET}\n" in text
+    assert f"UNICON_FORGE_PLATFORM_ACCOUNT: {main.BACKEND_ACCOUNT}\n" in text
