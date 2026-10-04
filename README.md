@@ -184,7 +184,13 @@ stack, at `http://backend:8000`, and nothing outside has a reason to call
 them. A grading machine's two calls, a grading's envelope and its callback
 under `/api/v1/gradings/`, go to the backend with the rest of `/api/`. The
 access log drops the query string of `/api/v1/auth/callback`, so the login
-`code` and `state` never reach disk.
+`code` and `state` never reach disk, and the same on the forge's host for
+the sign-in's start, `/login/oauth/authorize`, and for the address
+confirmation and password reset links in Forgejo's mail. Forgejo and Garage
+keep queries out of their own logs too: Forgejo's per-request lines are
+written only at Warn (`forgejo/app.ini`, `[log.router]`), and Garage's
+request log, which would hold presigned signatures, only for server errors
+(`RUST_LOG` in `compose.yaml`).
 
 One object storage path goes to Garage, for the one write that comes from
 outside: `/unicon-results/` takes PUT, a grading machine's run log. The
