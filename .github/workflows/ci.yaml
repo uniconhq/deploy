@@ -305,14 +305,14 @@ jobs:
           grep -q 'present  workflow unicon/classic version v1$' second-run.txt
 
       # After the browser test, which signs in from this machine too. A burst
-      # of 100 sign-in posts from one address: 20 over the rate pass at once,
-      # 40 wait their turn, and the rest are refused with 429; a page load is
-      # never held. The waiting ones are cut off at 4 seconds.
+      # of 300 sign-in posts from one address: 240 over the rate pass at once,
+      # none held, and the rest are refused with 429; a page load is never
+      # held.
       - name: sign-in posts are slowed per address
         working-directory: deploy
         run: |
           resolve="--resolve forge.localhost:8080:127.0.0.1"
-          seq 100 | xargs -P 100 -I{} curl -s -o /dev/null -w '%{http_code}\n' --max-time 4 \
+          seq 300 | xargs -P 100 -I{} curl -s -o /dev/null -w '%{http_code}\n' --max-time 4 \
             $resolve -X POST -d 'user_name=nobody&password=x' \
             http://forge.localhost:8080/user/login > posts.txt || true
           sort posts.txt | uniq -c
