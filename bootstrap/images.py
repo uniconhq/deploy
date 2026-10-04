@@ -13,7 +13,7 @@ bootstrap mirrors that repository into the forge (primitives.py).
       "primitives": {
         "compile": {
           "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
-          "source": {"github": "uniconhq/primitive-compile", "tag": "v0.1.0"}
+          "source": {"github": "uniconhq/primitive-compile", "tag": "v1.0.0"}
         }
       }
     }

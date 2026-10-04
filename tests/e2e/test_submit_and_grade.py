@@ -50,7 +50,7 @@ COMPOSE = shlex.split(
 )
 DEPLOY = Path(__file__).resolve().parents[2]
 VERDICT_TIMEOUT_MS = 300_000
-PROVISIONING_TIMEOUT_MS = 120_000
+CREATE_TIMEOUT_MS = 60_000
 
 SAMPLE = "a, b = map(int, input().split())\nprint(a + b)\n"
 WRONG = "a, b = map(int, input().split())\nprint(a - b)\n"
@@ -113,23 +113,22 @@ def sign_in(page: Page, username: str, password: str) -> None:
     page.wait_for_url(f"{APP}/")
 
 
-def create(
-    page: Page, name: str, button: str, opened: str, start: str | None = None
-) -> None:
+def create(page: Page, name: str, button: str, start: str | None = None) -> None:
     """Make `name` with the page's create form, opened first with the button
-    `start` when the form is behind one, follow it until it is made, and
-    open its page through the link that then appears. The new page is known
-    by its title: the router swaps pages in a transition, so for a moment the
-    address is the new page's while the old one is still shown.
+    `start` when the form is behind one, and open its page: the new org's
+    page comes up by itself, and a new contest or task is a link in the list
+    once it is made. The new page is known by its title: the router swaps
+    pages in a transition, so for a moment the address is the new page's
+    while the old one is still shown.
     """
     if start is not None:
         page.get_by_role("button", name=start, exact=True).click()
     page.get_by_role("textbox", name=re.compile("^Name")).fill(name)
     page.get_by_role("button", name=button, exact=True).click()
-    page.get_by_role("link", name=opened, exact=True).click(
-        timeout=PROVISIONING_TIMEOUT_MS
-    )
-    expect(page.get_by_role("heading", name=name, level=1, exact=True)).to_be_visible()
+    title = page.get_by_role("heading", name=name, level=1, exact=True)
+    if start is not None:
+        page.get_by_role("link", name=name, exact=True).click(timeout=CREATE_TIMEOUT_MS)
+    expect(title).to_be_visible(timeout=CREATE_TIMEOUT_MS)
 
 
 def edit_and_save(page: Page, file: str, change: str | None = None) -> None:
@@ -238,12 +237,10 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
 
     sign_in(organiser, organiser_name, organiser_password)
     organiser.goto(f"{APP}/orgs/new")
-    create(organiser, org, "Create org", f"Open the org {org}")
-    create(
-        organiser, "spring", "Create contest", "Open the contest spring", "New contest"
-    )
+    create(organiser, org, "Create org")
+    create(organiser, "spring", "Create contest", "New contest")
     contest_page = organiser.url
-    create(organiser, "sum", "Create task", "Open the task sum", "New task")
+    create(organiser, "sum", "Create task", "New task")
 
     organiser.get_by_role("link", name="task.yaml", exact=True).click()
     task_yaml = organiser.get_by_role("textbox", name="task.yaml").input_value()
@@ -273,12 +270,10 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
     expect(organiser.get_by_text("Approved")).to_be_visible()
 
     expect(contestant.get_by_text("You are in")).to_be_visible(
-        timeout=PROVISIONING_TIMEOUT_MS
+        timeout=CREATE_TIMEOUT_MS
     )
     contestant.goto(f"{APP}/contests/{org}/spring/tasks/sum")
-    expect(contestant.get_by_role("form", name="Submit")).to_be_visible(
-        timeout=PROVISIONING_TIMEOUT_MS
-    )
+    expect(contestant.get_by_role("form", name="Submit")).to_be_visible()
 
     submit(contestant, 1, SAMPLE)
     assert verdict_of(contestant, 1) == "ACCEPTED"

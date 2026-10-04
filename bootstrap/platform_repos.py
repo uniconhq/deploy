@@ -23,7 +23,7 @@ names files that are no longer at that tag, which is exactly why it is never
 done without being told to.
 
 Every call goes through the Forgejo API from inside its container, with the
-provisioning token, the way forgejo.py reaches it. Anything the API answers
+admin token, the way forgejo.py reaches it. Anything the API answers
 404 for is absent; any other refusal stops the run.
 """
 
@@ -81,7 +81,7 @@ class PlatformRepos:
     def ensure_platform_org(self) -> bool:
         """Returns True if this run created the platform org.
 
-        Made with the provisioning token, so its Owners team holds the
+        Made with the admin token, so its Owners team holds the
         platform account and nobody else. Limited, not private: Forgejo hides
         every repository of a private organisation from non-members, public
         ones included, and the built-in workflows and primitives are there to
