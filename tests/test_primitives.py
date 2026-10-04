@@ -34,7 +34,6 @@ SECOND = "localhost:5000/uniconhq/primitive-compile@sha256:" + "2" * 64
 RUNNER = "@sha256:" + "0" * 64
 DECLARATION = b"""# The compile primitive.
 name: unicon/compile
-entrypoint: [/usr/local/bin/compile]
 batch: false
 inputs:
   source: {type: file}

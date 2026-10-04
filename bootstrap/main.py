@@ -26,13 +26,20 @@ which the overlay's socket filter joins, and deletes any other agent that
 would take a grading run and has gone silent. Only there does --rewrite-v1 rewrite
 the built-in v1 versions in place instead of leaving them.
 
-Four Garage buckets and no other: FORGEJO_LFS_BUCKET for Forgejo, and the three
-in UNICON_BUCKETS for the backend, where unicon-uploads holds what a browser
-uploads before a submit, unicon-results the grading logs, and unicon-exports is
-reserved.
+Two Garage buckets and no other: FORGEJO_LFS_BUCKET for Forgejo, which holds
+every file a person uploads, and RESULTS_BUCKET for the backend, which holds
+the grading logs. Nothing a browser sends goes into a bucket the platform
+signs for: it goes through the upload door into Forgejo's own.
 
 GENERATORS lists every key .env holds that is generated here rather than
 discovered from a service. A key already carrying a value is left alone.
+
+RETIRED lists keys an older .env may hold that nothing reads: the addresses
+of the services on the compose network, the bucket names, the platform
+account and the database URL, which compose.yaml writes itself, and the
+settings whose value the backend works out on its own. A run drops them
+rather than carrying them across, so nothing in .env looks like a setting
+that is not one.
 
 UNLOCKS names, for each generated secret that data on disk depends on, the
 volume that data lives in: Forgejo's four secrets decrypt and sign what is in
@@ -75,13 +82,8 @@ BACKEND_ACCOUNT = "unicon-backend"
 CI_ACCOUNT = "unicon-ci"
 
 FORGEJO_LFS_BUCKET = "forgejo-lfs"
-UPLOADS_BUCKET = "unicon-uploads"
 RESULTS_BUCKET = "unicon-results"
-UNICON_BUCKETS = (
-    UPLOADS_BUCKET,
-    RESULTS_BUCKET,
-    "unicon-exports",
-)
+UNICON_BUCKETS = (RESULTS_BUCKET,)
 
 COMPOSE_PROJECT = "unicon"
 DEVELOPMENT_OVERLAY = "compose.dev.yaml"
@@ -97,6 +99,26 @@ GRADING_SERVICES: dict[str, tuple[str, ...]] = {
     ),
     "woodpecker-agent": ("WOODPECKER_DEV_AGENT_TOKEN",),
 }
+
+RETIRED = frozenset(
+    {
+        "UNICON_DATABASE_URL",
+        "UNICON_FORGE_PUBLIC_URL",
+        "UNICON_FORGE_INTERNAL_URL",
+        "UNICON_INTERNAL_URL",
+        "UNICON_FORGE_PLATFORM_ACCOUNT",
+        "UNICON_WOODPECKER_URL",
+        "UNICON_S3_ENDPOINT",
+        "UNICON_S3_REGION",
+        "UNICON_S3_UPLOADS_BUCKET",
+        "UNICON_S3_RESULTS_BUCKET",
+        "UNICON_COOKIE_SECURE",
+        "UNICON_FORGE",
+        "WOODPECKER_AGENT_SECRET",
+    }
+)
+
+BACKEND_READS_TOO = ("FORGEJO_PUBLIC_URL", "WOODPECKER_PUBLIC_URL")
 
 UNLOCKS: dict[str, str] = {
     "FORGEJO_SECRET_KEY": "forgejo-data",
@@ -150,9 +172,12 @@ def main(argv: list[str] | None = None) -> int:
         previous = envfile.load(env_path)
         _refuse_to_regenerate_over_existing_data(compose, env_path, previous)
         values = _starting_values(template, previous)
+        retired = sorted(RETIRED & previous.keys())
+        if retired:
+            print(f"dropped from .env, as nothing reads them: {', '.join(retired)}")
 
         _generate_missing_secrets(values, summary)
-        _derive_values(values, manifest)
+        _derive_values(values, manifest, development=development)
         if development:
             values["DOCKER_SOCKET_GID"] = compose.socket_group(SOCKET_PROBE_IMAGE)
         envfile.write(env_path, template, values)
@@ -295,13 +320,17 @@ def _refuse_to_regenerate_over_existing_data(
 
 
 def _starting_values(template: Path, previous: dict[str, str]) -> dict[str, str]:
-    """Template defaults, overridden by anything a previous run already wrote."""
+    """Template defaults, overridden by anything a previous run already wrote,
+    except the RETIRED keys, which are dropped.
+    """
     values = {k: v for k, v in envfile.defaults(template).items() if v}
-    values.update({k: v for k, v in previous.items() if v})
+    values.update({k: v for k, v in previous.items() if v and k not in RETIRED})
     return values
 
 
-def _derive_values(values: dict[str, str], manifest: Manifest) -> None:
+def _derive_values(
+    values: dict[str, str], manifest: Manifest, *, development: bool
+) -> None:
     """Values that are a restatement of another one, recomputed every run.
 
     They are written with the generated secrets rather than at the end, so an
@@ -312,51 +341,84 @@ def _derive_values(values: dict[str, str], manifest: Manifest) -> None:
     MAIL_SMTP_ADDR, so Forgejo's mailer is on exactly when there is a server
     to send through, and MAIL_PROTOCOL follows MAIL_SMTP_PORT, so the mail
     is always encrypted: TLS from the start on 465, STARTTLS required on any
-    other port. UNICON_FORGE_PUBLIC_URL
-    is a copy of the same URL, because the backend sends people to the Forgejo
-    their browser uses: two keys for one URL is two chances to disagree, and
-    the symptom of disagreeing is a login redirect to a host the browser cannot
-    resolve.
+    other port.
 
-    The two bucket names are the ones bootstrap makes, and the three images
-    are the image manifest's, so none of them can be set to something that is
-    not there.
+    SIGN_UP_OPEN is the one switch for people making their own accounts, and
+    the two settings that carry it out follow from it:
+    FORGEJO_DISABLE_REGISTRATION, which makes Forgejo take or refuse a
+    sign-up, and UNICON_FORGE_REGISTRATION_OPEN, which decides whether the
+    landing page offers Create account. Set apart, one could say open while
+    the other said closed. FORGEJO_REFRESH_TOKEN_HOURS follows
+    UNICON_SESSION_HARD_TTL for the same reason: a Unicon session that
+    outlives the Forgejo refresh token behind it can no longer act for the
+    person, so the two are one length of time, in Forgejo's unit.
+
+    The three images are the image manifest's, so none of them can be set to
+    something that is not there.
     """
-    values["UNICON_DATABASE_URL"] = (
-        f"postgresql+psycopg://unicon:{values['UNICON_DB_PASSWORD']}"
-        f"@postgres:5432/unicon"
-    )
     public_url = values["FORGEJO_PUBLIC_URL"]
     host = urlparse(public_url).hostname
     if not host:
         raise ValueError(f"FORGEJO_PUBLIC_URL has no host: {public_url}")
     values["FORGEJO_DOMAIN"] = host
-    values["UNICON_FORGE_PUBLIC_URL"] = public_url
     values["MAIL_ENABLED"] = "true" if values.get("MAIL_SMTP_ADDR") else "false"
     values["MAIL_PROTOCOL"] = (
         "smtps" if values.get("MAIL_SMTP_PORT") == "465" else "smtp+starttls"
     )
-    values["UNICON_S3_UPLOADS_BUCKET"] = UPLOADS_BUCKET
-    values["UNICON_S3_RESULTS_BUCKET"] = RESULTS_BUCKET
     values["UNICON_HARNESS_IMAGE"] = manifest.harness
     values["UNICON_CLONE_IMAGE"] = manifest.clone
     values["UNICON_FILTER_IMAGE"] = manifest.socket_filter
-    refuse_sign_up_without_mail(values)
+    open_sign_up = sign_up_open(values, development=development)
+    values["UNICON_FORGE_REGISTRATION_OPEN"] = "true" if open_sign_up else "false"
+    values["FORGEJO_DISABLE_REGISTRATION"] = "false" if open_sign_up else "true"
+    values["FORGEJO_REFRESH_TOKEN_HOURS"] = refresh_token_hours(values)
+    refuse_sign_up_without_mail(values, development=development)
 
 
-def refuse_sign_up_without_mail(values: dict[str, str]) -> None:
+def sign_up_open(values: dict[str, str], *, development: bool) -> bool:
+    """Whether SIGN_UP_OPEN opens sign-up. Empty means closed, except on a
+    development stack, where the dev overlay sends every mail to Mailpit and
+    sign-up is how a developer makes an account.
+    """
+    switch = values.get("SIGN_UP_OPEN", "")
+    if switch not in ("", "true", "false"):
+        raise ValueError(
+            f"SIGN_UP_OPEN is {switch!r}. It is true, false, or empty for closed "
+            "(open on a development stack)."
+        )
+    return switch == "true" or (switch == "" and development)
+
+
+def refresh_token_hours(values: dict[str, str]) -> str:
+    """UNICON_SESSION_HARD_TTL in whole hours, rounded up, so the refresh
+    token never runs out before the session does.
+    """
+    given = values.get("UNICON_SESSION_HARD_TTL", "")
+    seconds = int(given) if given.isdigit() else 0
+    if seconds <= 0:
+        raise ValueError(
+            f"UNICON_SESSION_HARD_TTL is {given!r}. It is how long a session "
+            "lives, in seconds, and has to be a whole number above zero."
+        )
+    return str(-(-seconds // 3600))
+
+
+def refuse_sign_up_without_mail(values: dict[str, str], *, development: bool) -> None:
     """Stop when sign-up is open and there is no mail server. Forgejo turns
     its address confirmation off without a word when it cannot send mail, and
     a contest's email_pattern would then let in anyone who types an address.
+    A development stack has Mailpit, which the dev overlay names itself.
     """
-    if values.get("UNICON_FORGE_REGISTRATION_OPEN") == "true" and not values.get(
-        "MAIL_SMTP_ADDR"
+    if (
+        values.get("UNICON_FORGE_REGISTRATION_OPEN") == "true"
+        and not development
+        and not values.get("MAIL_SMTP_ADDR")
     ):
         raise ValueError(
-            "UNICON_FORGE_REGISTRATION_OPEN is true but MAIL_SMTP_ADDR is empty. "
-            "People who sign themselves up confirm their address by mail, and "
-            "without a mail server Forgejo would confirm nobody. Set the MAIL_* "
-            "values in .env, or keep sign-up closed."
+            "SIGN_UP_OPEN is true but MAIL_SMTP_ADDR is empty. People who sign "
+            "themselves up confirm their address by mail, and without a mail "
+            "server Forgejo would confirm nobody. Set the MAIL_* values in .env, "
+            "or keep sign-up closed."
         )
 
 
@@ -433,13 +495,12 @@ def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -
     )
 
     if forgejo.token_is_valid(values.get("UNICON_FORGE_ADMIN_TOKEN", "")):
-        summary.record("forgejo provisioning token", created=False)
+        summary.record("forgejo admin token", created=False)
     else:
         values["UNICON_FORGE_ADMIN_TOKEN"] = forgejo.mint_access_token(
             BACKEND_ACCOUNT, values["FORGEJO_BACKEND_PASSWORD"]
         )
-        summary.record("forgejo provisioning token", created=True)
-    values["UNICON_FORGE_PLATFORM_ACCOUNT"] = BACKEND_ACCOUNT
+        summary.record("forgejo admin token", created=True)
 
     unicon_app, created = forgejo.ensure_oauth_application(
         BACKEND_ACCOUNT,
@@ -625,7 +686,8 @@ def _restart_backend_if_values_changed(
 ) -> None:
     """Hand the backend the values this run changed under it.
 
-    Compose passes the UNICON_* keys in as environment variables and a running
+    Compose passes the UNICON_* keys in as environment variables, with the
+    public URLs of Forgejo and the CI in BACKEND_READS_TOO, and a running
     container never re-reads them, so a re-minted token would sit in .env while
     the backend kept presenting the revoked one. Woodpecker needs no such step:
     everything it reads is written before this run starts it. The socket
@@ -635,7 +697,7 @@ def _restart_backend_if_values_changed(
     changed = sorted(
         key
         for key, value in values.items()
-        if key.startswith("UNICON_")
+        if (key.startswith("UNICON_") or key in BACKEND_READS_TOO)
         and key not in filter_keys
         and previous.get(key) != value
     )

@@ -119,7 +119,7 @@ jobs:
           grep -q '"ready"' readyz.json
           curl -fsS http://localhost:8080/healthz
           curl -fsS http://localhost:8080/ | grep -q '<div id="root">'
-          curl -fsS http://localhost:8080/openapi.json | grep -q '"openapi"'
+          test "$(curl -s -o /dev/null -w '%{http_code}' http://localhost:8080/openapi.json)" = 404
 
       # What the proxy exposes and nothing more. The forge host answers its
       # sign-in and account pages; its web UI, its API, token minting and git
@@ -149,8 +149,9 @@ jobs:
           expect 404 "$app/contestsx"
           expect 404 "$app/api/v1/events/forge/acme"
           expect 404 "$app/api/v1/ci/config"
-          expect 404 "$app/unicon-uploads/uploads/x"
           expect 404 "$app/unicon-results/logs/x"
+          expect 404 "$app/-/uploads/door"
+          expect 404 "$app/-/uploads/not-a-slot"
           expect 404 "$app/forgejo-lfs/lfs/x"
           expect 404 "$app/some/unlisted/path"
           expect 404 "$app/.env"
@@ -180,6 +181,17 @@ jobs:
             echo "Forgejo is published on every interface"; exit 1
           fi
 
+      # SIGN_UP_OPEN is empty, which is open on a development stack: Forgejo
+      # shows its sign-up form and the backend offers Create account. The
+      # last step closes it and checks both again.
+      - name: sign-up is open on both sides
+        working-directory: deploy
+        run: |
+          resolve="--resolve forge.localhost:8080:127.0.0.1"
+          curl -fsS http://localhost:8080/api/v1/auth/register-url | grep -q '"url":"http://forge.localhost:8080/user/sign_up"'
+          curl -fsS http://localhost:8080/api/v1/auth/forge-url | grep -q '"url":"http://forge.localhost:8080"'
+          curl -fsS $resolve http://forge.localhost:8080/user/sign_up | grep -q 'name="user_name"'
+
       # The extension refuses every method from outside, and object storage
       # takes only the writes it is routed for. A write with no signature
       # reaches Garage and is refused there with 403.
@@ -193,10 +205,18 @@ jobs:
             echo "$1 $2 $3"
           }
           expect 404 POST "$app/api/v1/ci/config"
-          expect 403 PUT "$app/unicon-uploads/uploads/x"
           expect 403 PUT "$app/unicon-results/logs/x"
           expect 404 POST "$app/unicon-results/logs/x"
-          expect 404 DELETE "$app/unicon-uploads/uploads/x"
+          # The upload door: the one shape it takes needs a session it has
+          # not got, so it refuses; everything else is not routed at all. The
+          # question the proxy asks the backend is never routed from outside,
+          # whatever it is spelled like.
+          slot="00000000-0000-4000-8000-000000000001"
+          expect 403 PUT "$app/-/uploads/$slot"
+          expect 404 PUT "$app/-/uploads/$slot/extra"
+          expect 404 PUT "$app/-/uploads/not-a-slot"
+          expect 404 GET "$app/-/uploads/door"
+          expect 404 POST "$app/-/uploads/door"
 
       # The development git listener every grading step has as its HTTP
       # proxy. A checkout's reads of the forge's host reach Forgejo, which
@@ -275,6 +295,39 @@ jobs:
             grep -q "present  primitive $name version v1" second-run.txt
           done
           grep -q 'present  workflow unicon/classic version v1$' second-run.txt
+
+      # After the browser test, which signs in from this machine too. A burst
+      # of 100 sign-in posts from one address: 20 over the rate pass at once,
+      # 40 wait their turn, and the rest are refused with 429; a page load is
+      # never held. The waiting ones are cut off at 4 seconds.
+      - name: sign-in posts are slowed per address
+        working-directory: deploy
+        run: |
+          resolve="--resolve forge.localhost:8080:127.0.0.1"
+          seq 100 | xargs -P 100 -I{} curl -s -o /dev/null -w '%{http_code}\n' --max-time 4 \
+            $resolve -X POST -d 'user_name=nobody&password=x' \
+            http://forge.localhost:8080/user/login > posts.txt || true
+          sort posts.txt | uniq -c
+          grep -qx 429 posts.txt
+          grep -qx 200 posts.txt
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 $resolve http://forge.localhost:8080/user/login)" = 200
+
+      # The one switch closed: Forgejo refuses sign-up and the landing page
+      # no longer offers it, from one line of .env and a bootstrap.
+      - name: closing sign-up closes both sides
+        working-directory: deploy
+        run: |
+          sed -i 's/^SIGN_UP_OPEN=.*/SIGN_UP_OPEN=false/' .env
+          uv run bootstrap
+          for _ in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/readyz > /dev/null 2>&1; then break; fi
+            sleep 2
+          done
+          curl -fsS http://localhost:8080/api/v1/auth/register-url | grep -q '"url":null'
+          resolve="--resolve forge.localhost:8080:127.0.0.1"
+          curl -fsS $resolve http://forge.localhost:8080/user/sign_up > sign-up.html
+          grep -q 'Registration is disabled' sign-up.html
+          if grep -q 'name="user_name"' sign-up.html; then echo "Forgejo still offers sign-up"; exit 1; fi
 
       - name: logs
         if: failure()

@@ -1,4 +1,4 @@
-"""Forgejo: the two service accounts, the provisioning token and the OAuth apps.
+"""Forgejo: the two service accounts, the admin token and the OAuth apps.
 
 Forgejo's API is reachable on the compose network and nowhere else: the proxy
 routes people to its sign-in and account pages and nothing more. So bootstrap
@@ -17,9 +17,10 @@ password or a token is never an argument that `ps` or a shell history can show.
 The user accounts are the one exception the Forgejo binary forces: its
 `admin user` commands take the password only as an argument.
 
-The provisioning token carries all scopes. It creates organisations,
-repositories, teams and protected tags, and administers accounts. It is never
-used to act for a person; that is the person's own OAuth token.
+The admin token, UNICON_FORGE_ADMIN_TOKEN, carries all scopes. It creates
+organisations, repositories, teams and protected tags, and administers
+accounts. It is never used to act for a person; that is the person's own
+OAuth token.
 """
 
 from __future__ import annotations
@@ -116,7 +117,7 @@ class Forgejo:
         return status == 200
 
     def mint_access_token(self, username: str, password: str) -> str:
-        """Replace the provisioning token and return the new one.
+        """Replace the admin token and return the new one.
 
         Forgejo shows a token once. If .env no longer has a working one there is
         nothing to recover, so the old token is deleted and a new one minted
