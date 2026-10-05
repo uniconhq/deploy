@@ -48,6 +48,10 @@ x-backend-env: &backend-env
   # Any signed-in person may create an org. A deployment open to strangers
   # turns it off and creates orgs with `unicon create-org`.
   UNICON_ORG_CREATION_OPEN: ${UNICON_ORG_CREATION_OPEN:-true}
+  # Make each approved contestant's place to submit every task ahead of their
+  # first upload, so a contest's start finds them made. Off, each is made at
+  # the first upload, and nobody who never submits costs a repository.
+  UNICON_PLACES_AHEAD: ${UNICON_PLACES_AHEAD:-true}
   # Object storage: Garage inside the network, in the region garage/garage.toml
   # names, the access key bootstrap made for the backend, and the two buckets
   # bootstrap makes. What a browser uploads before a submit goes to the first,
