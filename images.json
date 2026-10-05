@@ -14,10 +14,10 @@
       }
     },
     "sandbox-run": {
-      "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:79c92d294e9b81764dd3b566ac3f2c6d6ee20dd483538503bf55eeaf552b5224",
+      "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:bd4f45b3dc02647b6cf1168fb5e4dc14877be48983ff73b4daf864a3cffe0943",
       "source": {
         "github": "uniconhq/primitive-sandbox-run",
-        "tag": "v1.2.0"
+        "tag": "v1.3.0"
       }
     },
     "diff-check": {
