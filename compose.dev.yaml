@@ -129,6 +129,13 @@ services:
       # /unicon-results/, both signed for this host. localhost would be the
       # step container itself.
       UNICON_MACHINE_URL: http://proxy
+      # Invite mail goes to Mailpit too, the way Forgejo's does above.
+      UNICON_MAIL_SMTP_ADDR: mailpit
+      UNICON_MAIL_SMTP_PORT: "1025"
+      UNICON_MAIL_PROTOCOL: smtp
+      UNICON_MAIL_SMTP_USER: ""
+      UNICON_MAIL_SMTP_PASSWORD: ""
+      UNICON_MAIL_FROM: "Unicon <unicon@forge.localhost>"
 
   frontend:
     build:

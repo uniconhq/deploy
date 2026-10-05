@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml
 
 from bootstrap import main
 from bootstrap.images import Manifest
@@ -76,3 +77,20 @@ def test_a_development_stack_signs_up_through_mailpit() -> None:
     main._derive_values(values, MANIFEST, development=True)
 
     assert values["FORGEJO_DISABLE_REGISTRATION"] == "false"
+
+
+def test_the_backend_mails_through_the_server_forgejo_does() -> None:
+    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    backend = compose["services"]["backend"]["environment"]
+    forgejo = compose["services"]["forgejo"]["environment"]
+
+    pairs = {
+        "UNICON_MAIL_SMTP_ADDR": "FORGEJO__mailer__SMTP_ADDR",
+        "UNICON_MAIL_SMTP_PORT": "FORGEJO__mailer__SMTP_PORT",
+        "UNICON_MAIL_PROTOCOL": "FORGEJO__mailer__PROTOCOL",
+        "UNICON_MAIL_SMTP_USER": "FORGEJO__mailer__USER",
+        "UNICON_MAIL_SMTP_PASSWORD": "FORGEJO__mailer__PASSWD",
+        "UNICON_MAIL_FROM": "FORGEJO__mailer__FROM",
+    }
+    for ours, theirs in pairs.items():
+        assert backend[ours] == forgejo[theirs], ours
