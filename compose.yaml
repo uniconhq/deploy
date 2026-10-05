@@ -293,16 +293,23 @@ services:
     restart: unless-stopped
     # Deliberately no depends_on: the proxy comes up whether or not the app
     # services are running. See the comment in proxy/nginx.conf.
-    # The file is a template: the image fills in ${FORGE_HOST}, the hostname
-    # Forgejo is served under, and ${APP_URL}, where the forge's sign-out sends
-    # the browser back to, and the filter keeps it from touching any other
-    # dollar sign in the file, which are all nginx's own.
+    # The site file is a template: the image fills in ${FORGE_HOST}, the
+    # hostname Forgejo is served under, ${APP_URL}, where the forge's sign-out
+    # sends the browser back to, and the two caps on live streams, and the
+    # filter keeps it from touching any other dollar sign in the file, which
+    # are all nginx's own. main.conf sizes the connections those caps fit in.
     volumes:
+      - ./proxy/main.conf:/etc/nginx/nginx.conf:ro
       - ./proxy/nginx.conf:/etc/nginx/templates/default.conf.template:ro
     environment:
       FORGE_HOST: ${FORGEJO_DOMAIN:?set by bootstrap}
       APP_URL: ${UNICON_PUBLIC_URL:?set by bootstrap}
-      NGINX_ENVSUBST_FILTER: ^(FORGE_HOST|APP_URL)$$
+      LIVE_STREAMS: ${UNICON_LIVE_STREAMS:-3000}
+      LIVE_STREAMS_PER_ADDRESS: ${UNICON_LIVE_STREAMS_PER_ADDRESS:-1000}
+      NGINX_ENVSUBST_FILTER: ^(FORGE_HOST|APP_URL|LIVE_STREAMS|LIVE_STREAMS_PER_ADDRESS)$$
+    # Above the 16384 descriptors main.conf lets each worker open.
+    ulimits:
+      nofile: 65536
     ports:
       - "8080:80"
     healthcheck:

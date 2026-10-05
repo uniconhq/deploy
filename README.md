@@ -93,8 +93,13 @@ The proxy slows form posts to the forge's pages per client address, 30 a
 minute: when a crowd arrives at once from one network, 240 posts over that
 pass at once, a lab of 80 signing in for the first time, and only after
 those is a post refused with a page asking to wait a minute. Loading a page
-is never slowed. It also holds at most 300 open live streams per address,
-and turns away a body over 16 MiB anywhere but the upload door.
+is never slowed. It holds at most 3000 open live streams across the site
+(`UNICON_LIVE_STREAMS`) and 1000 from any one address
+(`UNICON_LIVE_STREAMS_PER_ADDRESS`, the largest lab you expect), so sign-in
+and pages always keep connections of their own: a tab whose stream is turned
+away asks again on its own every few seconds instead. `proxy/main.conf`
+gives nginx the connections those streams fit in. The proxy also turns away
+a body over 16 MiB anywhere but the upload door.
 
 `UNICON_SESSION_HARD_TTL`, how long a Unicon session lives, is likewise the
 one length for both sides: bootstrap writes Forgejo's refresh-token lifetime
