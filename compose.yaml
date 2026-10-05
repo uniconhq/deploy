@@ -263,6 +263,13 @@ services:
     environment:
       GARAGE_RPC_SECRET: ${GARAGE_RPC_SECRET:?set by bootstrap}
       GARAGE_ADMIN_TOKEN: ${GARAGE_ADMIN_TOKEN:?set by bootstrap}
+      # The image's own level, Info for every part of Garage, except the
+      # request log of its HTTP APIs, which writes each request with its
+      # whole query. A presigned URL's signature is in that query, and it
+      # lets anyone reading the log write that object until it expires. At
+      # Warn the request log writes only the requests that end in a server
+      # error, query included.
+      RUST_LOG: garage=info,garage_api_common::generic_server=warn
     volumes:
       - ./garage/garage.toml:/etc/garage.toml:ro
       - garage-meta:/var/lib/garage/meta
