@@ -27,6 +27,7 @@ BASE = {
     "FORGEJO_PUBLIC_URL": "https://forge.example.org",
     "UNICON_SESSION_HARD_TTL": "2592000",
     "MAIL_SMTP_ADDR": "smtp.example.org",
+    "MAIL_FROM": "Unicon <u@example.org>",
 }
 
 

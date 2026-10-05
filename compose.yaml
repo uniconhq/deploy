@@ -71,6 +71,16 @@ x-backend-env: &backend-env
   # submission out with, both by digest from the image manifest (images.json).
   UNICON_HARNESS_IMAGE: ${UNICON_HARNESS_IMAGE}
   UNICON_CLONE_IMAGE: ${UNICON_CLONE_IMAGE}
+  # The mail server invite mail goes through: the one Forgejo sends its
+  # confirmations and password resets through (below), from the same .env
+  # keys, so one set of credentials serves both. MAIL_SMTP_ADDR empty sends
+  # no mail, and an invite is then found in Unicon once its person signs in.
+  UNICON_MAIL_SMTP_ADDR: ${MAIL_SMTP_ADDR:-}
+  UNICON_MAIL_SMTP_PORT: ${MAIL_SMTP_PORT:-587}
+  UNICON_MAIL_PROTOCOL: ${MAIL_PROTOCOL:-smtp+starttls}
+  UNICON_MAIL_SMTP_USER: ${MAIL_SMTP_USER:-}
+  UNICON_MAIL_SMTP_PASSWORD: ${MAIL_SMTP_PASSWORD:-}
+  UNICON_MAIL_FROM: ${MAIL_FROM:-}
 
 services:
   postgres:
