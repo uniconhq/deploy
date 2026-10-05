@@ -348,8 +348,8 @@ never a tag, because a tag can be moved under a running stack; a manifest that
 names one is refused before anything starts. A new release of the runner or
 of a primitive reaches a deployment as a commit changing this file.
 
-Today it pins runner `v0.4.0` and the three primitives, `compile`,
-`sandbox-run` and `diff-check`, at `v1.1.0`.
+Today it pins runner `v0.5.0`, `sandbox-run` at `v1.2.0`, and `compile`
+and `diff-check` at `v1.1.1`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
