@@ -120,7 +120,18 @@ RETIRED = frozenset(
     }
 )
 
-BACKEND_READS_TOO = ("FORGEJO_PUBLIC_URL", "WOODPECKER_PUBLIC_URL")
+BACKEND_READS_TOO = (
+    "FORGEJO_PUBLIC_URL",
+    "WOODPECKER_PUBLIC_URL",
+    "MAIL_SMTP_ADDR",
+    "MAIL_SMTP_PORT",
+    "MAIL_PROTOCOL",
+    "MAIL_SMTP_USER",
+    "MAIL_SMTP_PASSWORD",
+    "MAIL_FROM",
+)
+"""The keys besides the UNICON_* ones compose hands the backend: the public
+URLs of Forgejo and the CI, and the mail server it sends invites through."""
 
 UNLOCKS: dict[str, str] = {
     "FORGEJO_SECRET_KEY": "forgejo-data",
@@ -375,6 +386,7 @@ def _derive_values(
     values["FORGEJO_DISABLE_REGISTRATION"] = "false" if open_sign_up else "true"
     values["FORGEJO_REFRESH_TOKEN_HOURS"] = refresh_token_hours(values)
     refuse_sign_up_without_mail(values, development=development)
+    refuse_mail_without_sender(values)
     refuse_bad_stream_caps(values)
 
 
@@ -423,6 +435,23 @@ def refuse_sign_up_without_mail(values: dict[str, str], *, development: bool) ->
             "server Forgejo would confirm nobody. Set the MAIL_* values in .env, "
             "or keep sign-up closed."
         )
+
+
+def refuse_mail_without_sender(values: dict[str, str]) -> None:
+    """Stop when a mail server is named without a sender or with a port that
+    is not a number. The backend refuses to start on either, and with it
+    every page, where Forgejo would only log it.
+    """
+    if not values.get("MAIL_SMTP_ADDR"):
+        return
+    if not values.get("MAIL_FROM", "").strip():
+        raise ValueError(
+            "MAIL_SMTP_ADDR is set but MAIL_FROM is empty. Name the sender mail "
+            "goes out as, such as Unicon <no-reply@contests.example.org>."
+        )
+    port = values.get("MAIL_SMTP_PORT", "587").strip()
+    if not port.isdigit() or not 0 < int(port) < 65536:
+        raise ValueError(f"MAIL_SMTP_PORT is {port!r}, which is not a port number.")
 
 
 def refuse_bad_stream_caps(values: dict[str, str]) -> None:
@@ -705,7 +734,8 @@ def _restart_backend_if_values_changed(
     """Hand the backend the values this run changed under it.
 
     Compose passes the UNICON_* keys in as environment variables, with the
-    public URLs of Forgejo and the CI in BACKEND_READS_TOO, and a running
+    public URLs of Forgejo and the CI and the mail server's keys in
+    BACKEND_READS_TOO, and a running
     container never re-reads them, so a re-minted token would sit in .env while
     the backend kept presenting the revoked one. Woodpecker needs no such step:
     everything it reads is written before this run starts it. The socket

@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 
 from bootstrap import main
 from bootstrap.images import Manifest
@@ -23,6 +24,7 @@ MANIFEST = Manifest(
     primitives=(),
 )
 BASE = {
+    "MAIL_FROM": "Unicon <u@example.org>",
     "UNICON_DB_PASSWORD": "x",
     "FORGEJO_PUBLIC_URL": "https://forge.example.org",
     "UNICON_SESSION_HARD_TTL": "2592000",
@@ -76,3 +78,60 @@ def test_a_development_stack_signs_up_through_mailpit() -> None:
     main._derive_values(values, MANIFEST, development=True)
 
     assert values["FORGEJO_DISABLE_REGISTRATION"] == "false"
+
+
+def test_the_backend_mails_through_the_server_forgejo_does() -> None:
+    compose = yaml.safe_load(Path("compose.yaml").read_text(encoding="utf-8"))
+    backend = compose["services"]["backend"]["environment"]
+    forgejo = compose["services"]["forgejo"]["environment"]
+
+    pairs = {
+        "UNICON_MAIL_SMTP_ADDR": "FORGEJO__mailer__SMTP_ADDR",
+        "UNICON_MAIL_SMTP_PORT": "FORGEJO__mailer__SMTP_PORT",
+        "UNICON_MAIL_PROTOCOL": "FORGEJO__mailer__PROTOCOL",
+        "UNICON_MAIL_SMTP_USER": "FORGEJO__mailer__USER",
+        "UNICON_MAIL_SMTP_PASSWORD": "FORGEJO__mailer__PASSWD",
+        "UNICON_MAIL_FROM": "FORGEJO__mailer__FROM",
+    }
+    for ours, theirs in pairs.items():
+        assert backend[ours] == forgejo[theirs], ours
+
+
+def test_a_mail_server_needs_a_sender_and_a_port() -> None:
+    main.refuse_mail_without_sender({})
+    main.refuse_mail_without_sender(
+        {"MAIL_SMTP_ADDR": "smtp.example.org", "MAIL_FROM": "u@x.org"}
+    )
+    with pytest.raises(ValueError, match="MAIL_FROM is empty"):
+        main.refuse_mail_without_sender(
+            {"MAIL_SMTP_ADDR": "smtp.example.org", "MAIL_FROM": " "}
+        )
+    with pytest.raises(ValueError, match="not a port number"):
+        main.refuse_mail_without_sender(
+            {
+                "MAIL_SMTP_ADDR": "smtp.example.org",
+                "MAIL_FROM": "u@x.org",
+                "MAIL_SMTP_PORT": "x",
+            }
+        )
+
+
+class _Compose:
+    def __init__(self) -> None:
+        self.started: list[str] = []
+
+    def container_exists(self, service: str) -> bool:
+        return True
+
+    def up(self, service: str) -> None:
+        self.started.append(service)
+
+
+def test_a_changed_mail_key_recreates_the_backend() -> None:
+    compose = _Compose()
+    before = {**BASE, "MAIL_SMTP_ADDR": ""}
+    after = {**BASE, "MAIL_SMTP_ADDR": "smtp.example.org"}
+
+    main._restart_backend_if_values_changed(compose, before, after)  # type: ignore[arg-type]
+
+    assert compose.started == ["backend"]
