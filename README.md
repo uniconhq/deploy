@@ -76,8 +76,9 @@ docker compose -f compose.yaml -f compose.dev.yaml down        # keep the data
 docker compose -f compose.yaml -f compose.dev.yaml down -v     # throw it away
 ```
 
-Without `-f compose.dev.yaml` you get the production shape: images by tag,
-nothing published to the host except the proxy on 8080, and sign-up closed.
+Without `-f compose.dev.yaml` you get the production shape: third-party
+images by release tag, the backend and frontend from their `main`, nothing
+published to the host except the proxy on 8080, and sign-up closed.
 `SIGN_UP_OPEN` in `.env` is the one switch for people making their own
 accounts: bootstrap writes Forgejo's `DISABLE_REGISTRATION`, which takes or
 refuses a sign-up, and the backend's `UNICON_FORGE_REGISTRATION_OPEN`, which
@@ -89,10 +90,11 @@ their address by the link in a mail, a contest's email pattern trusts only
 confirmed addresses, and Forgejo drops the confirmation without a word when
 it cannot send mail, so bootstrap refuses `SIGN_UP_OPEN=true` without one.
 The proxy slows form posts to the forge's pages per client address, 30 a
-minute: when a crowd arrives at once from one network, the first 20 posts
-over that pass at once, the next 40 wait their turn, and only after those is
-a post refused with a page asking to wait a minute. Loading a page is never
-slowed.
+minute: when a crowd arrives at once from one network, 240 posts over that
+pass at once, a lab of 80 signing in for the first time, and only after
+those is a post refused with a page asking to wait a minute. Loading a page
+is never slowed. It also holds at most 300 open live streams per address,
+and turns away a body over 16 MiB anywhere but the upload door.
 
 `UNICON_SESSION_HARD_TTL`, how long a Unicon session lives, is likewise the
 one length for both sides: bootstrap writes Forgejo's refresh-token lifetime
@@ -184,7 +186,13 @@ stack, at `http://backend:8000`, and nothing outside has a reason to call
 them. A grading machine's two calls, a grading's envelope and its callback
 under `/api/v1/gradings/`, go to the backend with the rest of `/api/`. The
 access log drops the query string of `/api/v1/auth/callback`, so the login
-`code` and `state` never reach disk.
+`code` and `state` never reach disk, and the same on the forge's host for
+the sign-in's start, `/login/oauth/authorize`, and for the address
+confirmation and password reset links in Forgejo's mail. Forgejo and Garage
+keep queries out of their own logs too: Forgejo's per-request lines are
+written only at Warn (`forgejo/app.ini`, `[log.router]`), and Garage's
+request log, which would hold presigned signatures, only for server errors
+(`RUST_LOG` in `compose.yaml`).
 
 One object storage path goes to Garage, for the one write that comes from
 outside: `/unicon-results/` takes PUT, a grading machine's run log. The
@@ -340,8 +348,8 @@ never a tag, because a tag can be moved under a running stack; a manifest that
 names one is refused before anything starts. A new release of the runner or
 of a primitive reaches a deployment as a commit changing this file.
 
-Today it pins runner `v0.3.0` and the three primitives, `compile`,
-`sandbox-run` and `diff-check`, at `v1.0.0`.
+Today it pins runner `v0.5.0`, `sandbox-run` at `v1.2.0`, and `compile`
+and `diff-check` at `v1.1.1`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
