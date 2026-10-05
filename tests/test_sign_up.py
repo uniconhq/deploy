@@ -1,6 +1,7 @@
 """SIGN_UP_OPEN is the one switch for people making their own accounts, and
 UNICON_SESSION_HARD_TTL the one length of a session: bootstrap derives
 Forgejo's settings and the backend's from them, so neither pair can disagree.
+It also refuses a cap on live streams the proxy would not start on.
 """
 
 from __future__ import annotations
@@ -89,3 +90,23 @@ def test_a_session_length_that_is_not_seconds_is_refused(seconds: str) -> None:
         main._derive_values(
             {**BASE, "UNICON_SESSION_HARD_TTL": seconds}, MANIFEST, development=False
         )
+
+
+@pytest.mark.parametrize(
+    "key", ["UNICON_LIVE_STREAMS", "UNICON_LIVE_STREAMS_PER_ADDRESS"]
+)
+@pytest.mark.parametrize("cap", ["0", "abc", "-1", "65536", "1.5"])
+def test_a_cap_on_live_streams_nginx_would_not_start_on_is_refused(
+    key: str, cap: str
+) -> None:
+    with pytest.raises(ValueError, match=key):
+        main._derive_values({**BASE, key: cap}, MANIFEST, development=False)
+
+
+@pytest.mark.parametrize("cap", ["", "1", "3000", "65535"])
+def test_a_cap_on_live_streams_nginx_takes_passes(cap: str) -> None:
+    main._derive_values(
+        {**BASE, "UNICON_LIVE_STREAMS": cap, "UNICON_LIVE_STREAMS_PER_ADDRESS": cap},
+        MANIFEST,
+        development=False,
+    )
