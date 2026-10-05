@@ -307,7 +307,8 @@ services:
       LIVE_STREAMS: ${UNICON_LIVE_STREAMS:-3000}
       LIVE_STREAMS_PER_ADDRESS: ${UNICON_LIVE_STREAMS_PER_ADDRESS:-1000}
       NGINX_ENVSUBST_FILTER: ^(FORGE_HOST|APP_URL|LIVE_STREAMS|LIVE_STREAMS_PER_ADDRESS)$$
-    # Above the 16384 descriptors main.conf lets each worker open.
+    # Above the 16384 descriptors main.conf lets each worker open, whatever
+    # the Docker host's default.
     ulimits:
       nofile: 65536
     ports:

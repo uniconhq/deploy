@@ -97,8 +97,10 @@ is never slowed. It holds at most 3000 open live streams across the site
 (`UNICON_LIVE_STREAMS`) and 1000 from any one address
 (`UNICON_LIVE_STREAMS_PER_ADDRESS`, the largest lab you expect), so sign-in
 and pages always keep connections of their own: a tab whose stream is turned
-away asks again on its own every few seconds instead. `proxy/main.conf`
-gives nginx the connections those streams fit in. The proxy also turns away
+away asks for what changed on its own, a submission being graded every 5 to
+15 seconds and the rest every 30 to 60, and tries the stream again after a
+wait that grows to a minute. `proxy/main.conf` gives nginx the connections
+those streams fit in, and bootstrap refuses a cap nginx would not start on. The proxy also turns away
 a body over 16 MiB anywhere but the upload door.
 
 `UNICON_SESSION_HARD_TTL`, how long a Unicon session lives, is likewise the

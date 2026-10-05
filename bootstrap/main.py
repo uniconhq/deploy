@@ -90,6 +90,8 @@ DEVELOPMENT_OVERLAY = "compose.dev.yaml"
 DEV_AGENT = "laptop"
 GRADING_LABEL = ("pool", "platform")
 SOCKET_PROBE_IMAGE = "busybox:1.37.0"
+LIVE_STREAMS_CEILING = 65535
+"""The most connections nginx's `limit_conn` takes for a cap."""
 
 GRADING_SERVICES: dict[str, tuple[str, ...]] = {
     "socket-filter": (
@@ -373,6 +375,7 @@ def _derive_values(
     values["FORGEJO_DISABLE_REGISTRATION"] = "false" if open_sign_up else "true"
     values["FORGEJO_REFRESH_TOKEN_HOURS"] = refresh_token_hours(values)
     refuse_sign_up_without_mail(values, development=development)
+    refuse_bad_stream_caps(values)
 
 
 def sign_up_open(values: dict[str, str], *, development: bool) -> bool:
@@ -420,6 +423,21 @@ def refuse_sign_up_without_mail(values: dict[str, str], *, development: bool) ->
             "server Forgejo would confirm nobody. Set the MAIL_* values in .env, "
             "or keep sign-up closed."
         )
+
+
+def refuse_bad_stream_caps(values: dict[str, str]) -> None:
+    """Stop when a cap on live streams is not a number nginx takes. The proxy
+    refuses to start on one, and with it sign-in and every page; empty is
+    the default compose fills in.
+    """
+    for key in ("UNICON_LIVE_STREAMS", "UNICON_LIVE_STREAMS_PER_ADDRESS"):
+        given = values.get(key, "")
+        if given and not (given.isdigit() and 1 <= int(given) <= LIVE_STREAMS_CEILING):
+            raise ValueError(
+                f"{key} is {given!r}. It is how many live streams the proxy "
+                f"holds, a whole number from 1 to {LIVE_STREAMS_CEILING}, or empty "
+                "for the default."
+            )
 
 
 def _generate_missing_secrets(values: dict[str, str], summary: Summary) -> None:
