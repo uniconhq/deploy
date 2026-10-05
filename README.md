@@ -15,7 +15,7 @@ fresh stack into one the backend can talk to.
 | `garage` | `dxflrs/garage:v2.4.1` | `garage:3900` in the network; S3 and admin on `127.0.0.1` in development |
 | `proxy` | `nginx:1.27-alpine` | `http://localhost:8080`, the app, and `http://forge.localhost:8080`, the forge's people pages |
 | `backend`, `frontend` | built from the siblings in development | behind the proxy |
-| `mailpit` | `axllent/mailpit:v1.31.3`, development only | `http://localhost:8025`, the mail Forgejo sends |
+| `mailpit` | `axllent/mailpit:v1.31.3`, development only | `http://localhost:8025`, the mail Forgejo and the backend send |
 | `woodpecker-agent`, `socket-filter`, `grading-volumes` | development only, under `--profile agent` | nothing; the agent dials out to the server |
 
 No grading machine is part of the stack: a machine that runs contestant code
@@ -46,8 +46,8 @@ Run it again whenever you like. Every step checks before it creates, so a second
 run reports what was already there and creates nothing new. It is not a no-op:
 it re-applies the three database role passwords and both Forgejo bot passwords
 from `.env`, re-applies the bucket grants, rewrites `.env`, and recreates the
-`backend` container if any value it reads changed under it, a `UNICON_*` key
-or the public URL of Forgejo or the CI, because a running container never
+`backend` container if any value it reads changed under it, a `UNICON_*` key,
+a `MAIL_*` key or the public URL of Forgejo or the CI, because a running container never
 re-reads its environment. On a development stack it recreates the agent and
 the socket filter the same way when they are running and a value of theirs
 changed. The rewrite drops the keys bootstrap knows nothing reads, ones an
@@ -88,7 +88,12 @@ Opening sign-up in the production shape takes a mail server in `.env`
 (`MAIL_SMTP_ADDR` and the rest): everyone who signs themselves up confirms
 their address by the link in a mail, a contest's email pattern trusts only
 confirmed addresses, and Forgejo drops the confirmation without a word when
-it cannot send mail, so bootstrap refuses `SIGN_UP_OPEN=true` without one.
+it cannot send mail, so bootstrap refuses `SIGN_UP_OPEN=true` without one,
+and refuses a mail server without `MAIL_FROM` or with a port that is not a
+number, since the backend would not start on either.
+The backend sends invite mail through the same server, from the same keys
+(`UNICON_MAIL_*` in `compose.yaml`); without one an invite still works, and
+its person finds it in Unicon once signed in.
 The proxy slows form posts to the forge's pages per client address, 30 a
 minute: when a crowd arrives at once from one network, 240 posts over that
 pass at once, a lab of 80 signing in for the first time, and only after
@@ -227,8 +232,8 @@ hosts entry is needed; the Woodpecker container reaches the same name through
 the Docker host gateway for its OAuth token request. Sign in through the app;
 Forgejo is where the account lives. In development Forgejo takes new
 sign-ups unless `.env` says `SIGN_UP_OPEN=false`, and sends its mail to
-Mailpit, which delivers nothing: the
-confirmation link for an account you make is at http://localhost:8025. The dev override also
+Mailpit, which delivers nothing, as does the backend: the
+confirmation link for an account you make, and every invite, is at http://localhost:8025. The dev override also
 publishes Forgejo on `127.0.0.1:3300` for `scripts/check-lfs.py`, which
 drives its API from this machine; nothing else uses that port.
 
