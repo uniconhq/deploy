@@ -1,5 +1,6 @@
-# The Unicon stack. Production shape: every image is pinned by tag and nothing
-# is built here. compose.dev.yaml overrides this for local work.
+# The Unicon stack. Production shape: every third-party image is pinned by its
+# release tag, the backend and the frontend follow their repositories' main,
+# and nothing is built here. compose.dev.yaml overrides this for local work.
 #
 # Values come from .env, which `uv run bootstrap` writes. Keys marked `:?` have
 # no sensible default and stop compose with a named variable rather than
@@ -69,7 +70,7 @@ x-backend-env: &backend-env
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16.15-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: postgres
@@ -288,7 +289,7 @@ services:
       start_period: 20s
 
   proxy:
-    image: nginx:1.27-alpine
+    image: nginx:1.30-alpine
     restart: unless-stopped
     # Deliberately no depends_on: the proxy comes up whether or not the app
     # services are running. See the comment in proxy/nginx.conf.
