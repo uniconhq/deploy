@@ -7,24 +7,30 @@
   },
   "primitives": {
     "compile": {
-      "image": "ghcr.io/uniconhq/primitive-compile@sha256:f66e9ae767e19e95ed5fa2c60386cf1444b0a62ea3f66a73f9b94d1d8f26e0de",
-      "source": {
-        "github": "uniconhq/primitive-compile",
-        "tag": "v1.1.1"
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-compile@sha256:f66e9ae767e19e95ed5fa2c60386cf1444b0a62ea3f66a73f9b94d1d8f26e0de",
+        "source": {
+          "github": "uniconhq/primitive-compile",
+          "tag": "v1.1.1"
+        }
       }
     },
     "sandbox-run": {
-      "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:bd4f45b3dc02647b6cf1168fb5e4dc14877be48983ff73b4daf864a3cffe0943",
-      "source": {
-        "github": "uniconhq/primitive-sandbox-run",
-        "tag": "v1.3.0"
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:bd4f45b3dc02647b6cf1168fb5e4dc14877be48983ff73b4daf864a3cffe0943",
+        "source": {
+          "github": "uniconhq/primitive-sandbox-run",
+          "tag": "v1.3.0"
+        }
       }
     },
     "diff-check": {
-      "image": "ghcr.io/uniconhq/primitive-diff-check@sha256:0e596fb973f28f6df5751d4a91ec2480490ed2655cc7499ca1fdd05a2d1dacc5",
-      "source": {
-        "github": "uniconhq/primitive-diff-check",
-        "tag": "v1.1.1"
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-diff-check@sha256:0e596fb973f28f6df5751d4a91ec2480490ed2655cc7499ca1fdd05a2d1dacc5",
+        "source": {
+          "github": "uniconhq/primitive-diff-check",
+          "tag": "v1.1.1"
+        }
       }
     }
   }

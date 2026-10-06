@@ -8,13 +8,14 @@ them by its shape and not by a registry: a public repository named
 `<name>.workflow` or `<name>.primitive`, carrying its mark as a topic, with a
 git tag for each version, `v1`, `v2` and on.
 
-A version is frozen. `publish` makes a version out of a set of files: the
-default branch is brought to exactly those files in one commit, and the next
-version's tag points at that commit. A rerun that finds the latest version
-already holding the same files makes nothing, so bootstrap can run as often as
-anyone likes. The comparison is by git blob id, computed here from the bytes
-and read back from the forge's tree listing, so nothing is downloaded to decide
-that nothing changed.
+A version is frozen. `publish` makes one named version out of a set of files:
+the default branch is brought to exactly those files in one commit, and the
+version's tag points at that commit. A tag already there is never moved: when
+it holds the same files the run makes nothing, so bootstrap can run as often
+as anyone likes, and when it holds others it is kept and the outcome says so.
+The comparison is by git blob id, computed here from the bytes and read back
+from the forge's tree listing, so nothing is downloaded to decide that nothing
+changed.
 
 Rewriting a version in place is for a development stack only, and only when
 the person running bootstrap asks for it: the default branch gets a new commit
@@ -33,7 +34,6 @@ import base64
 import enum
 import hashlib
 import re
-from collections.abc import Callable
 from typing import Any
 
 from bootstrap.forgejo import Forgejo, ForgejoError
@@ -41,7 +41,6 @@ from bootstrap.forgejo import Forgejo, ForgejoError
 PLATFORM_ORG = "unicon"
 PLATFORM_ORG_DESCRIPTION = "Unicon's own workflows and primitives"
 DEFAULT_BRANCH = "main"
-FIRST_VERSION = "v1"
 
 PAGE_SIZE = 50
 TREE_PAGE_SIZE = 1000
@@ -292,47 +291,34 @@ def publish(
     repos: PlatformRepos,
     org: str,
     repo: str,
-    files_for: Callable[[str], dict[str, bytes]],
+    version: str,
+    files: dict[str, bytes],
     *,
-    message: Callable[[str], str],
-    next_version_on_change: bool,
-    rewrite_first: bool = False,
+    message: str,
+    rewrite: bool = False,
     identity: tuple[str, ...] | None = None,
-) -> tuple[str, Outcome]:
-    """Make sure the repository's latest version holds the files
-    `files_for(version)` gives, and return that version and what was done.
+) -> Outcome:
+    """Make sure the tag `version` holds these files, and return what was
+    done.
 
-    `files_for` takes the version because a file may name its own version.
-    With no version yet, the files become `v1`. `identity` names the files
-    that say what a version is, every file when it is not given: a version
-    whose identity files match is the same version, whatever the others say.
-    When the latest version is another, `next_version_on_change` decides: a
-    primitive, whose declaration carries an image digest from the release
-    manifest, gets the next version; a workflow, whose versions are made
-    deliberately, keeps what it has and the outcome says it differs.
-    `rewrite_first` is the development-only exception: `v1` is rewritten to
-    the files and its tag moved. Whichever version is made holds every file.
+    With no such tag, the files are committed and tagged. A tag already there
+    is the same version when its `identity` files match, every file when
+    `identity` is not given, whatever the others say; otherwise it is kept as
+    it is. `rewrite` is the development-only exception: a tag that differs is
+    moved to a commit of the files. Whichever commit is made holds every file.
     """
     versions = repos.versions(org, repo)
-    if rewrite_first and FIRST_VERSION in versions:
-        files = files_for(FIRST_VERSION)
-        if repos.holds(org, repo, versions[FIRST_VERSION], files, identity):
-            return FIRST_VERSION, Outcome.PRESENT
-        head, _ = repos.write_tree(org, repo, files, message(FIRST_VERSION))
-        repos.move_tag(org, repo, FIRST_VERSION, head)
-        return FIRST_VERSION, Outcome.REWRITTEN
-    if versions:
-        latest = list(versions)[-1]
-        if repos.holds(org, repo, versions[latest], files_for(latest), identity):
-            return latest, Outcome.PRESENT
-        if not next_version_on_change:
-            return latest, Outcome.KEPT_DIFFERENT
-        target = f"v{_number(latest) + 1}"
-    else:
-        target = FIRST_VERSION
-    head, _ = repos.write_tree(org, repo, files_for(target), message(target))
-    repos.tag(org, repo, target, head)
-    return target, Outcome.CREATED
+    if version in versions:
+        if repos.holds(org, repo, versions[version], files, identity):
+            return Outcome.PRESENT
+        if not rewrite:
+            return Outcome.KEPT_DIFFERENT
+        head, _ = repos.write_tree(org, repo, files, message)
+        repos.move_tag(org, repo, version, head)
+        return Outcome.REWRITTEN
+    head, _ = repos.write_tree(org, repo, files, message)
+    repos.tag(org, repo, version, head)
+    return Outcome.CREATED
 
 
 def _number(version: str) -> int:

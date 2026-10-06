@@ -11,20 +11,22 @@ Every step checks before it creates, and .env is rewritten after each one, so an
 interrupted run can be resumed by running it again.
 
 After the accounts and the OAuth applications, the forge is seeded with the
-platform org and what is in it: the three primitives, mirrored from their
-repositories with the image digests of the image manifest written in
-(primitives.py, images.py), and the built-in workflow unicon/classic@v1 that
-wires them together (workflows.py). A task's first save has to find a
-workflow and its primitives the organiser can read, or nothing can be
-published. The manifest also gives the harness, clone and socket filter
-images, which go into .env for the services that run them.
+platform org and what is in it: the three primitives, each version the image
+manifest lists mirrored from its repository with the manifest's image digest
+written in (primitives.py, images.py), and the built-in workflow
+unicon/classic at each of its versions, which wire them together
+(workflows.py). A task's first save has to find a workflow and its primitives
+the organiser can read, or nothing can be published. Every version goes to its
+own tag, and a tag already at the forge is never edited. The manifest also
+gives the harness, clone and socket filter images, which go into .env for the
+services that run them.
 
 On a development stack, the one whose compose files include compose.dev.yaml,
 bootstrap also enrols the one CI agent that overlay can run and writes its
 token to .env, with the group that owns the Docker socket on this machine,
 which the overlay's socket filter joins, and deletes any other agent that
-would take a grading run and has gone silent. Only there does --rewrite-v1 rewrite
-the built-in v1 versions in place instead of leaving them.
+would take a grading run and has gone silent. Only there does --rewrite rewrite
+the built-in versions in place instead of leaving them.
 
 Two Garage buckets and no other: FORGEJO_LFS_BUCKET for Forgejo, which holds
 every file a person uploads, and RESULTS_BUCKET for the backend, which holds
@@ -62,7 +64,7 @@ from urllib.parse import urlparse
 
 import httpx
 
-from bootstrap import envfile, images, postgres, primitives, secret_values
+from bootstrap import envfile, images, postgres, primitives, secret_values, workflows
 from bootstrap.compose import Compose, ComposeFailed
 from bootstrap.forgejo import Forgejo, ForgejoError, OAuthApplication
 from bootstrap.garage import Garage, GarageError
@@ -71,12 +73,6 @@ from bootstrap.platform_repos import PLATFORM_ORG, Outcome, PlatformRepos, publi
 from bootstrap.readiness import NotReady, wait_for
 from bootstrap.summary import Summary
 from bootstrap.woodpecker import Woodpecker, WoodpeckerError
-from bootstrap.workflows import (
-    CLASSIC,
-    CLASSIC_REPO,
-    WORKFLOW_TOPIC,
-    seed_files,
-)
 
 BACKEND_ACCOUNT = "unicon-backend"
 CI_ACCOUNT = "unicon-ci"
@@ -158,7 +154,7 @@ def main(argv: list[str] | None = None) -> int:
     values: dict[str, str] = {}
 
     try:
-        refuse_rewrite_outside_development(options.rewrite_v1, development)
+        refuse_rewrite_outside_development(options.rewrite, development)
         manifest = images.load(images.choose(options.directory, options.images))
         print(f"images from {manifest.path.name}")
 
@@ -182,7 +178,7 @@ def main(argv: list[str] | None = None) -> int:
         envfile.write(env_path, template, values)
 
         _seed_platform(
-            compose, options.directory, manifest, values, summary, options.rewrite_v1
+            compose, options.directory, manifest, values, summary, options.rewrite
         )
         envfile.write(env_path, template, values)
 
@@ -248,12 +244,12 @@ def _parse_arguments(argv: list[str] | None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--rewrite-v1",
+        "--rewrite",
         action="store_true",
         help=(
-            "development stacks only: rewrite v1 of the built-in workflow and of "
-            "each primitive in place to what is here now, instead of leaving it "
-            "or making a new version"
+            "development stacks only: rewrite each version of the built-in "
+            "workflow and of each primitive in place to what is here now, "
+            "instead of keeping a version at the forge that differs"
         ),
     )
     options = parser.parse_args(argv)
@@ -276,7 +272,7 @@ def refuse_rewrite_outside_development(rewrite: bool, development: bool) -> None
     """
     if rewrite and not development:
         raise ValueError(
-            f"--rewrite-v1 rewrites published versions and is only for a "
+            f"--rewrite rewrites published versions and is only for a "
             f"development stack, one started with {DEVELOPMENT_OVERLAY}. A "
             "changed definition on any other stack is a new version."
         )
@@ -565,12 +561,12 @@ def _seed_platform(
     manifest: Manifest,
     values: dict[str, str],
     summary: Summary,
-    rewrite_v1: bool,
+    rewrite: bool,
 ) -> None:
-    """The platform org, the primitives the manifest pins and the built-in
-    workflow unicon/classic@v1, in that order, since the workflow names the
-    primitives. Then every image the primitives' versions name, which is the
-    socket filter's list.
+    """The platform org, each version of the primitives the manifest pins and
+    each version of the built-in workflow unicon/classic, in that order, since
+    the workflow names the primitives. Then every image the primitives'
+    versions name, which is the socket filter's list.
     """
     repos = PlatformRepos(
         Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]
@@ -583,51 +579,61 @@ def _seed_platform(
             "nothing can be graded yet. On a development machine, "
             "scripts/build-images.py builds them from the sibling checkouts."
         )
-    for release in manifest.primitives:
-        primitive = f"{PLATFORM_ORG}/{release.name}"
-        repo = primitives.repository(release.name)
+    for name in manifest.primitive_names:
+        primitive = f"{PLATFORM_ORG}/{name}"
+        repo = primitives.repository(name)
         summary.record(
             f"primitive {primitive} repository",
             repos.ensure_repository(PLATFORM_ORG, repo),
         )
-        version, outcome = primitives.mirror(repos, release, rewrite_first=rewrite_v1)
-        _record_version(summary, f"primitive {primitive}", version, outcome)
+        for release in manifest.versions_of(name):
+            outcome = primitives.mirror(repos, release, rewrite=rewrite)
+            _record_version(summary, f"primitive {primitive}", release.version, outcome)
+            if outcome is Outcome.KEPT_DIFFERENT:
+                print(
+                    f"note: {primitive}@{release.version} at the forge differs "
+                    f"from what {manifest.path.name} pins for it, and is kept as "
+                    "it is: a version is never edited, so a new image or "
+                    "declaration is a new version. On a development stack, "
+                    "--rewrite rewrites it."
+                )
         summary.record(
             f"primitive {primitive} mark {primitives.PRIMITIVE_TOPIC}",
             repos.ensure_mark(PLATFORM_ORG, repo, primitives.PRIMITIVE_TOPIC),
         )
 
-    workflow = f"{PLATFORM_ORG}/{CLASSIC}"
+    name = workflows.CLASSIC
+    workflow = f"{PLATFORM_ORG}/{name}"
+    repo = workflows.repository(name)
     summary.record(
         f"workflow {workflow} repository",
-        repos.ensure_repository(PLATFORM_ORG, CLASSIC_REPO),
+        repos.ensure_repository(PLATFORM_ORG, repo),
     )
-    files = seed_files(directory, CLASSIC)
-    version, outcome = publish(
-        repos,
-        PLATFORM_ORG,
-        CLASSIC_REPO,
-        lambda _: files,
-        message=lambda version: f"Seed {workflow}@{version}",
-        next_version_on_change=False,
-        rewrite_first=rewrite_v1,
-    )
-    _record_version(summary, f"workflow {workflow}", version, outcome)
-    if outcome is Outcome.KEPT_DIFFERENT:
-        print(
-            f"note: workflows/{CLASSIC}/ differs from {workflow}@{version} at the "
-            "forge, which is kept as it is. On a development stack, "
-            "--rewrite-v1 rewrites it."
+    for version, files in workflows.seed_versions(directory, name).items():
+        outcome = publish(
+            repos,
+            PLATFORM_ORG,
+            repo,
+            version,
+            files,
+            message=f"Seed {workflow}@{version}",
+            rewrite=rewrite,
         )
+        _record_version(summary, f"workflow {workflow}", version, outcome)
+        if outcome is Outcome.KEPT_DIFFERENT:
+            print(
+                f"note: workflows/{name}/{version}/ differs from "
+                f"{workflow}@{version} at the forge, which is kept as it is: a "
+                "changed definition is a new version folder. On a development "
+                "stack, --rewrite rewrites it."
+            )
     summary.record(
-        f"workflow {workflow} mark {WORKFLOW_TOPIC}",
-        repos.ensure_mark(PLATFORM_ORG, CLASSIC_REPO, WORKFLOW_TOPIC),
+        f"workflow {workflow} mark {workflows.WORKFLOW_TOPIC}",
+        repos.ensure_mark(PLATFORM_ORG, repo, workflows.WORKFLOW_TOPIC),
     )
 
     values["UNICON_FILTER_IMAGES"] = ",".join(
-        primitives.images_at_forge(
-            repos, [release.name for release in manifest.primitives]
-        )
+        primitives.images_at_forge(repos, manifest.primitive_names)
     )
 
 

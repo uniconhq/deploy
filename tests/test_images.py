@@ -3,7 +3,8 @@ what bootstrap takes from it for .env.
 
 Every image is a reference by digest, because a tag can be moved under a
 running stack and a digest cannot; a manifest that names a tag is refused
-before anything starts.
+before anything starts. A primitive's entries are keyed by its version at the
+forge, which is the major of its release tag.
 """
 
 from __future__ import annotations
@@ -39,6 +40,14 @@ def test_the_release_manifest_in_this_repo_loads() -> None:
     assert manifest.harness.startswith("ghcr.io/uniconhq/harness@sha256:")
     assert manifest.clone.startswith("ghcr.io/uniconhq/clone@sha256:")
     assert manifest.socket_filter.startswith("ghcr.io/uniconhq/socket-filter@sha256:")
+    assert manifest.primitive_names == ["compile", "diff-check", "sandbox-run"]
+    for release in manifest.primitives:
+        assert isinstance(release.source, GitHubSource)
+        assert release.image.startswith(
+            f"ghcr.io/uniconhq/primitive-{release.name}@sha256:"
+        )
+        assert release.source.repo == f"uniconhq/primitive-{release.name}"
+        assert release.version == f"v{images.major_of(release.source.tag)}"
 
 
 def test_both_kinds_of_primitive_source_are_read(tmp_path: Path) -> None:
@@ -48,15 +57,26 @@ def test_both_kinds_of_primitive_source_are_read(tmp_path: Path) -> None:
             "images": _runner("localhost:5000/uniconhq"),
             "primitives": {
                 "sandbox-run": {
-                    "image": f"ghcr.io/uniconhq/primitive-sandbox-run{DIGEST}",
-                    "source": {
-                        "github": "uniconhq/primitive-sandbox-run",
-                        "tag": "v1.0.0",
+                    "v1": {
+                        "image": f"ghcr.io/uniconhq/primitive-sandbox-run{DIGEST}",
+                        "source": {
+                            "github": "uniconhq/primitive-sandbox-run",
+                            "tag": "v1.0.0",
+                        },
                     },
                 },
                 "compile": {
-                    "image": f"localhost:5000/uniconhq/primitive-compile{DIGEST}",
-                    "source": {"path": "../primitive-compile"},
+                    "v2": {
+                        "image": f"localhost:5000/uniconhq/primitive-compile{DIGEST}",
+                        "source": {"path": "../primitive-compile"},
+                    },
+                    "v1": {
+                        "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
+                        "source": {
+                            "github": "uniconhq/primitive-compile",
+                            "tag": "v1.1.1",
+                        },
+                    },
                 },
             },
         },
@@ -64,17 +84,101 @@ def test_both_kinds_of_primitive_source_are_read(tmp_path: Path) -> None:
 
     manifest = images.load(path)
 
-    assert [release.name for release in manifest.primitives] == [
-        "compile",
-        "sandbox-run",
+    assert [(release.name, release.version) for release in manifest.primitives] == [
+        ("compile", "v1"),
+        ("compile", "v2"),
+        ("sandbox-run", "v1"),
     ]
-    compile_, sandbox_run = manifest.primitives
-    assert compile_.source == LocalSource(
+    compile_v1, compile_v2, sandbox_run = manifest.primitives
+    assert compile_v1.source == GitHubSource("uniconhq/primitive-compile", "v1.1.1")
+    assert compile_v2.source == LocalSource(
         (tmp_path.parent / "primitive-compile").resolve()
     )
     assert sandbox_run.source == GitHubSource(
         "uniconhq/primitive-sandbox-run", "v1.0.0"
     )
+    assert manifest.primitive_names == ["compile", "sandbox-run"]
+    assert manifest.versions_of("compile") == [compile_v1, compile_v2]
+
+
+def test_versions_are_in_number_order(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path / "images.json",
+        {
+            "images": _runner(),
+            "primitives": {
+                "compile": {
+                    version: {
+                        "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
+                        "source": {"path": f"../compile-{version}"},
+                    }
+                    for version in ("v10", "v2", "v1")
+                }
+            },
+        },
+    )
+
+    assert [release.version for release in images.load(path).primitives] == [
+        "v1",
+        "v2",
+        "v10",
+    ]
+
+
+def _compile_versions(versions: Any) -> dict[str, Any]:
+    return {"images": _runner(), "primitives": {"compile": versions}}
+
+
+def _released(tag: str) -> dict[str, Any]:
+    return {
+        "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
+        "source": {"github": "uniconhq/primitive-compile", "tag": tag},
+    }
+
+
+def test_a_release_under_another_major_is_refused(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path / "images.json", _compile_versions({"v1": _released("v2.0.0")})
+    )
+
+    with pytest.raises(ManifestError, match=r"v2\.0\.0, whose major is 2") as refused:
+        images.load(path)
+
+    assert "belongs under v2" in str(refused.value)
+
+
+def test_a_tag_that_is_not_a_release_is_refused(tmp_path: Path) -> None:
+    path = _write(
+        tmp_path / "images.json", _compile_versions({"v1": _released("latest")})
+    )
+
+    with pytest.raises(ManifestError, match="is not a release tag"):
+        images.load(path)
+
+
+@pytest.mark.parametrize(
+    "versions",
+    [
+        # The shape before versions: one image and source per primitive.
+        _released("v1.1.1"),
+        {"1": _released("v1.1.1")},
+        {"v0": _released("v0.1.0")},
+    ],
+)
+def test_entries_not_keyed_by_version_are_refused(
+    tmp_path: Path, versions: Any
+) -> None:
+    path = _write(tmp_path / "images.json", _compile_versions(versions))
+
+    with pytest.raises(ManifestError, match="is not a version"):
+        images.load(path)
+
+
+def test_a_primitive_with_no_version_is_refused(tmp_path: Path) -> None:
+    path = _write(tmp_path / "images.json", _compile_versions({}))
+
+    with pytest.raises(ManifestError, match="not an object of versions"):
+        images.load(path)
 
 
 @pytest.mark.parametrize(
@@ -115,8 +219,10 @@ def test_a_primitive_source_of_another_shape_is_refused(tmp_path: Path) -> None:
             "images": _runner(),
             "primitives": {
                 "compile": {
-                    "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
-                    "source": {"github": "uniconhq/primitive-compile"},
+                    "v1": {
+                        "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
+                        "source": {"github": "uniconhq/primitive-compile"},
+                    }
                 }
             },
         },

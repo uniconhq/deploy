@@ -9,28 +9,32 @@ org as the public repository `unicon/<name>.primitive`, carrying the topic
 names, and nothing else of it; the rest is there so the program behind a step
 can be read where the step is used.
 
-What is mirrored is the primitive's repository as the image manifest names it
-(images.py): on GitHub at the release tag, or, on a development machine, the
-sibling checkout as it is on disk, every file git does not ignore. The
-repository's own CI configuration under .github/ is left out, since it means
-nothing at the forge.
+A primitive's version at the forge is its port set, the major of its release
+tag: the release v1.1.1 is `v1`, and v2.0.0, which changes the ports, is
+`v2`. The image manifest (images.py) lists each version a deployment carries,
+and bootstrap mirrors each to its own tag. What is mirrored for a version is
+the primitive's repository as the manifest names it: on GitHub at the release
+tag, or, on a development machine, the sibling checkout as it is on disk,
+every file git does not ignore. The repository's own CI configuration under
+.github/ is left out, since it means nothing at the forge.
 
 The declaration in the primitive's repository has no `image` line: which image
 a version runs is the deployment's decision, from the manifest. Bootstrap
-writes `version` and `image` into the copy it commits, right under `name`, so
-the file names the tag it is under and the image by its digest. Nothing at the
-forge ever names an image by tag.
+writes it into the copy it commits, as the file's first line, so the file
+names the image by its digest. Nothing at the forge ever names an image by
+tag. A declaration from a v1 release still starts with `name` and `version`
+lines; for one of those, bootstrap writes `version` and `image` right under
+`name`, as it always has, so a v1 already at the forge reads as the same.
 
 A version is what its declaration says, the image included, since that is
-what the forge compiles against and what a step runs. A version is frozen, so
-a changed digest in the manifest, or any other change to the declaration,
-makes the next version, v2 and on, holding the repository as it is then, and
-never edits the old one: a published task keeps grading against what it was
-published with. A change to the other files alone makes no version, because
-it changes nothing that grades: the program that runs is the one in the
-image, and a rebuilt image is a new digest. A rerun with nothing changed makes
-nothing. The one exception is a development stack, where --rewrite-v1
-rewrites v1 in place instead.
+what the forge compiles against and what a step runs. A version is frozen: a
+tag already at the forge is left as it is, and when its declaration differs
+from what the manifest gives now, the run says so and changes nothing. A new
+image for a primitive reaches the forge as a new version in the manifest. A
+change to the other files alone is no difference, because it changes nothing
+that grades: the program that runs is the one in the image. A rerun with
+nothing changed makes nothing. The one exception is a development stack,
+where --rewrite rewrites each listed version in place instead.
 """
 
 from __future__ import annotations
@@ -61,7 +65,7 @@ BUILD_LEFTOVERS = (
 MAX_MIRROR_BYTES = 8 * 1024 * 1024
 
 _TOP_LEVEL = re.compile(r"^([A-Za-z_][A-Za-z0-9_]*)\s*:(.*)$")
-_WRITTEN_KEYS = ("version", "image")
+_NAMED_KEYS = ("version", "image")
 
 
 class PrimitiveError(ValueError):
@@ -102,7 +106,7 @@ def with_declaration(
     files: dict[str, bytes], name: str, version: str, image: str
 ) -> dict[str, bytes]:
     """The files to commit for a version: the repository's files with the
-    declaration naming that version and image.
+    declaration naming that version's image.
     """
     return {
         **files,
@@ -111,22 +115,29 @@ def with_declaration(
 
 
 def declaration(source: bytes, name: str, version: str, image: str) -> bytes:
-    """The declaration with `version` and `image` written in under `name`.
+    """The declaration with the image written in.
 
-    Any `version` or `image` line already there is replaced, so a copy is
-    the same whatever the repository's file said. The file is edited as text
-    rather than parsed and written out again, so its comments and layout are
-    the author's. It has to name the primitive the manifest has it under.
+    A declaration without a `name` line, which is how a primitive's
+    repository writes it, gets `image` as its first line. One with a `name`
+    line, from a v1 release, gets `version` and `image` under `name`, the way
+    bootstrap has always written a v1, and has to name the primitive the
+    manifest has it under. Either way any `image` line already there is
+    replaced, and in the second any `version` line too, so a copy is the same
+    whatever the repository's file said. The file is edited as text rather
+    than parsed and written out again, so its comments and layout are the
+    author's.
     """
     text = source.decode("utf-8")
     newline = "\r\n" if "\r\n" in text else "\n"
     lines = text.splitlines()
-    kept: list[str] = []
+    named = any(_key(line) == "name" for line in lines)
+    replaced = _NAMED_KEYS if named else ("image",)
+    kept: list[str] = [] if named else [f"image: {image}"]
     declared: str | None = None
     for index, line in enumerate(lines):
         match = _TOP_LEVEL.match(line)
         key = match.group(1) if match else None
-        if key in _WRITTEN_KEYS:
+        if key in replaced:
             following = lines[index + 1] if index + 1 < len(lines) else ""
             if following[:1] in (" ", "\t"):
                 raise PrimitiveError(
@@ -139,7 +150,7 @@ def declaration(source: bytes, name: str, version: str, image: str) -> bytes:
             continue
         kept.append(line)
     expected = f"{PLATFORM_ORG}/{name}"
-    if declared != expected:
+    if named and declared != expected:
         raise PrimitiveError(
             f"{DECLARATION} of {name} names {declared!r}, not {expected!r}"
         )
@@ -156,22 +167,23 @@ def image_of(declaration_bytes: bytes) -> str | None:
 
 
 def mirror(
-    repos: PlatformRepos, release: PrimitiveRelease, *, rewrite_first: bool
-) -> tuple[str, Outcome]:
-    """Make the primitive's latest version hold its repository with the
-    manifest's image, and return that version and what was done.
+    repos: PlatformRepos, release: PrimitiveRelease, *, rewrite: bool
+) -> Outcome:
+    """Make the version the release is under hold its repository with the
+    manifest's image, and return what was done.
     """
     files = source_files(release)
     return publish(
         repos,
         PLATFORM_ORG,
         repository(release.name),
-        lambda version: with_declaration(files, release.name, version, release.image),
-        message=lambda version: (
-            f"Mirror {PLATFORM_ORG}/{release.name}@{version} with {release.image}"
+        release.version,
+        with_declaration(files, release.name, release.version, release.image),
+        message=(
+            f"Mirror {PLATFORM_ORG}/{release.name}@{release.version} "
+            f"with {release.image}"
         ),
-        next_version_on_change=True,
-        rewrite_first=rewrite_first,
+        rewrite=rewrite,
         identity=(DECLARATION,),
     )
 
@@ -191,6 +203,12 @@ def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
             if image:
                 found.add(image)
     return sorted(found)
+
+
+def _key(line: str) -> str | None:
+    """The key of a top-level `key: value` line, or None for any other."""
+    match = _TOP_LEVEL.match(line)
+    return match.group(1) if match else None
 
 
 def _scalar(value: str) -> str:
