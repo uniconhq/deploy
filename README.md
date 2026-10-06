@@ -153,11 +153,13 @@ last line starts the grading machine, whose agent bootstrap has already
 enrolled. Without the first line bootstrap seeds no primitive, and nothing
 can be graded.
 
-After a change in one of those checkouts, run the first two lines again. A
-primitive whose image or declaration changed gets its next version at the
-forge, while `unicon/classic@v1` still names `v1` of each; `uv run bootstrap
---rewrite-v1` instead rewrites `v1` in place, so the built-in workflow grades
-with what was just built.
+Each primitive checkout fills the version at the forge that is the major of
+its own version, `v2` for 2.0.0, and the versions it does not fill come from
+`images.json` as released. After a change in one of those checkouts, run the
+first two lines again. A version already at the forge is never edited, so a
+rebuilt image leaves it as it was and bootstrap says it differs; `uv run
+bootstrap --rewrite` rewrites it in place instead, so the tasks already there
+grade with what was just built.
 
 `backend-migrate` runs `unicon-forge migrate`, the forge package's command,
 from the backend image, and exits; the backend image does not
@@ -266,33 +268,46 @@ nothing can be published.
 
 Each primitive the image manifest pins is mirrored from its own repository
 into the public repository `unicon/<name>.primitive` with the topic
-`unicon-primitive`: `compile`, `sandbox-run` and `diff-check`. The mirror is
-the primitive repository's files, less its CI configuration, in one commit
-tagged `v1`. The forge's compiler reads `primitive.yaml` at the root of a
-version. A primitive's own repository names no image in that file, so
-bootstrap writes the `version` and the `image`, the manifest's digest, into
-it under its `name`. What a version is, is that file: when the manifest's
-digest or anything else in the declaration changes, the next run commits the
-repository as it is then and tags `v2`, and `v1` still points at what it did,
-so a published task keeps grading against what it was published with. A
-change to the other files alone makes no version, since the program that runs
-is the one in the image and a rebuilt image is a new digest. A run that finds
-nothing changed makes nothing.
+`unicon-primitive`: `compile`, `sandbox-run` and `diff-check`. A primitive's
+version at the forge is its port set, the major of its release tag: the
+release `v1.1.1` is `v1`, and `v2.0.0`, which changes the ports, is `v2`. The
+manifest lists each version a deployment carries, and each is mirrored to its
+own tag: the primitive repository's files at that release, less its CI
+configuration, in one commit, with the tag pointing at it. The forge's
+compiler reads `primitive.yaml` at the root of a version. A primitive's own
+repository names no image in that file, so bootstrap writes the `image`, the
+manifest's digest, in as its first line. A `v1` release's declaration still
+starts with `name` and `version` lines; for it bootstrap writes `version` and
+`image` under `name`, which is how every `v1` at the forge was written.
+
+A version is that file, and a version is never edited. A tag already at the
+forge is left as it is: when it holds the same declaration the run makes
+nothing, and when it holds another, with a different digest or any other
+change, the run says it differs. A new image for a primitive is a new version
+in the manifest, so a published task keeps grading against what it was
+published with. A change to the other files alone is no difference, since the program
+that runs is the one in the image and a rebuilt image is a new digest. A run
+that finds nothing changed makes nothing.
 
 The workflow is the public repository `unicon/classic.workflow` with the
-topic `unicon-workflow`, holding `workflow.yaml` and `README.md` from
-`workflows/classic/`, tagged `v1`. That is the built-in workflow
-`unicon/classic@v1`: compile the submission, run it on every testcase, diff
-each output against the answer. A workflow's versions are made on purpose, so
-a rerun leaves `v1` as it is even when the files here have changed, and says
-so.
+topic `unicon-workflow`. Each of its versions is a folder here,
+`workflows/classic/v1/` and `workflows/classic/v2/`, holding the
+`workflow.yaml` and `README.md` the version's tag holds, and bootstrap
+publishes each to its own tag by the same rule: a tag that is not there is
+made, one that is there is never edited, and the run says when it differs
+from the folder. That is the built-in workflow: compile the submission, run
+it on every test, compare each output with the answer. `unicon/classic@v1`
+wires the primitives' `v1` in the format they were built for;
+`unicon/classic@v2` wires their `v2` in the format of `TASK-FORMAT.md`, with
+each test's `input` and `answer`, and reports the time and memory of every
+run. A changed definition is a new folder.
 
 The one exception to both is a development stack. `uv run bootstrap
---rewrite-v1` rewrites `v1` of the workflow and of each primitive in place to
-what is here now, with a new commit and the tag moved to it, rather than
-leaving it or making `v2`, so a primitive rebuilt on the laptop is what the
-tasks already there grade with. It refuses to run without `compose.dev.yaml`
-among the compose files.
+--rewrite` rewrites every listed version of the workflow and of each
+primitive in place to what is here now, with a new commit and the tag moved
+to it, rather than keeping the version at the forge that differs, so a
+primitive rebuilt on the laptop is what the tasks already there grade with.
+It refuses to run without `compose.dev.yaml` among the compose files.
 
 On a development stack, one CI agent: `laptop`, enrolled as a global agent
 through Woodpecker's administrator API, its token written to
@@ -344,24 +359,37 @@ digest, and the release of each primitive's repository that bootstrap mirrors.
   },
   "primitives": {
     "compile": {
-      "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
-      "source": {"github": "uniconhq/primitive-compile", "tag": "v1.0.0"}
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
+        "source": {"github": "uniconhq/primitive-compile", "tag": "v1.1.1"}
+      },
+      "v2": {
+        "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
+        "source": {"github": "uniconhq/primitive-compile", "tag": "v2.0.0"}
+      }
     }
   }
 }
 ```
 
 `images` holds the runner's images; `harness`, `clone` and `socket-filter` are
-required, since bootstrap writes them into `.env`. `primitives` holds one
-entry per primitive, keyed by its name at the forge: the image its steps run,
-and where its repository is at that release. Bootstrap fetches that tag's
-archive from GitHub and mirrors it. Every image is a reference by digest,
-never a tag, because a tag can be moved under a running stack; a manifest that
-names one is refused before anything starts. A new release of the runner or
-of a primitive reaches a deployment as a commit changing this file.
+required, since bootstrap writes them into `.env`. `primitives` holds each
+primitive by its name at the forge, and under it each version by its tag at
+the forge, `v1`, `v2` and on: the image that version's steps run, and where
+its repository is at that release. A version is the major of its release
+tag, so a release tag under a key of another major, `v2.0.0` under `v1`, is
+refused. Bootstrap fetches each tag's archive from GitHub and mirrors it to
+the version's tag. Every image is a reference by digest, never a tag, because
+a tag can be moved under a running stack; a manifest that names one is
+refused before anything starts. A new release of the runner reaches a
+deployment as a commit changing this file, and so does a new major of a
+primitive, as one more version beside the ones before it. A new minor or
+patch release of a primitive is a new pin under the same version, which a
+stack that already holds that version keeps as it was, since a version at the
+forge is never edited.
 
-Today it pins runner `v0.5.0`, `sandbox-run` at `v1.3.0`, and `compile`
-and `diff-check` at `v1.1.1`.
+Today it pins runner `v0.5.0` and the primitives' `v1`: `sandbox-run` at
+`v1.3.0`, and `compile` and `diff-check` at `v1.1.1`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
@@ -369,8 +397,14 @@ four from `../runner`, each primitive from `../primitive-<name>`, as they are
 on disk, committed or not. It runs `registry:2.8.3` on `127.0.0.1:5000` in a
 container of its own, `unicon-registry`, outside the compose stack and with
 its images in the volume `unicon-registry`, pushes each image there to learn
-its digest, and writes `images.local.json` in the same shape, with each
-primitive's source its checkout, `{"path": "../primitive-compile"}`. That file
+its digest, and writes `images.local.json` in the same shape. Each
+primitive's checkout fills the version that is the major of the version in
+its `pyproject.toml`, with its source the checkout,
+`{"path": "../primitive-compile"}`; every other version of the primitive is
+copied from `images.json` as released, so a stack built this way grades
+`v1` with the released image from ghcr.io and `v2` with the checkout's. On a
+development stack bootstrap pulls every one of those images, since the socket
+filter lets a step start only from an image already on the machine. That file
 is git-ignored. Bootstrap reads it whenever it is there and `images.json`
 otherwise; `--images <file>` names one. Docker pulls from a registry on
 localhost over plain HTTP without being told to, by digest, the same way it
@@ -578,7 +612,7 @@ push, the forge's API, a path that only becomes a checkout path once
 resolved, and every other host. It checks that sign-up is open on both
 sides, Forgejo's form and the backend's Create account link. It then runs bootstrap a second time and fails if `.env`
 changed or the run made anything, and checks that the three primitives and the
-workflow are at the forge at `v1`. Between the two it starts the `agent`
+workflow are at the forge at `v1` and at `v2`, each as this run would write it. Between the two it starts the `agent`
 profile, waits for the dev agent to connect, runs the browser test above,
 and runs `scripts/check-lfs.py --exact` for one 500 MB file. Last, it sends a burst of sign-in posts and expects some through and
 some refused with 429, then sets `SIGN_UP_OPEN=false`, runs bootstrap again
