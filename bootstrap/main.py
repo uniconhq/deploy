@@ -93,14 +93,7 @@ SOCKET_PROBE_IMAGE = "busybox:1.37.0"
 LIVE_STREAMS_CEILING = 65535
 """The most connections nginx's `limit_conn` takes for a cap."""
 
-GRADING_SERVICES: dict[str, tuple[str, ...]] = {
-    "socket-filter": (
-        "UNICON_FILTER_IMAGE",
-        "UNICON_FILTER_IMAGES",
-        "DOCKER_SOCKET_GID",
-    ),
-    "woodpecker-agent": ("WOODPECKER_DEV_AGENT_TOKEN",),
-}
+GRADING_SERVICES = ("socket-filter", "woodpecker-agent")
 
 RETIRED = frozenset(
     {
@@ -119,19 +112,6 @@ RETIRED = frozenset(
         "WOODPECKER_AGENT_SECRET",
     }
 )
-
-BACKEND_READS_TOO = (
-    "FORGEJO_PUBLIC_URL",
-    "WOODPECKER_PUBLIC_URL",
-    "MAIL_SMTP_ADDR",
-    "MAIL_SMTP_PORT",
-    "MAIL_PROTOCOL",
-    "MAIL_SMTP_USER",
-    "MAIL_SMTP_PASSWORD",
-    "MAIL_FROM",
-)
-"""The keys besides the UNICON_* ones compose hands the backend: the public
-URLs of Forgejo and the CI, and the mail server it sends invites through."""
 
 UNLOCKS: dict[str, str] = {
     "FORGEJO_SECRET_KEY": "forgejo-data",
@@ -213,11 +193,12 @@ def main(argv: list[str] | None = None) -> int:
             _pull_grading_images(compose, values, summary)
         envfile.write(env_path, template, values)
 
-        _restart_backend_if_values_changed(compose, previous, values)
+        recreate_changed(compose, "backend")
         if development:
-            _recreate_grading_services(compose, previous, values)
+            recreate_changed(compose, *GRADING_SERVICES)
     except (
         ComposeFailed,
+        envfile.MissingTemplate,
         ForgejoError,
         GarageError,
         LostEnvironment,
@@ -728,51 +709,26 @@ def _pull_grading_images(
         )
 
 
-def _restart_backend_if_values_changed(
-    compose: Compose, previous: dict[str, str], values: dict[str, str]
-) -> None:
-    """Hand the backend the values this run changed under it.
+def recreate_changed(compose: Compose, *services: str) -> None:
+    """Bring each running service up to the values now in .env.
 
-    Compose passes the UNICON_* keys in as environment variables, with the
-    public URLs of Forgejo and the CI and the mail server's keys in
-    BACKEND_READS_TOO, and a running
-    container never re-reads them, so a re-minted token would sit in .env while
-    the backend kept presenting the revoked one. Woodpecker needs no such step:
-    everything it reads is written before this run starts it. The socket
-    filter's keys are the filter's, not the backend's.
+    A running container keeps the environment it started with, so a re-minted
+    token would sit in .env while the backend kept presenting the revoked one.
+    `up` recreates a container when the configuration compose works out from
+    the compose files and .env, interpolated values included, differs from
+    the one the container was made with, and leaves it alone otherwise; so
+    every running service gets an `up` and compose decides. A service that is
+    not running is left as it is, since the dev overlay's agent and socket
+    filter run only when someone started the `agent` profile; whatever starts
+    it with `up` gives it the new values.
     """
-    filter_keys = {key for keys in GRADING_SERVICES.values() for key in keys}
-    changed = sorted(
-        key
-        for key, value in values.items()
-        if (key.startswith("UNICON_") or key in BACKEND_READS_TOO)
-        and key not in filter_keys
-        and previous.get(key) != value
-    )
-    if not changed:
-        return
-    if not compose.container_exists("backend"):
-        print("backend is not running; it reads the new values when it starts")
-        return
-    compose.up("backend")
-    print(f"recreated backend for: {', '.join(changed)}")
-
-
-def _recreate_grading_services(
-    compose: Compose, previous: dict[str, str], values: dict[str, str]
-) -> None:
-    """Hand the dev overlay's agent and socket filter the values this run
-    changed under them, for the reason the backend gets its own: a running
-    container keeps the environment it started with. Neither runs unless
-    someone started the `agent` profile, and one that is not running is left
-    as it is: it reads the new values when it is next started.
-    """
-    for service, keys in GRADING_SERVICES.items():
-        changed = [key for key in keys if previous.get(key) != values.get(key)]
-        if not changed or not compose.is_running(service):
+    for service in services:
+        if not compose.is_running(service):
             continue
+        before = compose.container_id(service)
         compose.up(service)
-        print(f"recreated {service} for: {', '.join(changed)}")
+        if compose.container_id(service) != before:
+            print(f"recreated {service}, as its configuration changed")
 
 
 def _known_application(
