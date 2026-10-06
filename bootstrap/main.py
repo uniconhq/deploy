@@ -198,6 +198,7 @@ def main(argv: list[str] | None = None) -> int:
             recreate_changed(compose, *GRADING_SERVICES)
     except (
         ComposeFailed,
+        envfile.MissingTemplate,
         ForgejoError,
         GarageError,
         LostEnvironment,
