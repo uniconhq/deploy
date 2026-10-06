@@ -337,6 +337,48 @@ jobs:
           grep -q 'Registration is disabled' sign-up.html
           if grep -q 'name="user_name"' sign-up.html; then echo "Forgejo still offers sign-up"; exit 1; fi
 
+      # forge's live tests, which check what only a real Forgejo and
+      # Woodpecker can, against this stack: Forgejo, Garage and the CI on the
+      # ports compose.dev.yaml publishes on loopback, with the platform's
+      # admin token and the CI account's, and the stack's Postgres for the
+      # databases the tests make and drop. The one that stands in for the
+      # backend through a whole grading run skips here, since the CI and its
+      # step containers would reach the test at host.docker.internal, which
+      # Docker on Linux does not name; the browser test above grades on this
+      # stack instead. -rs lists every skip with its reason.
+      - name: forge's live tests pass against this stack
+        working-directory: forge
+        run: |
+          # An empty value would skip the tests that need it rather than fail.
+          env_value() {
+            value="$(grep "^$1=" ../deploy/.env | cut -d= -f2-)"
+            if [ -z "$value" ]; then echo "$1 is empty in .env" >&2; return 1; fi
+            echo "$value"
+          }
+          forge_token="$(env_value UNICON_FORGE_ADMIN_TOKEN)"
+          forge_public_url="$(env_value FORGEJO_PUBLIC_URL)"
+          ci_public_url="$(env_value WOODPECKER_PUBLIC_URL)"
+          ci_token="$(env_value UNICON_WOODPECKER_TOKEN)"
+          s3_access_key="$(env_value UNICON_S3_ACCESS_KEY)"
+          s3_secret_key="$(env_value UNICON_S3_SECRET_KEY)"
+          harness_image="$(env_value UNICON_HARNESS_IMAGE)"
+          clone_image="$(env_value UNICON_CLONE_IMAGE)"
+          postgres_password="$(env_value POSTGRES_SUPERUSER_PASSWORD)"
+          export UNICON_LIVE_FORGE_URL=http://127.0.0.1:3300
+          export UNICON_LIVE_FORGE_ADMIN_TOKEN="$forge_token"
+          export UNICON_LIVE_FORGE_PUBLIC_URL="$forge_public_url"
+          export UNICON_LIVE_CI_URL=http://127.0.0.1:8000
+          export UNICON_LIVE_CI_PUBLIC_URL="$ci_public_url"
+          export UNICON_LIVE_CI_ADMIN_TOKEN="$ci_token"
+          export UNICON_LIVE_S3_ENDPOINT=http://127.0.0.1:3900
+          export UNICON_LIVE_S3_ACCESS_KEY="$s3_access_key"
+          export UNICON_LIVE_S3_SECRET_KEY="$s3_secret_key"
+          export UNICON_LIVE_HARNESS_IMAGE="$harness_image"
+          export UNICON_LIVE_CLONE_IMAGE="$clone_image"
+          export UNICON_TEST_DATABASE_URL="postgresql+psycopg://postgres:$postgres_password@127.0.0.1:55432/postgres"
+          uv sync --frozen
+          uv run --frozen pytest -m live -rs tests/live
+
       - name: logs
         if: failure()
         working-directory: deploy
