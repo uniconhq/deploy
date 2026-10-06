@@ -4,6 +4,13 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Run by hand to try the stack on unmerged work: every sibling repo is
+  # checked out at the branch named here, which each of them must have.
+  workflow_dispatch:
+    inputs:
+      siblings:
+        description: The branch to check every sibling repo out at
+        default: main
 
 permissions:
   contents: read
@@ -61,30 +68,37 @@ jobs:
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/forge
+          ref: ${{ inputs.siblings || 'main' }}
           path: forge
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/backend
+          ref: ${{ inputs.siblings || 'main' }}
           path: backend
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/frontend
+          ref: ${{ inputs.siblings || 'main' }}
           path: frontend
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/runner
+          ref: ${{ inputs.siblings || 'main' }}
           path: runner
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/primitive-compile
+          ref: ${{ inputs.siblings || 'main' }}
           path: primitive-compile
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/primitive-sandbox-run
+          ref: ${{ inputs.siblings || 'main' }}
           path: primitive-sandbox-run
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/primitive-diff-check
+          ref: ${{ inputs.siblings || 'main' }}
           path: primitive-diff-check
 
       - uses: astral-sh/setup-uv@v10.1.0
