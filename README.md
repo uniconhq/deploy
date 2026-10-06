@@ -45,12 +45,12 @@ through Forgejo's pages on it; then Woodpecker.
 Run it again whenever you like. Every step checks before it creates, so a second
 run reports what was already there and creates nothing new. It is not a no-op:
 it re-applies the three database role passwords and both Forgejo bot passwords
-from `.env`, re-applies the bucket grants, rewrites `.env`, and recreates the
-`backend` container if any value it reads changed under it, a `UNICON_*` key,
-a `MAIL_*` key or the public URL of Forgejo or the CI, because a running container never
-re-reads its environment. On a development stack it recreates the agent and
-the socket filter the same way when they are running and a value of theirs
-changed. The rewrite drops the keys bootstrap knows nothing reads, ones an
+from `.env`, re-applies the bucket grants, rewrites `.env`, and runs
+`docker compose up -d` for the `backend` container when it is running, because
+a running container never re-reads its environment. Compose recreates it
+exactly when its configuration, the values from `.env` included, changed, and
+bootstrap says so. On a development stack it does the same for the agent and
+the socket filter when they are running. The rewrite drops the keys bootstrap knows nothing reads, ones an
 earlier bootstrap wrote, and names them; a key it does not know, such as one
 added by hand, is kept at the end under a comment of its own.
 
