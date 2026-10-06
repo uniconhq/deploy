@@ -304,8 +304,8 @@ jobs:
         run: uv run scripts/check-lfs.py --exact
 
       # Nothing is made the second time: no secret, no version, no agent.
-      # Its summary lists what was already there, the primitives and the
-      # workflow at v1 among them.
+      # Its summary lists what was already there, each primitive and the
+      # workflow at v1 and at v2 among them.
       - name: a second bootstrap changes nothing
         working-directory: deploy
         run: |
@@ -313,10 +313,12 @@ jobs:
           uv run bootstrap | tee second-run.txt
           diff .env.first .env
           grep -q '^created: 0,' second-run.txt
-          for name in unicon/compile unicon/sandbox-run unicon/diff-check; do
-            grep -q "present  primitive $name version v1" second-run.txt
+          for version in v1 v2; do
+            for name in unicon/compile unicon/sandbox-run unicon/diff-check; do
+              grep -q "present  primitive $name version $version\$" second-run.txt
+            done
+            grep -q "present  workflow unicon/classic version $version\$" second-run.txt
           done
-          grep -q 'present  workflow unicon/classic version v1$' second-run.txt
 
       # After the browser test, which signs in from this machine too. A burst
       # of 300 sign-in posts from one address: 240 over the rate pass at once,
