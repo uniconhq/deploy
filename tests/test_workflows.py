@@ -1,6 +1,6 @@
-"""Seeding unicon/classic@v1: what is made on a fresh forge, what is left
-alone on a rerun, the shape the forge package looks for, and the one way v1
-is ever rewritten.
+"""Seeding unicon/classic at each of its versions: what is made on a fresh
+forge, what is left alone on a rerun, the shape the forge package looks for,
+and the one way a version is ever rewritten.
 
 The forge package finds a workflow as a public repository
 `<owner>/<name>.workflow` carrying the topic `unicon-workflow`, with a git tag
@@ -19,12 +19,18 @@ from bootstrap import main
 from bootstrap.forgejo import ForgejoError
 from bootstrap.images import Manifest
 from bootstrap.summary import Summary
-from bootstrap.workflows import CLASSIC, CLASSIC_REPO, SEED_FILES, seed_files
+from bootstrap.workflows import (
+    CLASSIC,
+    SEED_FILES,
+    WorkflowError,
+    seed_files,
+    seed_versions,
+)
 from tests.forgejo_fake import FakeForgejo
 
 DEPLOY = Path(__file__).resolve().parent.parent
 ORG = "unicon"
-FULL = f"{ORG}/{CLASSIC_REPO}"
+FULL = f"{ORG}/{CLASSIC}.workflow"
 REPO = f"/repos/{FULL}"
 TOKEN = "provisioning-token"
 DIGEST = "@sha256:" + "0" * 64
@@ -36,14 +42,24 @@ NO_PRIMITIVES = Manifest(
     },
     primitives=(),
 )
+REPORTED = "fold: max, better: lower, at_least: 0}"
 
 
-def _deploy_with(tmp_path: Path, definition: bytes) -> Path:
-    """A deploy directory whose classic definition is `definition`."""
-    root = tmp_path / "workflows" / CLASSIC
-    root.mkdir(parents=True)
-    (root / "workflow.yaml").write_bytes(definition)
-    (root / "README.md").write_bytes(b"# classic\n")
+def _v1() -> dict[str, bytes]:
+    return seed_files(DEPLOY, CLASSIC, "v1")
+
+
+def _v2() -> dict[str, bytes]:
+    return seed_files(DEPLOY, CLASSIC, "v2")
+
+
+def _deploy_with(tmp_path: Path, definitions: dict[str, bytes]) -> Path:
+    """A deploy directory whose classic versions are these definitions."""
+    for version, definition in definitions.items():
+        root = tmp_path / "workflows" / CLASSIC / version
+        root.mkdir(parents=True)
+        (root / "workflow.yaml").write_bytes(definition)
+        (root / "README.md").write_bytes(b"# classic\n")
     return tmp_path
 
 
@@ -62,22 +78,28 @@ def _seed(
     return summary
 
 
-def test_a_fresh_forge_gets_every_piece() -> None:
+def test_a_fresh_forge_gets_v1_then_v2() -> None:
     forge = FakeForgejo()
 
     summary = _seed(forge)
 
-    assert summary.lines()[0] == "created: 4, already present: 0"
+    assert summary.lines()[0] == "created: 5, already present: 0"
     assert forge.writes() == [
         ("POST", "/orgs"),
         ("POST", f"/orgs/{ORG}/repos"),
         ("POST", f"{REPO}/contents"),
         ("POST", f"{REPO}/tags"),
+        ("POST", f"{REPO}/contents"),
+        ("POST", f"{REPO}/tags"),
         ("PUT", f"{REPO}/topics/unicon-workflow"),
     ]
     repo = forge.repos[FULL]
-    assert repo.files_at("v1") == seed_files(DEPLOY, CLASSIC)
+    assert list(repo.tags) == ["v1", "v2"]
+    assert repo.files_at("v1") == _v1()
+    assert repo.files_at("v2") == _v2()
     assert repo.topics == ["unicon-workflow"]
+    assert f"  created  workflow {ORG}/{CLASSIC} version v1" in summary.lines()
+    assert f"  created  workflow {ORG}/{CLASSIC} version v2" in summary.lines()
 
 
 def test_a_seeded_forge_is_read_and_not_written() -> None:
@@ -87,7 +109,7 @@ def test_a_seeded_forge_is_read_and_not_written() -> None:
 
     summary = _seed(forge)
 
-    assert summary.lines()[0] == "created: 0, already present: 4"
+    assert summary.lines()[0] == "created: 0, already present: 5"
     assert forge.writes() == []
 
 
@@ -117,65 +139,84 @@ def test_the_repository_is_public_on_main_with_no_commit_of_forgejos_own() -> No
     }
 
 
-def test_the_files_land_in_one_commit_that_the_version_points_at() -> None:
+def test_each_version_lands_in_one_commit_that_its_tag_points_at() -> None:
     forge = FakeForgejo()
 
     _seed(forge)
 
-    commit = forge.body_of("POST", f"{REPO}/contents")
-    assert commit["branch"] == "main"
-    assert commit["new_branch"] == "main"
-    assert commit["message"] == f"Seed {ORG}/{CLASSIC}@v1"
+    commits = [
+        body
+        for method, path, body in forge.bodies
+        if (method, path) == ("POST", f"{REPO}/contents")
+    ]
+    assert [commit["message"] for commit in commits] == [
+        f"Seed {ORG}/{CLASSIC}@v1",
+        f"Seed {ORG}/{CLASSIC}@v2",
+    ]
+    first, second = commits
+    assert first["branch"] == "main"
+    assert first["new_branch"] == "main"
     assert {
-        entry["path"]: base64.b64decode(entry["content"]) for entry in commit["files"]
-    } == seed_files(DEPLOY, CLASSIC)
-    assert all(entry["operation"] == "create" for entry in commit["files"])
+        entry["path"]: base64.b64decode(entry["content"]) for entry in first["files"]
+    } == _v1()
+    assert all(entry["operation"] == "create" for entry in first["files"])
+    assert "new_branch" not in second
     repo = forge.repos[FULL]
-    assert repo.tags == {"v1": repo.head}
+    assert repo.tags["v2"] == repo.head
+    assert repo.commits[repo.tags["v1"]] == _v1()
 
 
 def test_a_commit_holding_the_files_without_a_tag_is_tagged_where_it_is() -> None:
     """An earlier run that stopped between the commit and the tag."""
     forge = FakeForgejo()
-    repo = forge.seed(FULL, seed_files(DEPLOY, CLASSIC), topics=("unicon-workflow",))
+    repo = forge.seed(FULL, _v1(), topics=("unicon-workflow",))
     head = repo.head
 
     _seed(forge)
 
-    assert ("POST", f"{REPO}/contents") not in forge.requests
-    assert repo.tags == {"v1": head}
+    assert repo.tags["v1"] == head
+    assert repo.files_at("v2") == _v2()
 
 
-def test_a_changed_definition_leaves_v1_as_it_is(
+def test_a_changed_v1_is_kept_and_v2_is_still_made(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
     forge = FakeForgejo()
-    repo = forge.seed(
-        FULL, seed_files(DEPLOY, CLASSIC), tags=("v1",), topics=("unicon-workflow",)
-    )
-    before = dict(repo.tags)
+    repo = forge.seed(FULL, _v1(), tags=("v1",), topics=("unicon-workflow",))
+    first = repo.tags["v1"]
+    directory = _deploy_with(tmp_path, {"v1": b"steps: [1]\n", "v2": b"steps: [2]\n"})
 
-    _seed(forge, _deploy_with(tmp_path, b"name: unicon/classic\nversion: v1\n"))
+    summary = _seed(forge, directory)
 
-    assert forge.writes() == []
-    assert repo.tags == before
+    assert repo.tags["v1"] == first
+    assert repo.files_at("v1") == _v1()
+    assert repo.files_at("v2") == seed_files(directory, CLASSIC, "v2")
     assert "differs from unicon/classic@v1" in capsys.readouterr().out
+    assert (
+        f"  present  workflow {ORG}/{CLASSIC} version v1 "
+        "(kept, differs from the files here)"
+    ) in summary.lines()
 
 
-def test_rewrite_moves_v1_to_a_commit_of_the_definition_here(tmp_path: Path) -> None:
+def test_rewrite_moves_each_version_that_differs(tmp_path: Path) -> None:
     forge = FakeForgejo()
-    repo = forge.seed(
-        FULL, seed_files(DEPLOY, CLASSIC), tags=("v1",), topics=("unicon-workflow",)
+    _seed(forge)
+    repo = forge.repos[FULL]
+    old = dict(repo.tags)
+    directory = _deploy_with(
+        tmp_path, {"v1": _v1()["workflow.yaml"], "v2": b"steps: [2]\n"}
     )
-    old = repo.tags["v1"]
-    directory = _deploy_with(tmp_path, b"name: unicon/classic\nversion: v1\n")
+    (directory / "workflows" / CLASSIC / "v1" / "README.md").write_bytes(
+        _v1()["README.md"]
+    )
 
     summary = _seed(forge, directory, rewrite=True)
 
-    assert repo.tags["v1"] != old
-    assert repo.files_at("v1") == seed_files(directory, CLASSIC)
-    assert old in repo.commits
-    assert f"  created  workflow {ORG}/{CLASSIC} version v1 (rewritten)" in (
+    assert repo.tags["v1"] == old["v1"]
+    assert repo.tags["v2"] != old["v2"]
+    assert repo.files_at("v2") == seed_files(directory, CLASSIC, "v2")
+    assert old["v2"] in repo.commits
+    assert f"  created  workflow {ORG}/{CLASSIC} version v2 (rewritten)" in (
         summary.lines()
     )
     forge.requests.clear()
@@ -219,8 +260,31 @@ def test_rewriting_is_refused_outside_a_development_stack() -> None:
     assert not main.is_development(["compose.yaml"])
 
 
-def test_the_seeded_definition_wires_compile_into_run_into_check() -> None:
-    files = seed_files(DEPLOY, CLASSIC)
+def test_the_versions_are_the_version_folders_oldest_first(tmp_path: Path) -> None:
+    directory = _deploy_with(tmp_path, {"v10": b"ten\n", "v2": b"two\n", "v1": b"1\n"})
+
+    versions = seed_versions(directory, CLASSIC)
+
+    assert list(versions) == ["v1", "v2", "v10"]
+    assert versions["v10"]["workflow.yaml"] == b"ten\n"
+    assert list(seed_versions(DEPLOY, CLASSIC)) == ["v1", "v2"]
+
+
+@pytest.mark.parametrize("stray", ["workflow.yaml", "latest"])
+def test_anything_but_a_version_folder_is_refused(tmp_path: Path, stray: str) -> None:
+    directory = _deploy_with(tmp_path, {"v1": b"1\n"})
+    path = directory / "workflows" / CLASSIC / stray
+    if stray == "latest":
+        path.mkdir()
+    else:
+        path.write_bytes(b"")
+
+    with pytest.raises(WorkflowError, match="not a version folder"):
+        seed_versions(directory, CLASSIC)
+
+
+def test_v1_wires_the_v1_primitives() -> None:
+    files = _v1()
 
     assert set(files) == set(SEED_FILES) == {"workflow.yaml", "README.md"}
     definition = [line.strip() for line in files["workflow.yaml"].decode().splitlines()]
@@ -241,4 +305,44 @@ def test_the_seeded_definition_wires_compile_into_run_into_check() -> None:
         "summary: ${{ steps.compile.compile_log }}",
     ):
         assert wiring in definition
+    assert files["README.md"].startswith(b"# classic\n")
+
+
+def test_v2_wires_the_v2_primitives_over_tests_and_reports() -> None:
+    files = _v2()
+
+    assert set(files) == {"workflow.yaml", "README.md"}
+    lines = files["workflow.yaml"].decode().splitlines()
+    assert lines[0].startswith("# unicon/classic@v2,")
+    definition = [line for line in lines if not line.startswith("#")]
+    assert not any(line.startswith(("name:", "version:")) for line in definition)
+    assert [line.split("use: ")[1] for line in definition if "use: " in line] == [
+        "unicon/compile@v2",
+        "unicon/sandbox-run@v2",
+        "unicon/diff-check@v2",
+    ]
+    at = definition.index
+    assert definition[at("test:") : at("test:") + 3] == [
+        "test:",
+        "  input: file",
+        "  answer: file",
+    ]
+    assert definition[at("report:") :] == [
+        "report:",
+        f'  time_ms: {{from: "${{{{ steps.run.time_ms }}}}", {REPORTED}',
+        f'  memory_kb: {{from: "${{{{ steps.run.memory_kb }}}}", {REPORTED}',
+        "  log: ${{ steps.compile.compile_log }}",
+    ]
+    for wiring in (
+        "  submission: {type: file, contestant: true}",
+        "  language: {type: enum, options: [c, cpp, java, python], contestant: true}",
+        "      source: ${{ inputs.submission }}",
+        "      language: ${{ inputs.language }}",
+        "      binary: ${{ steps.compile.binary }}",
+        "      input: ${{ test.input }}",
+        "      actual: ${{ steps.run.output }}",
+        "      expected: ${{ test.answer }}",
+    ):
+        assert wiring in definition
+    assert definition.count("    per_test: true") == 2
     assert files["README.md"].startswith(b"# classic\n")
