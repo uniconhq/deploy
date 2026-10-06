@@ -92,13 +92,13 @@ class Compose:
         """Whether this service has a running container."""
         return bool(self._ps(service, include_stopped=False))
 
-    def container_exists(self, service: str) -> bool:
-        """Whether this service has a container, running or stopped.
-
-        A service behind a compose profile still answers here without the
-        profile being named, which is what lets bootstrap ask about `backend`.
+    def container_id(self, service: str) -> str | None:
+        """The id of this service's container, running or stopped, or None
+        when it has none. A recreated container has a new one.
         """
-        return bool(self._ps(service, include_stopped=True))
+        for row in self._ps(service, include_stopped=True):
+            return str(row["ID"])
+        return None
 
     def volume_exists(self, name: str) -> bool:
         """Whether a named Docker volume is present. The name is the full one

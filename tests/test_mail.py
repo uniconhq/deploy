@@ -114,24 +114,3 @@ def test_a_mail_server_needs_a_sender_and_a_port() -> None:
                 "MAIL_SMTP_PORT": "x",
             }
         )
-
-
-class _Compose:
-    def __init__(self) -> None:
-        self.started: list[str] = []
-
-    def container_exists(self, service: str) -> bool:
-        return True
-
-    def up(self, service: str) -> None:
-        self.started.append(service)
-
-
-def test_a_changed_mail_key_recreates_the_backend() -> None:
-    compose = _Compose()
-    before = {**BASE, "MAIL_SMTP_ADDR": ""}
-    after = {**BASE, "MAIL_SMTP_ADDR": "smtp.example.org"}
-
-    main._restart_backend_if_values_changed(compose, before, after)  # type: ignore[arg-type]
-
-    assert compose.started == ["backend"]

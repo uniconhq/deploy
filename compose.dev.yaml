@@ -31,18 +31,20 @@ services:
       - "127.0.0.1:55432:5432"
 
   garage:
-    # Published for scripts/check-lfs.py, which runs on this machine. Bootstrap
-    # needs neither port: it drives Garage through the container's own command
-    # line. The admin API on 3903 is full control over the store, so in the
-    # production shape it stays inside the network.
+    # Published for scripts/check-lfs.py, which runs on this machine, and S3
+    # for forge's live tests too. Bootstrap needs neither port: it drives
+    # Garage through the container's own command line. The admin API on 3903
+    # is full control over the store, so in the production shape it stays
+    # inside the network.
     ports:
       - "127.0.0.1:3900:3900"
       - "127.0.0.1:3903:3903"
 
   forgejo:
-    # Loopback only, for scripts/check-lfs.py, which drives the API from this
-    # machine. Nothing else uses it: the browser goes through the proxy, and
-    # bootstrap drives the API from inside the container.
+    # Loopback only, for scripts/check-lfs.py and forge's live tests, which
+    # drive the API from this machine. Nothing else uses it: the browser goes
+    # through the proxy, and bootstrap drives the API from inside the
+    # container.
     ports:
       - "127.0.0.1:3300:3000"
     environment:

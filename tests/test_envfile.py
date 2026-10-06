@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from bootstrap import envfile
+from bootstrap import envfile, main
 
 DEPLOY = Path(__file__).resolve().parent.parent
 
@@ -161,10 +161,22 @@ def test_compose_names_what_bootstrap_makes() -> None:
     backend's environment itself, so they have to be the ones bootstrap
     makes. The backend has one bucket: what people upload goes through the
     upload door into the one Forgejo owns."""
-    from bootstrap import main
-
     text = (DEPLOY / "compose.yaml").read_text(encoding="utf-8")
 
     assert "UNICON_S3_UPLOADS_BUCKET" not in text
     assert f"UNICON_S3_RESULTS_BUCKET: {main.RESULTS_BUCKET}\n" in text
     assert f"UNICON_FORGE_PLATFORM_ACCOUNT: {main.BACKEND_ACCOUNT}\n" in text
+
+
+def test_a_missing_template_ends_the_run_like_any_failure(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    (tmp_path / "images.json").write_bytes((DEPLOY / "images.json").read_bytes())
+    (tmp_path / ".env").write_text(
+        "".join(f"{key}=kept\n" for key in main.UNLOCKS), encoding="utf-8"
+    )
+
+    status = main.main(["--directory", str(tmp_path), "-f", "compose.yaml"])
+
+    assert status == 1
+    assert capsys.readouterr().out.splitlines()[-1].startswith("bootstrap failed: ")

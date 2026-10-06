@@ -7,11 +7,11 @@
 # starting a service with an empty password.
 name: unicon
 
-# The backend's environment, in one place because two services need it: only
-# the backend's own keys, not the whole of .env, so nothing here carries the
-# Forgejo administrator password or the Garage RPC secret. The addresses of the
-# other services on the compose network, the bucket names and the account
-# bootstrap makes are written here as they are; the rest comes from .env.
+# The backend's environment: only the backend's own keys, not the whole of
+# .env, so nothing here carries the Forgejo administrator password or the
+# Garage RPC secret. The addresses of the other services on the compose
+# network, the bucket names and the account bootstrap makes are written here
+# as they are; the rest comes from .env.
 # Plain ${...} rather than ${...:?}, because compose interpolates every service
 # on every command and bootstrap has to start Postgres before these exist. The
 # backend checks them at boot and refuses to start on a missing one.
@@ -312,9 +312,12 @@ services:
     # sends the browser back to, and the two caps on live streams, and the
     # filter keeps it from touching any other dollar sign in the file, which
     # are all nginx's own. main.conf sizes the connections those caps fit in.
+    # forwarded.conf, which the site includes, has nothing to fill in and is
+    # mounted as it is, outside conf.d, which main.conf includes whole.
     volumes:
       - ./proxy/main.conf:/etc/nginx/nginx.conf:ro
       - ./proxy/nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./proxy/forwarded.conf:/etc/nginx/forwarded.conf:ro
     environment:
       FORGE_HOST: ${FORGEJO_DOMAIN:?set by bootstrap}
       APP_URL: ${UNICON_PUBLIC_URL:?set by bootstrap}
