@@ -312,9 +312,12 @@ services:
     # sends the browser back to, and the two caps on live streams, and the
     # filter keeps it from touching any other dollar sign in the file, which
     # are all nginx's own. main.conf sizes the connections those caps fit in.
+    # forwarded.conf, which the site includes, has nothing to fill in and is
+    # mounted as it is, outside conf.d, which main.conf includes whole.
     volumes:
       - ./proxy/main.conf:/etc/nginx/nginx.conf:ro
       - ./proxy/nginx.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./proxy/forwarded.conf:/etc/nginx/forwarded.conf:ro
     environment:
       FORGE_HOST: ${FORGEJO_DOMAIN:?set by bootstrap}
       APP_URL: ${UNICON_PUBLIC_URL:?set by bootstrap}
