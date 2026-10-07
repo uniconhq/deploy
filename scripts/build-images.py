@@ -14,10 +14,17 @@ It builds the runner's four images from ../runner (images/<name>/Dockerfile,
 with the checkout as the context, the way the runner's own CI builds them)
 and each primitive from ../primitive-<name> (its Dockerfile at the root),
 pushes each to the registry, reads back the digest the push gave it, and
-writes images.local.json: the same shape as images.json, with every image a
-localhost:5000 reference by digest and every primitive's source its sibling
-checkout. That file is git-ignored, and bootstrap reads it instead of
-images.json whenever it is there. Run it from the deploy directory:
+writes images.local.json: the same shape as images.json, with every runner
+image a localhost:5000 reference by digest. Each primitive's checkout fills
+the version at the forge that is the major of the version in its
+pyproject.toml, `v2` for 2.0.0, with its source the sibling checkout; every
+other version of it is copied from images.json as released, the image by its
+digest at ghcr.io and the source its tag on GitHub. So a stack built this way
+seeds v1 of each primitive from its release and v2 from the checkout. The
+harness built here reads only a task's plans/plan.json, which a save on
+unicon/classic@v2 writes, so a task saved on v1 grades only once it is saved
+again on v2. images.local.json is git-ignored, and bootstrap reads it instead
+of images.json whenever it is there. Run it from the deploy directory:
 
     uv run scripts/build-images.py
     uv run bootstrap
@@ -25,10 +32,12 @@ images.json whenever it is there. Run it from the deploy directory:
 A checkout is built as it is on disk, committed or not, so a change in a
 sibling is one build and one bootstrap away from a grading. An image whose
 build did not change keeps its digest, and bootstrap then changes nothing at
-the forge; one that did change gets a new digest, and bootstrap makes the
-primitive's next version (or rewrites v1, with --rewrite-v1). That is why the
-build attaches no provenance or SBOM attestation: each carries the time of the
-build, so every build would be a new digest even when nothing changed.
+the forge. One that did change gets a new digest, and bootstrap stops before
+it seeds anything, naming the version at the forge that differs, since a
+version is never edited; `uv run bootstrap --rewrite` rewrites it in place on
+a development stack. That is why the build attaches no provenance or SBOM
+attestation: each carries the time of the build, so every build would be a
+new digest even when nothing changed.
 """
 
 from __future__ import annotations
@@ -40,7 +49,9 @@ import re
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
+from typing import Any
 
 import httpx
 
@@ -79,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
     siblings = (options.siblings or directory.parent).resolve()
 
     try:
+        released = _released_primitives(directory)
         _ensure_registry()
         built = {
             name: _build(
@@ -88,10 +100,12 @@ def main(argv: list[str] | None = None) -> int:
             )
             for name in RUNNER_IMAGES
         }
-        primitives: dict[str, dict[str, object]] = {}
+        primitives: dict[str, dict[str, Any]] = {}
         for name in PRIMITIVES:
             checkout = siblings / f"primitive-{name}"
-            primitives[name] = {
+            version = _version_of(checkout)
+            versions = dict(released.get(name, {}))
+            versions[version] = {
                 "image": _build(
                     f"primitive-{name}",
                     context=checkout,
@@ -99,7 +113,10 @@ def main(argv: list[str] | None = None) -> int:
                 ),
                 "source": {"path": _relative(checkout, directory)},
             }
-    except BuildFailed as failure:
+            primitives[name] = dict(
+                sorted(versions.items(), key=lambda item: int(item[0][1:]))
+            )
+    except (BuildFailed, images.ManifestError) as failure:
         print(f"build-images failed: {failure}")
         return 1
 
@@ -112,9 +129,42 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\nwrote {manifest}")
     for name, reference in built.items():
         print(f"  {name:<22} {reference}")
-    for name, entry in primitives.items():
-        print(f"  {'primitive-' + name:<22} {entry['image']}")
+    for name, versions in primitives.items():
+        for version, entry in versions.items():
+            label = f"primitive-{name} {version}"
+            print(f"  {label:<22} {entry['image']}")
     return 0
+
+
+def _released_primitives(directory: Path) -> dict[str, dict[str, Any]]:
+    """Every primitive version the release manifest pins, as its entries
+    there: the image at ghcr.io by digest and the source its tag on GitHub.
+    """
+    path = directory / images.RELEASE_MANIFEST
+    images.load(path)
+    document = json.loads(path.read_text(encoding="utf-8"))
+    return {
+        str(name): dict(versions) for name, versions in document["primitives"].items()
+    }
+
+
+def _version_of(checkout: Path) -> str:
+    """The version at the forge a checkout fills: the major of the version
+    its pyproject.toml gives, `v2` for 2.0.0.
+    """
+    pyproject = checkout / "pyproject.toml"
+    try:
+        project = tomllib.loads(pyproject.read_text(encoding="utf-8"))["project"]
+        major = int(str(project["version"]).split(".")[0])
+    except OSError, KeyError, ValueError, tomllib.TOMLDecodeError:
+        raise BuildFailed(
+            f"{pyproject} gives no version <major>.<minor>.<patch>"
+        ) from None
+    if major < 1:
+        raise BuildFailed(
+            f"{pyproject} gives the major {major}; versions at the forge start at v1"
+        )
+    return f"v{major}"
 
 
 def _relative(checkout: Path, directory: Path) -> str:

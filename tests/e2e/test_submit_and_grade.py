@@ -152,34 +152,24 @@ def running_contest(title: str) -> str:
     end = (now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
     return (
         f'name: "{title}"\n'
-        'description: ""\n'
         f"start: {start}\n"
         f"end: {end}\n"
         "state: published\n"
-        "submissions_closed: false\n"
         "visibility: signed-in\n"
-        "\n"
         "registration:\n"
-        "  mode: open\n"
         "  approval: manual\n"
-        "\n"
-        "teams:\n"
-        "  enabled: false\n"
-        "  max_size: 3\n"
-        "\n"
-        "leaderboards: []\n"
-        "\n"
+        "leaderboards:\n"
+        "  - name: Standings\n"
+        "    who: contestants\n"
         "tasks:\n"
         "  - id: sum\n"
-        "    label: A\n"
-        "    points: 100\n"
     )
 
 
 def submit(page: Page, number: int, source: str) -> None:
     """Send `source` as the task's Python solution from the submit panel. The
-    starter task takes Python alone, so the panel names the language rather
-    than asking for it.
+    starter task offers one language, so the panel names it rather than
+    asking for it.
     """
     form = page.get_by_role("form", name="Submit")
     solution: FilePayload = {
@@ -188,7 +178,7 @@ def submit(page: Page, number: int, source: str) -> None:
         "buffer": source.encode(),
     }
     form.get_by_label("Your solution", exact=True).set_input_files(files=[solution])
-    expect(form.get_by_text("In python.")).to_be_visible()
+    expect(form.get_by_text("language: python")).to_be_visible()
     form.get_by_role("button", name="Submit", exact=True).click()
     expect(page.get_by_text(f"Submitted as #{number}.")).to_be_visible()
 
@@ -244,8 +234,9 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
 
     organiser.get_by_role("link", name="task.yaml", exact=True).click()
     task_yaml = organiser.get_by_role("textbox", name="task.yaml").input_value()
-    loosened = re.sub(r"rate: .*", "rate: 10 per 60s", task_yaml)
-    assert loosened != task_yaml, "the starter task.yaml has no rate line"
+    assert "workflow: unicon/classic@v2" in task_yaml, task_yaml
+    assert "submissions:" not in task_yaml, "the starter task.yaml sets its own caps"
+    loosened = task_yaml.rstrip("\n") + "\nsubmissions:\n  rate: {count: 10, per: 60}\n"
     edit_and_save(organiser, "task.yaml", loosened)
     expect(
         organiser.get_by_text(re.compile(r"Published as publication \d+\."))
@@ -254,7 +245,7 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
     organiser.goto(contest_page)
     organiser.get_by_role("link", name="contest.yaml", exact=True).click()
     expect(organiser.get_by_role("textbox", name="contest.yaml")).to_have_value(
-        re.compile(r"tasks:\n  - id: sum\n    label: A\n    points: 100\n")
+        re.compile(r"tasks:\n  - id: sum\n")
     )
     edit_and_save(organiser, "contest.yaml", running_contest(f"Spring {stamp}"))
     expect(organiser.get_by_text(re.compile(r"Saved as version"))).to_be_visible()
