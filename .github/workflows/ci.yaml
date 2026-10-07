@@ -5,7 +5,9 @@ on:
     branches: [main]
   pull_request:
   # Run by hand to try the stack on unmerged work: every sibling repo is
-  # checked out at the branch named here, which each of them must have.
+  # checked out at the branch named here, which each of them must have. A
+  # pull request tries each sibling's branch of its own name when there is
+  # one (see the stack job).
   workflow_dispatch:
     inputs:
       siblings:
@@ -61,44 +63,64 @@ jobs:
       # checkouts, with the forge checkout handed to the backend's build as
       # the context `forge`, and scripts/build-images.py builds the grading
       # images from the runner and the three primitives, so the repos sit
-      # beside each other the way they do on a laptop.
+      # beside each other the way they do on a laptop. Each sibling is checked
+      # out at the branch a hand run names; on a pull request, at the
+      # sibling's branch of the same name when it has one, so a change made
+      # across repos is tried together before any of it merges; otherwise at
+      # main.
+      - name: sibling branches
+        id: refs
+        env:
+          NAMED: ${{ inputs.siblings }}
+          BRANCH: ${{ github.head_ref }}
+        run: |
+          for repo in forge backend frontend runner primitive-compile primitive-sandbox-run primitive-diff-check; do
+            ref=main
+            if [ -n "$NAMED" ]; then
+              ref=$NAMED
+            elif [ -n "$BRANCH" ] && git ls-remote --exit-code --heads "https://github.com/uniconhq/$repo" "$BRANCH" > /dev/null; then
+              ref=$BRANCH
+            fi
+            echo "$repo at $ref"
+            echo "$repo=$ref" >> "$GITHUB_OUTPUT"
+          done
       - uses: actions/checkout@v7
         with:
           path: deploy
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/forge
-          ref: ${{ inputs.siblings || 'main' }}
+          ref: ${{ steps.refs.outputs['forge'] }}
           path: forge
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/backend
-          ref: ${{ inputs.siblings || 'main' }}
+          ref: ${{ steps.refs.outputs['backend'] }}
           path: backend
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/frontend
-          ref: ${{ inputs.siblings || 'main' }}
+          ref: ${{ steps.refs.outputs['frontend'] }}
           path: frontend
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/runner
-          ref: ${{ inputs.siblings || 'main' }}
+          ref: ${{ steps.refs.outputs['runner'] }}
           path: runner
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/primitive-compile
-          ref: ${{ inputs.siblings || 'main' }}
+          ref: ${{ steps.refs.outputs['primitive-compile'] }}
           path: primitive-compile
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/primitive-sandbox-run
-          ref: ${{ inputs.siblings || 'main' }}
+          ref: ${{ steps.refs.outputs['primitive-sandbox-run'] }}
           path: primitive-sandbox-run
       - uses: actions/checkout@v7
         with:
           repository: uniconhq/primitive-diff-check
-          ref: ${{ inputs.siblings || 'main' }}
+          ref: ${{ steps.refs.outputs['primitive-diff-check'] }}
           path: primitive-diff-check
 
       - uses: astral-sh/setup-uv@v10.1.0
@@ -304,8 +326,8 @@ jobs:
         run: uv run scripts/check-lfs.py --exact
 
       # Nothing is made the second time: no secret, no version, no agent.
-      # Its summary lists what was already there, the primitives and the
-      # workflow at v1 among them.
+      # Its summary lists what was already there, each primitive and the
+      # workflow at v1 and at v2 among them.
       - name: a second bootstrap changes nothing
         working-directory: deploy
         run: |
@@ -313,10 +335,29 @@ jobs:
           uv run bootstrap | tee second-run.txt
           diff .env.first .env
           grep -q '^created: 0,' second-run.txt
-          for name in unicon/compile unicon/sandbox-run unicon/diff-check; do
-            grep -q "present  primitive $name version v1" second-run.txt
+          for version in v1 v2; do
+            for name in unicon/compile unicon/sandbox-run unicon/diff-check; do
+              grep -q "present  primitive $name version $version\$" second-run.txt
+            done
+            grep -q "present  workflow unicon/classic version $version\$" second-run.txt
           done
-          grep -q 'present  workflow unicon/classic version v1$' second-run.txt
+
+      # A version folder that no longer matches its tag at the forge stops
+      # bootstrap before it seeds anything, naming the version.
+      - name: a changed version stops bootstrap
+        working-directory: deploy
+        run: |
+          cp workflows/classic/v2/README.md readme.saved
+          echo "changed" >> workflows/classic/v2/README.md
+          if uv run bootstrap > changed-run.txt; then
+            cat changed-run.txt
+            echo "bootstrap seeded over a version that differs"
+            exit 1
+          fi
+          cp readme.saved workflows/classic/v2/README.md
+          cat changed-run.txt
+          grep -q 'unicon/classic@v2, against workflows/classic/v2/' changed-run.txt
+          if grep -q 'unicon/classic@v1, against' changed-run.txt; then exit 1; fi
 
       # After the browser test, which signs in from this machine too. A burst
       # of 300 sign-in posts from one address: 240 over the rate pass at once,

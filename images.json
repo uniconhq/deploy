@@ -1,30 +1,57 @@
 {
   "images": {
-    "harness": "ghcr.io/uniconhq/harness@sha256:385a516eb5183aa8b072f45ca7ff6d82aaeee2441c5364673065a53e350a4af4",
-    "clone": "ghcr.io/uniconhq/clone@sha256:2407a8a46994d8dcc2d45aa78c1f17a14c7c8c3a8ee36a5855af3bb7f7a879ea",
-    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:429ffa72e28fc65976d2ec590f694be5e20b83b26ad6da24982e70c20520e857",
-    "worker": "ghcr.io/uniconhq/worker@sha256:3dceea14bacafa81c2d9a3201ccb4c494e818e8b0d3f7ed1fdd560f1f42522e5"
+    "harness": "ghcr.io/uniconhq/harness@sha256:9296f7cf066382927284d2eea27e31712ae5607371b49ae771a8ede753124044",
+    "clone": "ghcr.io/uniconhq/clone@sha256:1b03bcd3c6e6864b98f471eeca08dfc5107d217f29aad5d2081465eb028e6fd8",
+    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:c1770aeda6271fdc75181706fa8ed222e4ae473a448b0dd104166cc9d31d2334",
+    "worker": "ghcr.io/uniconhq/worker@sha256:c541889485d2a28155c9165fd07a744b3ce1e44b128c13480cccd289e5d7d0a6"
   },
   "primitives": {
     "compile": {
-      "image": "ghcr.io/uniconhq/primitive-compile@sha256:f66e9ae767e19e95ed5fa2c60386cf1444b0a62ea3f66a73f9b94d1d8f26e0de",
-      "source": {
-        "github": "uniconhq/primitive-compile",
-        "tag": "v1.1.1"
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-compile@sha256:f66e9ae767e19e95ed5fa2c60386cf1444b0a62ea3f66a73f9b94d1d8f26e0de",
+        "source": {
+          "github": "uniconhq/primitive-compile",
+          "tag": "v1.1.1"
+        }
+      },
+      "v2": {
+        "image": "ghcr.io/uniconhq/primitive-compile@sha256:fd36c1f04aca23bed70ef9ecf2d3ed732514c96735313aa6631528adafe034e3",
+        "source": {
+          "github": "uniconhq/primitive-compile",
+          "tag": "v2.0.0"
+        }
       }
     },
     "sandbox-run": {
-      "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:bd4f45b3dc02647b6cf1168fb5e4dc14877be48983ff73b4daf864a3cffe0943",
-      "source": {
-        "github": "uniconhq/primitive-sandbox-run",
-        "tag": "v1.3.0"
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:bd4f45b3dc02647b6cf1168fb5e4dc14877be48983ff73b4daf864a3cffe0943",
+        "source": {
+          "github": "uniconhq/primitive-sandbox-run",
+          "tag": "v1.3.0"
+        }
+      },
+      "v2": {
+        "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:9aa99d4b52bff18642b88659e4c35ecd39412bde64f49bd1e0cd5b360a03a57d",
+        "source": {
+          "github": "uniconhq/primitive-sandbox-run",
+          "tag": "v2.0.0"
+        }
       }
     },
     "diff-check": {
-      "image": "ghcr.io/uniconhq/primitive-diff-check@sha256:0e596fb973f28f6df5751d4a91ec2480490ed2655cc7499ca1fdd05a2d1dacc5",
-      "source": {
-        "github": "uniconhq/primitive-diff-check",
-        "tag": "v1.1.1"
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-diff-check@sha256:0e596fb973f28f6df5751d4a91ec2480490ed2655cc7499ca1fdd05a2d1dacc5",
+        "source": {
+          "github": "uniconhq/primitive-diff-check",
+          "tag": "v1.1.1"
+        }
+      },
+      "v2": {
+        "image": "ghcr.io/uniconhq/primitive-diff-check@sha256:adb98447ddc54643f2aa833bb3b41186bd9c17d2ae9086ca7af96417b7c0b40b",
+        "source": {
+          "github": "uniconhq/primitive-diff-check",
+          "tag": "v2.0.0"
+        }
       }
     }
   }
