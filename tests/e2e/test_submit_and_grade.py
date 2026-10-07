@@ -1,16 +1,22 @@
-"""Submit and grade on the running compose stack, from the browser.
+"""Run a contest from the organiser's forms and grade on the running
+compose stack, from the browser.
 
 An organiser and a contestant, each made with the operator's command and
 signed in through Forgejo's own pages. The organiser creates an org, a
-contest and a task from the organiser pages, saves `task.yaml` so the task
-publishes, and saves `contest.yaml` so the contest is published and running.
-The contestant registers, the organiser approves them from the contestants
-table, and the contestant submits the task's sample solution and then a
-wrong one from the submit panel. The first comes back `accepted` and the
-second `wrong_answer`, graded by the real CI, a real grading machine and the
-primitives at the forge. Then the contestant signs out, and signing in again
-asks Forgejo for their password: signing out of the app signed the browser
-out of Forgejo too.
+contest and a task from the organiser pages, sets the task's submission
+rate in the task's settings form so the task publishes, and publishes the
+contest, running now, from the contest's settings form. The contestant
+registers, the organiser approves them from the contestants table, and the
+contestant submits the task's sample solution and then a wrong one from the
+submit panel. The first comes back `accepted` and the second
+`wrong_answer`, graded by the real CI, a real grading machine and the
+primitives at the forge. The organiser then uploads a new input for the
+task's test through the upload door and saves it in; since the contest is
+running and the data grades, the save asks first, the organiser publishes
+the change, and every submission is graded again, which the contest's
+gradings feed shows as a second attempt of the sample solution, accepted.
+Then the contestant signs out, and signing in again asks Forgejo for their
+password: signing out of the app signed the browser out of Forgejo too.
 
 It runs against a stack that is already up with both profiles, `app` and
 `agent`, and is skipped unless `UNICON_E2E_URL` names the app, for example
@@ -35,6 +41,7 @@ import pytest
 from playwright.sync_api import (
     Browser,
     FilePayload,
+    Locator,
     Page,
     ViewportSize,
     expect,
@@ -131,39 +138,19 @@ def create(page: Page, name: str, button: str, start: str | None = None) -> None
     expect(title).to_be_visible(timeout=CREATE_TIMEOUT_MS)
 
 
-def edit_and_save(page: Page, file: str, change: str | None = None) -> None:
-    """Open `file` in the organiser's file browser, replace its text with
-    `change` (or leave it), and press Save.
-    """
-    page.get_by_role("link", name=file, exact=True).click()
-    editor = page.get_by_role("textbox", name=file)
-    expect(editor).to_be_visible()
-    if change is not None:
-        editor.fill(change)
-    page.get_by_role("button", name="Save", exact=True).click()
+def open_settings(page: Page, form: str) -> Locator:
+    """Open the page's settings section and answer its form, by name."""
+    page.get_by_role("button", name="Edit the settings", exact=True).click()
+    found = page.get_by_role("form", name=form)
+    expect(found).to_be_visible()
+    return found
 
 
-def running_contest(title: str) -> str:
-    """A `contest.yaml` for a contest that is published and running now, open
-    to register with the organisers' approval, with the task `sum` in it.
+def local(moment: datetime) -> str:
+    """`moment` as a `datetime-local` field takes it, in the browser's zone,
+    which is the machine's: UTC on the CI's runner.
     """
-    now = datetime.now(UTC).replace(microsecond=0)
-    start = (now - timedelta(hours=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    end = (now + timedelta(hours=3)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    return (
-        f'name: "{title}"\n'
-        f"start: {start}\n"
-        f"end: {end}\n"
-        "state: published\n"
-        "visibility: signed-in\n"
-        "registration:\n"
-        "  approval: manual\n"
-        "leaderboards:\n"
-        "  - name: Standings\n"
-        "    who: contestants\n"
-        "tasks:\n"
-        "  - id: sum\n"
-    )
+    return moment.astimezone().strftime("%Y-%m-%dT%H:%M")
 
 
 def submit(page: Page, number: int, source: str) -> None:
@@ -232,22 +219,25 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
     contest_page = organiser.url
     create(organiser, "sum", "Create task", "New task")
 
-    organiser.get_by_role("link", name="task.yaml", exact=True).click()
-    task_yaml = organiser.get_by_role("textbox", name="task.yaml").input_value()
-    assert "workflow: unicon/classic@v2" in task_yaml, task_yaml
-    assert "submissions:" not in task_yaml, "the starter task.yaml sets its own caps"
-    loosened = task_yaml.rstrip("\n") + "\nsubmissions:\n  rate: {count: 10, per: 60}\n"
-    edit_and_save(organiser, "task.yaml", loosened)
+    task_page = organiser.url
+    settings = open_settings(organiser, "Task settings")
+    expect(settings.get_by_label("Workflow")).to_have_value("unicon/classic@v2")
+    expect(settings.get_by_label("Rate: count")).to_have_value("")
+    settings.get_by_label("Rate: count").fill("10")
+    settings.get_by_label("Rate: per seconds").fill("60")
+    settings.get_by_role("button", name="Save settings").click()
     expect(
         organiser.get_by_text(re.compile(r"Published as publication \d+\."))
     ).to_be_visible()
 
     organiser.goto(contest_page)
-    organiser.get_by_role("link", name="contest.yaml", exact=True).click()
-    expect(organiser.get_by_role("textbox", name="contest.yaml")).to_have_value(
-        re.compile(r"tasks:\n  - id: sum\n")
-    )
-    edit_and_save(organiser, "contest.yaml", running_contest(f"Spring {stamp}"))
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    settings = open_settings(organiser, "Contest settings")
+    settings.get_by_label("Name").fill(f"Spring {stamp}")
+    settings.get_by_label("State").select_option("published")
+    settings.get_by_label("Start").fill(local(now - timedelta(hours=1)))
+    settings.get_by_label("End").fill(local(now + timedelta(hours=3)))
+    settings.get_by_role("button", name="Save settings").click()
     expect(organiser.get_by_text(re.compile(r"Saved as version"))).to_be_visible()
 
     sign_in(contestant, contestant_name, contestant_password)
@@ -270,6 +260,34 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
     assert verdict_of(contestant, 1) == "ACCEPTED"
     submit(contestant, 2, WRONG)
     assert verdict_of(contestant, 2) == "WRONG ANSWER"
+
+    organiser.goto(task_page)
+    organiser.get_by_role("button", name="Upload a file", exact=True).click()
+    upload = organiser.get_by_role("region", name="Upload a file")
+    data: FilePayload = {
+        "name": "input",
+        "mimeType": "application/octet-stream",
+        "buffer": b"2 1\n",
+    }
+    upload.get_by_label("File to upload", exact=True).set_input_files(files=[data])
+    upload.get_by_label("Path in the task").fill("tests/main/1/input")
+    upload.get_by_role("button", name="Upload", exact=True).click()
+    upload.get_by_role("button", name="Save into the task").click(
+        timeout=CREATE_TIMEOUT_MS
+    )
+    organiser.get_by_role("button", name="Publish the change").click()
+    expect(
+        organiser.get_by_text(re.compile(r"Published as publication \d+\."))
+    ).to_be_visible()
+
+    organiser.goto(f"{APP}/orgs/{org}/contests/spring/gradings")
+    first = (
+        organiser.get_by_role("table", name="Gradings")
+        .get_by_role("row")
+        .filter(has_text="Submission 1")
+        .filter(has_text="Show earlier attempts (1)")
+    )
+    expect(first).to_contain_text("accepted", timeout=VERDICT_TIMEOUT_MS)
 
     contestant.get_by_role("button", name="Account menu").click()
     with contestant.expect_event("load"):
