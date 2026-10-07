@@ -16,10 +16,13 @@ manifest lists mirrored from its repository with the manifest's image digest
 written in (primitives.py, images.py), and the built-in workflow
 unicon/classic at each of its versions, which wire them together
 (workflows.py). A task's first save has to find a workflow and its primitives
-the organiser can read, or nothing can be published. Every version goes to its
-own tag, and a tag already at the forge is never edited. The manifest also
-gives the harness, clone and socket filter images, which go into .env for the
-services that run them.
+the organiser can read, or nothing can be published, so a workflow version
+that uses a primitive version the manifest does not pin is refused before
+anything is written. Every version goes to its own tag, and a tag already at
+the forge is never edited: every version is compared with the forge before
+any is seeded, and one that differs stops the run there, naming each. The
+manifest also gives the harness, clone and socket filter images, which go into
+.env for the services that run them.
 
 On a development stack, the one whose compose files include compose.dev.yaml,
 bootstrap also enrols the one CI agent that overlay can run and writes its
@@ -69,7 +72,14 @@ from bootstrap.compose import Compose, ComposeFailed
 from bootstrap.forgejo import Forgejo, ForgejoError, OAuthApplication
 from bootstrap.garage import Garage, GarageError
 from bootstrap.images import Manifest
-from bootstrap.platform_repos import PLATFORM_ORG, Outcome, PlatformRepos, publish
+from bootstrap.platform_repos import (
+    PLATFORM_ORG,
+    Outcome,
+    PlatformRepos,
+    Standing,
+    publish,
+    standing,
+)
 from bootstrap.readiness import NotReady, wait_for
 from bootstrap.summary import Summary
 from bootstrap.woodpecker import Woodpecker, WoodpeckerError
@@ -143,6 +153,18 @@ class LostEnvironment(Exception):
     """
 
 
+class UnpinnedPrimitive(ValueError):
+    """A built-in workflow version uses a primitive version the image
+    manifest does not pin.
+    """
+
+
+class DifferingVersions(ValueError):
+    """Versions at the forge differ from what is here, and a version is never
+    edited without being told to.
+    """
+
+
 def main(argv: list[str] | None = None) -> int:
     options = _parse_arguments(argv)
     template = options.directory / ".env.example"
@@ -157,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         refuse_rewrite_outside_development(options.rewrite, development)
         manifest = images.load(images.choose(options.directory, options.images))
         print(f"images from {manifest.path.name}")
+        refuse_unpinned_primitives(options.directory, manifest)
 
         previous = envfile.load(env_path)
         _refuse_to_regenerate_over_existing_data(compose, env_path, previous)
@@ -249,7 +272,7 @@ def _parse_arguments(argv: list[str] | None) -> argparse.Namespace:
         help=(
             "development stacks only: rewrite each version of the built-in "
             "workflow and of each primitive in place to what is here now, "
-            "instead of keeping a version at the forge that differs"
+            "instead of stopping at a version at the forge that differs"
         ),
     )
     options = parser.parse_args(argv)
@@ -263,6 +286,32 @@ def is_development(files: list[str]) -> bool:
     is one of them.
     """
     return any(Path(file).name == DEVELOPMENT_OVERLAY for file in files)
+
+
+def refuse_unpinned_primitives(directory: Path, manifest: Manifest) -> None:
+    """Refuse a version of the built-in workflow whose steps use a primitive
+    version the manifest does not pin, since the forge would refuse every
+    task saved against that workflow version.
+    """
+    pinned = {
+        f"{PLATFORM_ORG}/{release.name}@{release.version}"
+        for release in manifest.primitives
+    }
+    name = workflows.CLASSIC
+    unpinned = [
+        f"workflows/{name}/{version}/ uses {used}"
+        for version, files in workflows.seed_versions(directory, name).items()
+        for used in workflows.primitives_used(files[workflows.DEFINITION])
+        if used not in pinned
+    ]
+    if unpinned:
+        raise UnpinnedPrimitive(
+            f"{manifest.path.name} does not pin every primitive version the "
+            f"built-in workflow uses, so nothing is seeded: "
+            f"{'; '.join(unpinned)}. Pin each in the manifest; on a "
+            "development machine, scripts/build-images.py builds them from "
+            "the sibling checkouts into images.local.json."
+        )
 
 
 def refuse_rewrite_outside_development(rewrite: bool, development: bool) -> None:
@@ -567,69 +616,77 @@ def _seed_platform(
     each version of the built-in workflow unicon/classic, in that order, since
     the workflow names the primitives. Then every image the primitives'
     versions name, which is the socket filter's list.
+
+    Every version is compared with the forge first, so that any that differs
+    stops the run before anything is seeded, unless `rewrite`.
     """
     repos = PlatformRepos(
         Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]
     )
-    summary.record(f"forgejo organisation {PLATFORM_ORG}", repos.ensure_platform_org())
-
-    if not manifest.primitives:
-        print(
-            f"note: {manifest.path.name} pins no primitive, so none is seeded and "
-            "nothing can be graded yet. On a development machine, "
-            "scripts/build-images.py builds them from the sibling checkouts."
+    name = workflows.CLASSIC
+    workflow = f"{PLATFORM_ORG}/{name}"
+    workflow_repo = workflows.repository(name)
+    mirrored = {
+        release: primitives.version_files(release) for release in manifest.primitives
+    }
+    definitions = workflows.seed_versions(directory, name)
+    if not rewrite:
+        refuse_differing_versions(
+            manifest,
+            [
+                f"{PLATFORM_ORG}/{release.name}@{release.version}, against what "
+                f"{manifest.path.name} pins for it"
+                for release, files in mirrored.items()
+                if primitives.standing_of(repos, release, files) is Standing.DIFFERENT
+            ]
+            + [
+                f"{workflow}@{version}, against workflows/{name}/{version}/"
+                for version, files in definitions.items()
+                if standing(repos, PLATFORM_ORG, workflow_repo, version, files)
+                is Standing.DIFFERENT
+            ],
         )
-    for name in manifest.primitive_names:
-        primitive = f"{PLATFORM_ORG}/{name}"
-        repo = primitives.repository(name)
+
+    summary.record(f"forgejo organisation {PLATFORM_ORG}", repos.ensure_platform_org())
+    for primitive in manifest.primitive_names:
+        repo = primitives.repository(primitive)
         summary.record(
-            f"primitive {primitive} repository",
+            f"primitive {PLATFORM_ORG}/{primitive} repository",
             repos.ensure_repository(PLATFORM_ORG, repo),
         )
-        for release in manifest.versions_of(name):
-            outcome = primitives.mirror(repos, release, rewrite=rewrite)
-            _record_version(summary, f"primitive {primitive}", release.version, outcome)
-            if outcome is Outcome.KEPT_DIFFERENT:
-                print(
-                    f"note: {primitive}@{release.version} at the forge differs "
-                    f"from what {manifest.path.name} pins for it, and is kept as "
-                    "it is: a version is never edited, so a new image or "
-                    "declaration is a new version. On a development stack, "
-                    "--rewrite rewrites it."
-                )
+        for release in manifest.versions_of(primitive):
+            outcome = primitives.mirror(
+                repos, release, mirrored[release], rewrite=rewrite
+            )
+            _record_version(
+                summary,
+                f"primitive {PLATFORM_ORG}/{primitive}",
+                release.version,
+                outcome,
+            )
         summary.record(
-            f"primitive {primitive} mark {primitives.PRIMITIVE_TOPIC}",
+            f"primitive {PLATFORM_ORG}/{primitive} mark {primitives.PRIMITIVE_TOPIC}",
             repos.ensure_mark(PLATFORM_ORG, repo, primitives.PRIMITIVE_TOPIC),
         )
 
-    name = workflows.CLASSIC
-    workflow = f"{PLATFORM_ORG}/{name}"
-    repo = workflows.repository(name)
     summary.record(
         f"workflow {workflow} repository",
-        repos.ensure_repository(PLATFORM_ORG, repo),
+        repos.ensure_repository(PLATFORM_ORG, workflow_repo),
     )
-    for version, files in workflows.seed_versions(directory, name).items():
+    for version, files in definitions.items():
         outcome = publish(
             repos,
             PLATFORM_ORG,
-            repo,
+            workflow_repo,
             version,
             files,
             message=f"Seed {workflow}@{version}",
             rewrite=rewrite,
         )
         _record_version(summary, f"workflow {workflow}", version, outcome)
-        if outcome is Outcome.KEPT_DIFFERENT:
-            print(
-                f"note: workflows/{name}/{version}/ differs from "
-                f"{workflow}@{version} at the forge, which is kept as it is: a "
-                "changed definition is a new version folder. On a development "
-                "stack, --rewrite rewrites it."
-            )
     summary.record(
         f"workflow {workflow} mark {workflows.WORKFLOW_TOPIC}",
-        repos.ensure_mark(PLATFORM_ORG, repo, workflows.WORKFLOW_TOPIC),
+        repos.ensure_mark(PLATFORM_ORG, workflow_repo, workflows.WORKFLOW_TOPIC),
     )
 
     values["UNICON_FILTER_IMAGES"] = ",".join(
@@ -637,14 +694,31 @@ def _seed_platform(
     )
 
 
+def refuse_differing_versions(manifest: Manifest, differing: list[str]) -> None:
+    """Stop the run, naming each version at the forge that differs from what
+    is here.
+    """
+    if not differing:
+        return
+    raise DifferingVersions(
+        "nothing is seeded, since these versions at the forge differ from "
+        "what is here and a version is never edited:\n"
+        + "".join(f"  {version}\n" for version in differing)
+        + "A changed image or declaration of a primitive goes under a new "
+        f"version in {manifest.path.name}, and a changed workflow definition "
+        "in a new version folder under workflows/. On a development stack, "
+        "uv run bootstrap --rewrite rewrites each version in place instead."
+    )
+
+
 def _record_version(
     summary: Summary, what: str, version: str, outcome: Outcome
 ) -> None:
-    """One summary line for a version. A rewritten version counts as made,
-    and one kept although it differs says so.
+    """One summary line for a version. A rewritten version counts as made and
+    says so.
     """
     label = f"{what} version {version}"
-    if outcome in (Outcome.REWRITTEN, Outcome.KEPT_DIFFERENT):
+    if outcome is Outcome.REWRITTEN:
         label += f" ({outcome.value})"
     summary.record(label, outcome in (Outcome.CREATED, Outcome.REWRITTEN))
 

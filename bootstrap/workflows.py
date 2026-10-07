@@ -13,13 +13,15 @@ workflow.yaml and README.md, so the definition is a file a person can read
 and yamllint checks, not a string in this module. The definition wires the
 three primitives together: compile the submission, run it on every test under
 the task's limits, and compare each output with that test's answer. v1 wires
-the primitives' v1 and v2 their v2.
+the primitives' v1 and v2 their v2. Every primitive version a definition
+`use:`s has to be one the image manifest pins, or bootstrap refuses before it
+writes anything, since the forge would refuse every task saved against it.
 
 Bootstrap publishes every version folder to its own tag. A version is frozen:
-a rerun leaves a tag already at the forge as it is even when its folder here
-has changed since, and says so; a changed definition is a new folder. The one
-exception is a development stack, where bootstrap rewrites each version in
-place when it is run with --rewrite.
+a tag already at the forge is left as it is, and one whose folder here has
+changed since stops the run before anything is seeded, naming it; a changed
+definition is a new folder. The one exception is a development stack, where
+bootstrap rewrites each version in place when it is run with --rewrite.
 """
 
 from __future__ import annotations
@@ -31,8 +33,10 @@ WORKFLOW_TOPIC = "unicon-workflow"
 
 CLASSIC = "classic"
 SEED_FILES = ("workflow.yaml", "README.md")
+DEFINITION = "workflow.yaml"
 
 _VERSION = re.compile(r"^v([1-9][0-9]*)$")
+_USE = re.compile(r"(?:^|[\s{,])use\s*:\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s,}]+))")
 
 
 class WorkflowError(ValueError):
@@ -68,3 +72,18 @@ def seed_files(directory: Path, name: str, version: str) -> dict[str, bytes]:
     """The files version `version` of the workflow `name` is seeded with."""
     root = directory / "workflows" / name / version
     return {path: (root / path).read_bytes() for path in SEED_FILES}
+
+
+def primitives_used(definition: bytes) -> list[str]:
+    """Every reference a definition's steps `use:`, in the order written, as
+    `owner/name@version`. Read from the lines rather than parsed, the way
+    bootstrap reads `primitive.yaml`; a comment is not read.
+    """
+    used: list[str] = []
+    for line in definition.decode("utf-8").splitlines():
+        text = line.split(" #", 1)[0]
+        if text.lstrip().startswith("#"):
+            continue
+        for match in _USE.finditer(text):
+            used.append(next(group for group in match.groups() if group is not None))
+    return used

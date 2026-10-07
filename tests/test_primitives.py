@@ -192,45 +192,77 @@ def test_a_v1_written_the_way_bootstrap_always_has_is_present(
     assert "  present  primitive unicon/compile version v1" in summary.lines()
 
 
-def test_a_changed_v1_pin_is_kept_and_nothing_is_edited(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+def test_a_changed_pin_stops_the_run_before_anything_is_seeded(
+    tmp_path: Path,
 ) -> None:
+    """v2, new in the manifest, is not made either: the run stops before it
+    writes anything, naming the version that differs and what to do.
+    """
     forge = FakeForgejo()
     checkout = _compile(tmp_path)
-    v2 = _compile_v2(tmp_path)
-    _seed(forge, _manifest(("v1", checkout, FIRST), ("v2", v2, SECOND)))
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
     repo = forge.repos[FULL]
     tags = dict(repo.tags)
     head = repo.head
     forge.requests.clear()
 
-    summary, values = _seed(
-        forge, _manifest(("v1", checkout, OTHER), ("v2", v2, SECOND))
-    )
+    with pytest.raises(main.DifferingVersions) as refused:
+        _seed(
+            forge,
+            _manifest(("v1", checkout, OTHER), ("v2", _compile_v2(tmp_path), SECOND)),
+        )
 
     assert forge.writes() == []
     assert repo.tags == tags
     assert repo.head == head
     assert f"image: {FIRST}" in repo.files_at("v1")["primitive.yaml"].decode()
-    assert (
-        "  present  primitive unicon/compile version v1 "
-        "(kept, differs from the files here)"
-    ) in summary.lines()
-    assert "unicon/compile@v1 at the forge differs" in capsys.readouterr().out
-    assert values["UNICON_FILTER_IMAGES"] == f"{FIRST},{SECOND}"
+    message = str(refused.value)
+    assert "unicon/compile@v1, against what images.local.json pins for it" in (message)
+    assert "unicon/compile@v2" not in message
+    assert "new version in images.local.json" in message
+    assert "--rewrite" in message
 
 
-def test_a_changed_declaration_is_kept_too(tmp_path: Path) -> None:
+def test_a_changed_declaration_stops_the_run_too(tmp_path: Path) -> None:
     forge = FakeForgejo()
     checkout = _compile(tmp_path)
     _seed(forge, _manifest(("v1", checkout, FIRST)))
     (checkout / "primitive.yaml").write_bytes(NAMED + b"batch_note: x\n")
     forge.requests.clear()
 
-    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    with pytest.raises(main.DifferingVersions, match="unicon/compile@v1"):
+        _seed(forge, _manifest(("v1", checkout, FIRST)))
 
     assert forge.writes() == []
     assert list(forge.repos[FULL].tags) == ["v1"]
+
+
+def test_an_older_format_under_a_released_version_stops_the_run(
+    tmp_path: Path,
+) -> None:
+    """A stack that numbered each rebuilt image as the next version holds a
+    v2 in the format of v1; the v2 release is not mirrored over it.
+    """
+    forge = FakeForgejo()
+    forge.seed(
+        FULL,
+        {
+            "primitive.yaml": (
+                b"name: unicon/compile\nversion: v2\n"
+                + f"image: {FIRST}\n".encode()
+                + b"batch: false\n"
+            ),
+            "Dockerfile": b"FROM scratch\n",
+        },
+        tags=("v1", "v2"),
+        topics=("unicon-primitive",),
+    )
+    forge.requests.clear()
+
+    with pytest.raises(main.DifferingVersions, match="unicon/compile@v2"):
+        _seed(forge, _manifest(("v2", _compile_v2(tmp_path), SECOND)))
+
+    assert forge.writes() == []
 
 
 def test_a_changed_program_alone_is_the_same_version(tmp_path: Path) -> None:

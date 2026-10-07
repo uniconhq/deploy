@@ -12,10 +12,11 @@ A version is frozen. `publish` makes one named version out of a set of files:
 the default branch is brought to exactly those files in one commit, and the
 version's tag points at that commit. A tag already there is never moved: when
 it holds the same files the run makes nothing, so bootstrap can run as often
-as anyone likes, and when it holds others it is kept and the outcome says so.
-The comparison is by git blob id, computed here from the bytes and read back
-from the forge's tree listing, so nothing is downloaded to decide that nothing
-changed.
+as anyone likes, and when it holds others the version differs, which
+`standing` reads without writing anything so that a run can stop before it
+seeds. The comparison is by git blob id, computed here from the bytes and
+read back from the forge's tree listing, so nothing is downloaded to decide
+that nothing changed.
 
 Rewriting a version in place is for a development stack only, and only when
 the person running bootstrap asks for it: the default branch gets a new commit
@@ -54,7 +55,20 @@ class Outcome(enum.Enum):
     PRESENT = "present"
     CREATED = "created"
     REWRITTEN = "rewritten"
-    KEPT_DIFFERENT = "kept, differs from the files here"
+
+
+class Standing(enum.Enum):
+    """How a version at the forge stands against the files for it here."""
+
+    ABSENT = "absent"
+    SAME = "same"
+    DIFFERENT = "different"
+
+
+class VersionDiffers(ValueError):
+    """A version at the forge holds other files than the ones for it here,
+    and a version is never edited without being told to.
+    """
 
 
 def version_number(version: str) -> int | None:
@@ -133,15 +147,14 @@ class PlatformRepos:
 
     def versions(self, org: str, repo: str) -> dict[str, str]:
         """Every version tag of the repository and the commit it points at,
-        oldest version first. Tags that are not `vN` are left out.
+        oldest version first. Tags that are not `vN` are left out, and a
+        repository that is not there has none.
         """
         found: dict[str, str] = {}
         page = 1
         while True:
-            listed = _ok(
-                self._call(
-                    "GET", f"/repos/{org}/{repo}/tags?page={page}&limit={PAGE_SIZE}"
-                )
+            listed = self._found(
+                "GET", f"/repos/{org}/{repo}/tags?page={page}&limit={PAGE_SIZE}"
             )
             for tag in listed or []:
                 name = str(tag["name"])
@@ -287,6 +300,27 @@ class PlatformRepos:
         return self._forgejo.api(method, path, token=self._token, body=body)
 
 
+def standing(
+    repos: PlatformRepos,
+    org: str,
+    repo: str,
+    version: str,
+    files: dict[str, bytes],
+    identity: tuple[str, ...] | None = None,
+) -> Standing:
+    """Whether the tag `version` is absent, holds these files, or differs,
+    read without writing anything. A tag holds the files when its `identity`
+    files match, every file when `identity` is not given, whatever the
+    others say.
+    """
+    commit = repos.versions(org, repo).get(version)
+    if commit is None:
+        return Standing.ABSENT
+    if repos.holds(org, repo, commit, files, identity):
+        return Standing.SAME
+    return Standing.DIFFERENT
+
+
 def publish(
     repos: PlatformRepos,
     org: str,
@@ -301,18 +335,21 @@ def publish(
     """Make sure the tag `version` holds these files, and return what was
     done.
 
-    With no such tag, the files are committed and tagged. A tag already there
-    is the same version when its `identity` files match, every file when
-    `identity` is not given, whatever the others say; otherwise it is kept as
-    it is. `rewrite` is the development-only exception: a tag that differs is
-    moved to a commit of the files. Whichever commit is made holds every file.
+    With no such tag, the files are committed and tagged. A tag that holds
+    them, by `standing`, is left as it is. One that differs is refused with
+    `VersionDiffers`, unless `rewrite`, the development-only exception, which
+    moves it to a commit of the files. Whichever commit is made holds every
+    file.
     """
-    versions = repos.versions(org, repo)
-    if version in versions:
-        if repos.holds(org, repo, versions[version], files, identity):
-            return Outcome.PRESENT
+    found = standing(repos, org, repo, version, files, identity)
+    if found is Standing.SAME:
+        return Outcome.PRESENT
+    if found is Standing.DIFFERENT:
         if not rewrite:
-            return Outcome.KEPT_DIFFERENT
+            raise VersionDiffers(
+                f"{org}/{repo}@{version} at the forge differs from the files "
+                "here, and a version is never edited"
+            )
         head, _ = repos.write_tree(org, repo, files, message)
         repos.move_tag(org, repo, version, head)
         return Outcome.REWRITTEN

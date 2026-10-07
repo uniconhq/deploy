@@ -28,13 +28,14 @@ lines; for one of those, bootstrap writes `version` and `image` right under
 
 A version is what its declaration says, the image included, since that is
 what the forge compiles against and what a step runs. A version is frozen: a
-tag already at the forge is left as it is, and when its declaration differs
-from what the manifest gives now, the run says so and changes nothing. A new
-image for a primitive reaches the forge as a new version in the manifest. A
-change to the other files alone is no difference, because it changes nothing
-that grades: the program that runs is the one in the image. A rerun with
-nothing changed makes nothing. The one exception is a development stack,
-where --rewrite rewrites each listed version in place instead.
+tag already at the forge is left as it is, and one whose declaration differs
+from what the manifest gives now stops the run before anything is seeded
+(main.py), naming it. A new image for a primitive reaches the forge as a new
+version in the manifest. A change to the other files alone is no difference,
+because it changes nothing that grades: the program that runs is the one in
+the image. A rerun with nothing changed makes nothing. The one exception is a
+development stack, where --rewrite rewrites each listed version in place
+instead.
 """
 
 from __future__ import annotations
@@ -48,11 +49,20 @@ from pathlib import PurePosixPath
 import httpx
 
 from bootstrap.images import GitHubSource, LocalSource, PrimitiveRelease
-from bootstrap.platform_repos import PLATFORM_ORG, Outcome, PlatformRepos, publish
+from bootstrap.platform_repos import (
+    PLATFORM_ORG,
+    Outcome,
+    PlatformRepos,
+    Standing,
+    publish,
+    standing,
+)
 
 PRIMITIVE_TOPIC = "unicon-primitive"
 DECLARATION = "primitive.yaml"
 REQUIRED_FILES = (DECLARATION, "Dockerfile")
+IDENTITY = (DECLARATION,)
+"""The files a version is compared by: its declaration, image included."""
 LEFT_OUT = (".github/",)
 BUILD_LEFTOVERS = (
     "__pycache__/",
@@ -166,25 +176,53 @@ def image_of(declaration_bytes: bytes) -> str | None:
     return None
 
 
-def mirror(
-    repos: PlatformRepos, release: PrimitiveRelease, *, rewrite: bool
-) -> Outcome:
-    """Make the version the release is under hold its repository with the
-    manifest's image, and return what was done.
+def version_files(release: PrimitiveRelease) -> dict[str, bytes]:
+    """The files the version the release is under is mirrored with: its
+    repository's, with the manifest's image in the declaration.
     """
-    files = source_files(release)
+    return with_declaration(
+        source_files(release), release.name, release.version, release.image
+    )
+
+
+def standing_of(
+    repos: PlatformRepos, release: PrimitiveRelease, files: dict[str, bytes]
+) -> Standing:
+    """How the version at the forge stands against these files, read without
+    writing anything.
+    """
+    return standing(
+        repos,
+        PLATFORM_ORG,
+        repository(release.name),
+        release.version,
+        files,
+        IDENTITY,
+    )
+
+
+def mirror(
+    repos: PlatformRepos,
+    release: PrimitiveRelease,
+    files: dict[str, bytes],
+    *,
+    rewrite: bool,
+) -> Outcome:
+    """Make the version the release is under hold these files, its
+    `version_files`, and return what was done.
+    """
     return publish(
         repos,
         PLATFORM_ORG,
         repository(release.name),
         release.version,
-        with_declaration(files, release.name, release.version, release.image),
+        files,
         message=(
             f"Mirror {PLATFORM_ORG}/{release.name}@{release.version} "
             f"with {release.image}"
         ),
         rewrite=rewrite,
-        identity=(DECLARATION,),
+        identity=IDENTITY,
     )
 
 

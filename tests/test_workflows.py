@@ -16,13 +16,15 @@ from pathlib import Path
 import pytest
 
 from bootstrap import main
-from bootstrap.forgejo import ForgejoError
-from bootstrap.images import Manifest
+from bootstrap.forgejo import Forgejo, ForgejoError
+from bootstrap.images import LocalSource, Manifest, PrimitiveRelease
+from bootstrap.platform_repos import PlatformRepos, VersionDiffers, publish
 from bootstrap.summary import Summary
 from bootstrap.workflows import (
     CLASSIC,
     SEED_FILES,
     WorkflowError,
+    primitives_used,
     seed_files,
     seed_versions,
 )
@@ -178,24 +180,51 @@ def test_a_commit_holding_the_files_without_a_tag_is_tagged_where_it_is() -> Non
     assert repo.files_at("v2") == _v2()
 
 
-def test_a_changed_v1_is_kept_and_v2_is_still_made(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
-) -> None:
+def test_a_changed_v1_stops_the_run_before_v2_is_made(tmp_path: Path) -> None:
     forge = FakeForgejo()
     repo = forge.seed(FULL, _v1(), tags=("v1",), topics=("unicon-workflow",))
     first = repo.tags["v1"]
     directory = _deploy_with(tmp_path, {"v1": b"steps: [1]\n", "v2": b"steps: [2]\n"})
+    forge.requests.clear()
 
-    summary = _seed(forge, directory)
+    with pytest.raises(main.DifferingVersions) as refused:
+        _seed(forge, directory)
 
+    assert forge.writes() == []
+    assert list(repo.tags) == ["v1"]
     assert repo.tags["v1"] == first
+    message = str(refused.value)
+    assert f"{ORG}/{CLASSIC}@v1, against workflows/{CLASSIC}/v1/" in message
+    assert "new version folder" in message
+
+
+def test_every_version_that_differs_is_named(tmp_path: Path) -> None:
+    forge = FakeForgejo()
+    _seed(forge)
+    directory = _deploy_with(tmp_path, {"v1": b"steps: [1]\n", "v2": b"steps: [2]\n"})
+    forge.requests.clear()
+
+    with pytest.raises(main.DifferingVersions) as refused:
+        _seed(forge, directory)
+
+    assert forge.writes() == []
+    assert str(refused.value).splitlines()[1:3] == [
+        f"  {ORG}/{CLASSIC}@v1, against workflows/{CLASSIC}/v1/",
+        f"  {ORG}/{CLASSIC}@v2, against workflows/{CLASSIC}/v2/",
+    ]
+
+
+def test_publishing_over_a_version_that_differs_is_refused() -> None:
+    forge = FakeForgejo()
+    repo = forge.seed(FULL, _v1(), tags=("v1",))
+    forge.requests.clear()
+    repos = PlatformRepos(Forgejo(forge, "forgejo"), TOKEN)
+
+    with pytest.raises(VersionDiffers, match=f"{FULL}@v1 at the forge differs"):
+        publish(repos, ORG, f"{CLASSIC}.workflow", "v1", _v2(), message="m")
+
+    assert forge.writes() == []
     assert repo.files_at("v1") == _v1()
-    assert repo.files_at("v2") == seed_files(directory, CLASSIC, "v2")
-    assert "differs from unicon/classic@v1" in capsys.readouterr().out
-    assert (
-        f"  present  workflow {ORG}/{CLASSIC} version v1 "
-        "(kept, differs from the files here)"
-    ) in summary.lines()
 
 
 def test_rewrite_moves_each_version_that_differs(tmp_path: Path) -> None:
@@ -346,3 +375,80 @@ def test_v2_wires_the_v2_primitives_over_tests_and_reports() -> None:
         assert wiring in definition
     assert definition.count("    per_test: true") == 2
     assert files["README.md"].startswith(b"# classic\n")
+
+
+def _pinning(*versions: str) -> Manifest:
+    """A manifest pinning each of the three primitives at these versions."""
+    return Manifest(
+        path=DEPLOY / "images.json",
+        images=NO_PRIMITIVES.images,
+        primitives=tuple(
+            PrimitiveRelease(
+                name,
+                version,
+                f"ghcr.io/uniconhq/primitive-{name}{DIGEST}",
+                LocalSource(DEPLOY.parent / f"primitive-{name}"),
+            )
+            for name in ("compile", "diff-check", "sandbox-run")
+            for version in versions
+        ),
+    )
+
+
+def test_the_primitives_a_definition_uses_are_read_from_its_steps() -> None:
+    definition = b"""# use: unicon/commented@v9
+steps:
+  - id: a
+    use: unicon/compile@v2
+  - {id: b, use: "unicon/sandbox-run@v2", per_test: true}
+  - id: c
+    use: 'unicon/diff-check@v2'  # the comparison
+    with:
+      reuse: ${{ steps.a.binary }}
+"""
+
+    assert primitives_used(definition) == [
+        "unicon/compile@v2",
+        "unicon/sandbox-run@v2",
+        "unicon/diff-check@v2",
+    ]
+    assert primitives_used(_v1()["workflow.yaml"]) == [
+        "unicon/compile@v1",
+        "unicon/sandbox-run@v1",
+        "unicon/diff-check@v1",
+    ]
+
+
+def test_every_primitive_version_the_workflow_uses_has_to_be_pinned() -> None:
+    main.refuse_unpinned_primitives(DEPLOY, _pinning("v1", "v2"))
+
+    with pytest.raises(main.UnpinnedPrimitive) as refused:
+        main.refuse_unpinned_primitives(DEPLOY, _pinning("v1"))
+
+    message = str(refused.value)
+    assert message.startswith("images.json does not pin every primitive version")
+    assert (
+        f"workflows/{CLASSIC}/v2/ uses unicon/compile@v2; "
+        f"workflows/{CLASSIC}/v2/ uses unicon/sandbox-run@v2; "
+        f"workflows/{CLASSIC}/v2/ uses unicon/diff-check@v2."
+    ) in message
+    assert "v1/" not in message
+
+
+def test_a_manifest_pinning_no_primitive_seeds_no_workflow() -> None:
+    with pytest.raises(main.UnpinnedPrimitive, match=r"scripts/build-images\.py"):
+        main.refuse_unpinned_primitives(DEPLOY, NO_PRIMITIVES)
+
+
+def test_bootstrap_stops_at_an_unpinned_primitive_before_writing_anything(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    for name in (".env.example", "images.json"):
+        (tmp_path / name).write_bytes((DEPLOY / name).read_bytes())
+    _deploy_with(tmp_path, {"v1": b"steps:\n  - use: unicon/compile@v7\n"})
+
+    status = main.main(["--directory", str(tmp_path), "-f", "compose.yaml"])
+
+    assert status == 1
+    assert "uses unicon/compile@v7" in capsys.readouterr().out
+    assert not (tmp_path / ".env").exists()
