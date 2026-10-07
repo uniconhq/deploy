@@ -320,6 +320,23 @@ jobs:
             grep -q "present  workflow unicon/classic version $version\$" second-run.txt
           done
 
+      # A version folder that no longer matches its tag at the forge stops
+      # bootstrap before it seeds anything, naming the version.
+      - name: a changed version stops bootstrap
+        working-directory: deploy
+        run: |
+          cp workflows/classic/v2/README.md readme.saved
+          echo "changed" >> workflows/classic/v2/README.md
+          if uv run bootstrap > changed-run.txt; then
+            cat changed-run.txt
+            echo "bootstrap seeded over a version that differs"
+            exit 1
+          fi
+          cp readme.saved workflows/classic/v2/README.md
+          cat changed-run.txt
+          grep -q 'unicon/classic@v2, against workflows/classic/v2/' changed-run.txt
+          if grep -q 'unicon/classic@v1, against' changed-run.txt; then exit 1; fi
+
       # After the browser test, which signs in from this machine too. A burst
       # of 300 sign-in posts from one address: 240 over the rate pass at once,
       # none held, and the rest are refused with 429; a page load is never
