@@ -574,8 +574,12 @@ the compose command the accounts are made with, from this directory; it
 defaults to the dev files.
 
 In CI it runs in the stack job, on the freshly bootstrapped stack, once the
-dev agent has connected. That job builds everything from the `main` branch
-of each sibling, so it passes only once each of these is on its `main`:
+dev agent has connected. That job builds everything from each sibling's
+`main`, or, on a pull request, from the sibling's branch of the pull
+request's own name when it has one, so a change made across repos is tried
+together before any of it merges; run by hand, it takes the branch its
+`siblings` input names. On `main` it passes only once each of these is on
+its `main`:
 
 - `forge`: the submit, grading, extension, envelope and callback services
   (feature 6), which the backend image builds against through the `forge`
