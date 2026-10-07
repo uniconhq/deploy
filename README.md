@@ -396,8 +396,9 @@ reaches a stack that does not hold that version yet; on a stack that does,
 its other image or declaration stops bootstrap, since a version at the forge
 is never edited.
 
-Today it pins runner `v0.5.0` and the primitives' `v1`: `sandbox-run` at
-`v1.3.0`, and `compile` and `diff-check` at `v1.1.1`.
+Today it pins runner `v0.6.0`, the primitives' `v1`, `sandbox-run` at
+`v1.3.0` and `compile` and `diff-check` at `v1.1.1`, and their `v2`, all
+three at `v2.0.0`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
