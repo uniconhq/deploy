@@ -134,7 +134,6 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     field("Who sees it", exact=True).select_option("everyone")
     field("Start", exact=True).fill(local(now - timedelta(hours=1)))
     field("End", exact=True).fill(local(now + timedelta(hours=3)))
-    field("A worth", exact=True).fill("100")
     field("A closes", exact=True).fill(local(now + timedelta(hours=2)))
 
     field("Board 1 name", exact=True).fill("IOI")
@@ -204,11 +203,14 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     expect(cell(organiser, "IOI now", contestant_name, 0)()).to_have_text("50")
     expect(cell(organiser, "IOI final", contestant_name, 0)()).to_have_text("100")
 
+    # A close is refused before a submission already made, and the field
+    # takes whole minutes: the task closes at the first minute after the
+    # last submission, once that minute has come.
+    reveal = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    time.sleep(max(0.0, (reveal - datetime.now(UTC)).total_seconds()) + 1)
     organiser.goto(contest_page)
     settings = open_settings(organiser, "Contest settings")
-    settings.get_by_label("A closes", exact=True).fill(
-        local(datetime.now(UTC) - timedelta(minutes=1))
-    )
+    settings.get_by_label("A closes", exact=True).fill(local(reveal))
     settings.get_by_role("button", name="Save settings").click()
     expect(organiser.get_by_text(re.compile(r"Saved as version"))).to_be_visible()
 
