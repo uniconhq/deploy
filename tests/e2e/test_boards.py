@@ -143,8 +143,7 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     settings.get_by_role("button", name="Add a board").click()
     field("Board 2 name", exact=True).fill("ICPC")
     field("Board 2 shown to", exact=True).select_option("contestants")
-    for _ in range(2):
-        settings.get_by_role("button", name="Add a key to Board 2").click()
+    settings.get_by_role("button", name="Add a key to Board 2").click()
     field("Board 2 key 2", exact=True).select_option("penalty")
     field("Board 2 key 2 minutes per earlier attempt", exact=True).fill("20")
 

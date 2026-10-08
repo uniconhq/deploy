@@ -179,6 +179,5 @@ def upload_into_task(page: Page, path: str, content: bytes) -> None:
     upload.get_by_label("File to upload", exact=True).set_input_files(files=[data])
     upload.get_by_label("Path in the task").fill(path)
     upload.get_by_role("button", name="Upload", exact=True).click()
-    upload.get_by_role("button", name="Save into the task").click(
-        timeout=CREATE_TIMEOUT_MS
-    )
+    expect(upload.get_by_text("has arrived")).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    upload.get_by_role("button", name="Save into the task").click()
