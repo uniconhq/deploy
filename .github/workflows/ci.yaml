@@ -179,6 +179,9 @@ jobs:
           expect 200 "$app/orgs"
           expect 200 "$app/orgs/acme/contests/spring/tasks/sum"
           expect 404 "$app/orgsx"
+          expect 200 "$app/workflows"
+          expect 200 "$app/workflows/unicon/classic"
+          expect 404 "$app/workflowsx"
           expect 200 "$app/contests/acme/spring"
           expect 200 "$app/contests/acme/spring/tasks/sum"
           expect 404 "$app/contests"
@@ -326,8 +329,9 @@ jobs:
         run: uv run scripts/check-lfs.py --exact
 
       # Nothing is made the second time: no secret, no version, no agent.
-      # Its summary lists what was already there, each primitive and the
-      # workflow at v1 and at v2 among them.
+      # Its summary lists what was already there, each primitive and
+      # unicon/classic at v1 and at v2 and unicon/classic-folder at v1 among
+      # them.
       - name: a second bootstrap changes nothing
         working-directory: deploy
         run: |
@@ -341,6 +345,7 @@ jobs:
             done
             grep -q "present  workflow unicon/classic version $version\$" second-run.txt
           done
+          grep -q "present  workflow unicon/classic-folder version v1\$" second-run.txt
 
       # A version folder that no longer matches its tag at the forge stops
       # bootstrap before it seeds anything, naming the version.
