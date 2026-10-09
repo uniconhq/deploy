@@ -1,21 +1,24 @@
-"""The built-in workflow the forge is seeded with, unicon/classic, at each of
-its versions.
+"""The built-in workflows the forge is seeded with, each at every one of its
+versions: unicon/classic, and unicon/classic-folder, classic over a folder of
+sources with an entry point.
 
 A task's first save reads the workflow it names through the forge, as the
 saving organiser, so a workflow that organiser can read has to exist before
-any task can be published. It is the public repository
-`unicon/classic.workflow` in the platform org, carrying the topic
+any task can be published. Each is a public repository
+`unicon/<name>.workflow` in the platform org, carrying the topic
 `unicon-workflow`, with a tag per version (platform_repos.py).
 
-Each version is a folder in this repo, workflows/classic/v1/,
-workflows/classic/v2/ and on, holding the two files the version's tag holds,
-workflow.yaml and README.md, so the definition is a file a person can read
-and yamllint checks, not a string in this module. The definition wires the
-three primitives together: compile the submission, run it on every test under
-the task's limits, and compare each output with that test's answer. v1 wires
-the primitives' v1 and v2 their v2. Every primitive version a definition
-`use:`s has to be one the image manifest pins, or bootstrap refuses before it
-writes anything, since the forge would refuse every task saved against it.
+Each workflow is a folder under workflows/ in this repo, and each version a
+folder in it, workflows/classic/v1/, workflows/classic/v2/ and on, holding
+the two files the version's tag holds, workflow.yaml and README.md, so the
+definition is a file a person can read and yamllint checks, not a string in
+this module. classic wires the three primitives together: compile the
+submission, run it on every test under the task's limits, and compare each
+output with that test's answer; v1 wires the primitives' v1 and v2 their v2.
+classic-folder does the same with compile@v2 over a folder and its entry.
+Every primitive version a definition `use:`s has to be one the image
+manifest pins, or bootstrap refuses before it writes anything, since the
+forge would refuse every task saved against it.
 
 Bootstrap publishes every version folder to its own tag. A version is frozen:
 a tag already at the forge is left as it is, and one whose folder here has
@@ -41,6 +44,27 @@ _USE = re.compile(r"(?:^|[\s{,])use\s*:\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s,}]+))"
 
 class WorkflowError(ValueError):
     """The seed folders of a workflow do not have the shape above."""
+
+
+_NAME = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
+
+
+def seeded(directory: Path) -> list[str]:
+    """The name of every built-in workflow, each folder under workflows/ in
+    the deploy directory, in name order.
+    """
+    root = directory / "workflows"
+    names: list[str] = []
+    for entry in sorted(root.iterdir()) if root.is_dir() else []:
+        if not entry.is_dir() or _NAME.match(entry.name) is None:
+            raise WorkflowError(
+                f"{entry} is not a workflow folder; workflows/ holds one folder "
+                "per built-in workflow, named as the workflow is"
+            )
+        names.append(entry.name)
+    if not names:
+        raise WorkflowError(f"{root} holds no workflow folder")
+    return names
 
 
 def repository(name: str) -> str:
