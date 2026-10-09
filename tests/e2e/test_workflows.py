@@ -303,7 +303,19 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     settings.get_by_label("Rate: count").fill("10")
     settings.get_by_label("Rate: per seconds").fill("60")
     settings.get_by_role("button", name="Save settings").click()
-    expect(organiser.get_by_text("Saved as a draft.", exact=False)).to_be_visible()
+    made_task = f"{APP}/api/v1/orgs/{org}/contests/spring/tasks/made"
+    named = f"workflow: {owner}/graded@v1"
+    task_yaml = ""
+    for _ in range(30):
+        task_yaml = organiser.request.get(f"{made_task}/files/task.yaml").json()[
+            "content"
+        ]
+        if named in task_yaml:
+            break
+        organiser.wait_for_timeout(1000)
+    assert named in task_yaml, task_yaml
+    form_of = organiser.request.get(f"{made_task}/workflow-form").json()
+    assert form_of["problem"] is None, form_of
     organiser.reload()
     settings = open_settings(organiser, "Task settings")
     settings.get_by_role("button", name="Give seed a value").click()
@@ -330,7 +342,13 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     settings.get_by_label("Rate: count").fill("10")
     settings.get_by_label("Rate: per seconds").fill("60")
     settings.get_by_role("button", name="Save settings").click()
-    expect(organiser.get_by_text("Saved as a draft.", exact=False)).to_be_visible()
+    multi_task = f"{APP}/api/v1/orgs/{org}/contests/spring/tasks/multi"
+    for _ in range(30):
+        form_of = organiser.request.get(f"{multi_task}/workflow-form").json()
+        if form_of["workflow"] == "unicon/classic-folder@v1":
+            break
+        organiser.wait_for_timeout(1000)
+    assert form_of["problem"] is None, form_of
     organiser.reload()
     settings = open_settings(organiser, "Task settings")
     settings.get_by_role("button", name="Remove submission").click()
