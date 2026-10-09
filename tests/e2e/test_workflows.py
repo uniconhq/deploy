@@ -332,7 +332,7 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     for step in plan["steps"][1:]:
         assert [item["test"] for item in step["batch"]] == plan["tests"]
     run = plan["steps"][1]
-    assert run["batch"][0]["inputs"]["args"] == "--seed 7"
+    assert run["batch"][0]["inputs"]["args"] == {"value": "--seed 7"}
 
     # A task on unicon/classic-folder@v1.
     organiser.goto(contest_page)
