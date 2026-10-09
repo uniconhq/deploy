@@ -118,8 +118,28 @@ def _node_of(page: Page, port: str) -> str:
     return node
 
 
+# The preview is CodeMirror, which draws only the lines in view; the whole
+# text is its view's document.
+PREVIEW_TEXT = """(label) => {
+  const host = [...document.querySelectorAll('label')].find(
+    (each) => each.textContent.trim() === label);
+  const content = document.querySelector(`[aria-labelledby="${host.id}"]`);
+  const view = content.cmView && content.cmView.view;
+  return view ? view.state.doc.toString() : content.innerText;
+}"""
+
+
 def _preview(page: Page) -> str:
-    return page.get_by_label(PREVIEW).input_value()
+    text: str = page.evaluate(PREVIEW_TEXT, PREVIEW)
+    return text
+
+
+def _preview_shows(page: Page, pattern: str) -> None:
+    """Wait until the preview holds `pattern`, a regular expression."""
+    page.wait_for_function(
+        f"([label, pattern]) => new RegExp(pattern).test(({PREVIEW_TEXT})(label))",
+        arg=[PREVIEW, pattern],
+    )
 
 
 def test_a_workflow_is_built_versioned_shared_and_graded_with(
@@ -179,17 +199,13 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     adding.get_by_role("textbox", name="New input").fill("seed")
     adding.get_by_role("combobox", name="Of type").select_option("number")
     adding.get_by_role("button", name="Add an input").click()
-    expect(author.get_by_label(PREVIEW)).to_have_value(
-        re.compile(r"\n  seed: number\n")
-    )
+    _preview_shows(author, r"\n  seed: number\n")
     author.get_by_role("button", name="Test fields", exact=True).click()
     adding = author.get_by_role("form", name="Add a test field")
     adding.get_by_role("textbox", name="New test field").fill("expected")
     adding.get_by_role("combobox", name="Of type").select_option("file")
     adding.get_by_role("button", name="Add a test field").click()
-    expect(author.get_by_label(PREVIEW)).to_have_value(
-        re.compile(r"\n  expected: file\n")
-    )
+    _preview_shows(author, r"\n  expected: file\n")
 
     # The check step out, and a diff-check added back from the palette.
     author.get_by_role("group", name="Step check").get_by_role(
@@ -207,9 +223,7 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
         _handle(author, "step:1", "out:output"),
         _handle(author, "step:2", "in:actual"),
     )
-    expect(author.get_by_label(PREVIEW)).to_have_value(
-        re.compile(r"actual: \$\{\{ steps\.run\.output \}\}")
-    )
+    _preview_shows(author, r"actual: \$\{\{ steps\.run\.output \}\}")
     _drag(
         author,
         _handle(author, _node_of(author, "out:submission"), "out:submission"),
@@ -228,14 +242,10 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     args.press("Enter")
     panel.get_by_role("button", name="Write a value into args").click()
     author.get_by_role("menuitem", name="inputs.seed").click()
-    expect(author.get_by_label(PREVIEW)).to_have_value(
-        re.compile(r'args: "--seed \$\{\{ inputs\.seed \}\}"')
-    )
+    _preview_shows(author, r'args: "--seed \$\{\{ inputs\.seed \}\}"')
     author.get_by_role("button", name="The output run.time_ms").click()
     author.get_by_role("menuitem", name="Report it").click()
-    expect(author.get_by_label(PREVIEW)).to_have_value(
-        re.compile(r"time_ms_2: \$\{\{ steps\.run\.time_ms \}\}")
-    )
+    _preview_shows(author, r"time_ms_2: \$\{\{ steps\.run\.time_ms \}\}")
 
     # The draft saves with diff-check's expected unwired; its version does not.
     expect(
@@ -255,9 +265,7 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
         _handle(author, _node_of(author, "out:expected"), "out:expected"),
         _handle(author, "step:2", "in:expected"),
     )
-    expect(author.get_by_label(PREVIEW)).to_have_value(
-        re.compile(r"expected: \$\{\{ test\.expected \}\}")
-    )
+    _preview_shows(author, r"expected: \$\{\{ test\.expected \}\}")
     author.get_by_role("button", name="Save", exact=True).click()
     expect(author.get_by_text("Saved.", exact=True)).to_be_visible()
     author.get_by_role("button", name="Make the version").click()
