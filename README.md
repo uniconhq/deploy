@@ -292,19 +292,22 @@ to the other files alone is no difference, since the program that runs is the
 one in the image and a rebuilt image is a new digest. A run that finds nothing
 changed makes nothing.
 
-The workflow is the public repository `unicon/classic.workflow` with the
-topic `unicon-workflow`. Each of its versions is a folder here,
-`workflows/classic/v1/` and `workflows/classic/v2/`, holding the
-`workflow.yaml` and `README.md` the version's tag holds, and bootstrap
-publishes each to its own tag by the same rule: a tag that is not there is
-made, one that is there is never edited, and one that differs from its
-folder stops the run the same way. That is the built-in workflow: compile the
-submission, run it on every test, compare each output with the answer.
-`unicon/classic@v1`
-wires the primitives' `v1` in the format they were built for;
-`unicon/classic@v2` wires their `v2` in the format of `TASK-FORMAT.md`, with
-each test's `input` and `answer`, and reports the time and memory of every
-run. A changed definition is a new folder. Every primitive version a
+Each built-in workflow is a folder under `workflows/`, and each is the
+public repository `unicon/<name>.workflow` with the topic
+`unicon-workflow`. Each of a workflow's versions is a folder in its own,
+`workflows/classic/v1/`, `workflows/classic/v2/` and
+`workflows/classic-folder/v1/`, holding the `workflow.yaml` and `README.md`
+the version's tag holds, and bootstrap publishes each to its own tag by the
+same rule: a tag that is not there is made, one that is there is never
+edited, and one that differs from its folder stops the run the same way.
+`unicon/classic` is the built-in workflow: compile the submission, run it on
+every test, compare each output with the answer. `unicon/classic@v1` wires
+the primitives' `v1` in the format they were built for; `unicon/classic@v2`
+wires their `v2` in the format of `TASK-FORMAT.md`, with each test's `input`
+and `answer`, and reports the time and memory of every run.
+`unicon/classic-folder@v1` is classic over a folder of sources: the
+contestant gives a folder, its language and the entry point `compile@v2`
+starts from (`TASK-FORMAT.md` section 4.7). A changed definition is a new folder. Every primitive version a
 definition `use:`s has to be one the manifest pins: bootstrap refuses one
 that is not before it writes anything, since the forge would refuse every
 task saved against that workflow version.

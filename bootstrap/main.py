@@ -13,10 +13,11 @@ interrupted run can be resumed by running it again.
 After the accounts and the OAuth applications, the forge is seeded with the
 platform org and what is in it: the three primitives, each version the image
 manifest lists mirrored from its repository with the manifest's image digest
-written in (primitives.py, images.py), and the built-in workflow
-unicon/classic at each of its versions, which wire them together
-(workflows.py). A task's first save has to find a workflow and its primitives
-the organiser can read, or nothing can be published, so a workflow version
+written in (primitives.py, images.py), and the built-in workflows,
+unicon/classic and unicon/classic-folder, at each of their versions, which
+wire them together (workflows.py). A task's first save has to find a
+workflow and its primitives the organiser can read, or nothing can be
+published, so a workflow version
 that uses a primitive version the manifest does not pin is refused before
 anything is written. Every version goes to its own tag, and a tag already at
 the forge is never edited: every version is compared with the forge before
@@ -289,7 +290,7 @@ def is_development(files: list[str]) -> bool:
 
 
 def refuse_unpinned_primitives(directory: Path, manifest: Manifest) -> None:
-    """Refuse a version of the built-in workflow whose steps use a primitive
+    """Refuse a version of a built-in workflow whose steps use a primitive
     version the manifest does not pin, since the forge would refuse every
     task saved against that workflow version.
     """
@@ -297,9 +298,9 @@ def refuse_unpinned_primitives(directory: Path, manifest: Manifest) -> None:
         f"{PLATFORM_ORG}/{release.name}@{release.version}"
         for release in manifest.primitives
     }
-    name = workflows.CLASSIC
     unpinned = [
         f"workflows/{name}/{version}/ uses {used}"
+        for name in workflows.seeded(directory)
         for version, files in workflows.seed_versions(directory, name).items()
         for used in workflows.primitives_used(files[workflows.DEFINITION])
         if used not in pinned
@@ -307,7 +308,7 @@ def refuse_unpinned_primitives(directory: Path, manifest: Manifest) -> None:
     if unpinned:
         raise UnpinnedPrimitive(
             f"{manifest.path.name} does not pin every primitive version the "
-            f"built-in workflow uses, so nothing is seeded: "
+            f"built-in workflows use, so nothing is seeded: "
             f"{'; '.join(unpinned)}. Pin each in the manifest; on a "
             "development machine, scripts/build-images.py builds them from "
             "the sibling checkouts into images.local.json."
@@ -613,9 +614,9 @@ def _seed_platform(
     rewrite: bool,
 ) -> None:
     """The platform org, each version of the primitives the manifest pins and
-    each version of the built-in workflow unicon/classic, in that order, since
-    the workflow names the primitives. Then every image the primitives'
-    versions name, which is the socket filter's list.
+    each version of every built-in workflow, in that order, since a workflow
+    names the primitives. Then every image the primitives' versions name,
+    which is the socket filter's list.
 
     Every version is compared with the forge first, so that any that differs
     stops the run before anything is seeded, unless `rewrite`.
@@ -623,13 +624,13 @@ def _seed_platform(
     repos = PlatformRepos(
         Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]
     )
-    name = workflows.CLASSIC
-    workflow = f"{PLATFORM_ORG}/{name}"
-    workflow_repo = workflows.repository(name)
     mirrored = {
         release: primitives.version_files(release) for release in manifest.primitives
     }
-    definitions = workflows.seed_versions(directory, name)
+    definitions = {
+        name: workflows.seed_versions(directory, name)
+        for name in workflows.seeded(directory)
+    }
     if not rewrite:
         refuse_differing_versions(
             manifest,
@@ -640,9 +641,12 @@ def _seed_platform(
                 if primitives.standing_of(repos, release, files) is Standing.DIFFERENT
             ]
             + [
-                f"{workflow}@{version}, against workflows/{name}/{version}/"
-                for version, files in definitions.items()
-                if standing(repos, PLATFORM_ORG, workflow_repo, version, files)
+                f"{PLATFORM_ORG}/{name}@{version}, against workflows/{name}/{version}/"
+                for name, versions in definitions.items()
+                for version, files in versions.items()
+                if standing(
+                    repos, PLATFORM_ORG, workflows.repository(name), version, files
+                )
                 is Standing.DIFFERENT
             ],
         )
@@ -669,11 +673,31 @@ def _seed_platform(
             repos.ensure_mark(PLATFORM_ORG, repo, primitives.PRIMITIVE_TOPIC),
         )
 
+    for name, versions in definitions.items():
+        _seed_workflow(repos, name, versions, summary, rewrite)
+
+    values["UNICON_FILTER_IMAGES"] = ",".join(
+        primitives.images_at_forge(repos, manifest.primitive_names)
+    )
+
+
+def _seed_workflow(
+    repos: PlatformRepos,
+    name: str,
+    versions: dict[str, dict[str, bytes]],
+    summary: Summary,
+    rewrite: bool,
+) -> None:
+    """The built-in workflow `name`: its repository, each of its versions and
+    its mark.
+    """
+    workflow = f"{PLATFORM_ORG}/{name}"
+    workflow_repo = workflows.repository(name)
     summary.record(
         f"workflow {workflow} repository",
         repos.ensure_repository(PLATFORM_ORG, workflow_repo),
     )
-    for version, files in definitions.items():
+    for version, files in versions.items():
         outcome = publish(
             repos,
             PLATFORM_ORG,
@@ -687,10 +711,6 @@ def _seed_platform(
     summary.record(
         f"workflow {workflow} mark {workflows.WORKFLOW_TOPIC}",
         repos.ensure_mark(PLATFORM_ORG, workflow_repo, workflows.WORKFLOW_TOPIC),
-    )
-
-    values["UNICON_FILTER_IMAGES"] = ",".join(
-        primitives.images_at_forge(repos, manifest.primitive_names)
     )
 
 

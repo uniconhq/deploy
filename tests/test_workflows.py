@@ -1,4 +1,5 @@
-"""Seeding unicon/classic at each of its versions: what is made on a fresh
+"""Seeding the built-in workflows, unicon/classic and
+unicon/classic-folder, at each of their versions: what is made on a fresh
 forge, what is left alone on a rerun, the shape the forge package looks for,
 and the one way a version is ever rewritten.
 
@@ -27,6 +28,7 @@ from bootstrap.workflows import (
     primitives_used,
     seed_files,
     seed_versions,
+    seeded,
 )
 from tests.forgejo_fake import FakeForgejo
 
@@ -34,6 +36,8 @@ DEPLOY = Path(__file__).resolve().parent.parent
 ORG = "unicon"
 FULL = f"{ORG}/{CLASSIC}.workflow"
 REPO = f"/repos/{FULL}"
+FOLDER = "classic-folder"
+FOLDER_REPO = f"/repos/{ORG}/{FOLDER}.workflow"
 TOKEN = "provisioning-token"
 DIGEST = "@sha256:" + "0" * 64
 NO_PRIMITIVES = Manifest(
@@ -80,12 +84,12 @@ def _seed(
     return summary
 
 
-def test_a_fresh_forge_gets_v1_then_v2() -> None:
+def test_a_fresh_forge_gets_each_workflow_at_each_version() -> None:
     forge = FakeForgejo()
 
     summary = _seed(forge)
 
-    assert summary.lines()[0] == "created: 5, already present: 0"
+    assert summary.lines()[0] == "created: 8, already present: 0"
     assert forge.writes() == [
         ("POST", "/orgs"),
         ("POST", f"/orgs/{ORG}/repos"),
@@ -94,7 +98,15 @@ def test_a_fresh_forge_gets_v1_then_v2() -> None:
         ("POST", f"{REPO}/contents"),
         ("POST", f"{REPO}/tags"),
         ("PUT", f"{REPO}/topics/unicon-workflow"),
+        ("POST", f"/orgs/{ORG}/repos"),
+        ("POST", f"{FOLDER_REPO}/contents"),
+        ("POST", f"{FOLDER_REPO}/tags"),
+        ("PUT", f"{FOLDER_REPO}/topics/unicon-workflow"),
     ]
+    folder = forge.repos[f"{ORG}/{FOLDER}.workflow"]
+    assert list(folder.tags) == ["v1"]
+    assert folder.files_at("v1") == seed_files(DEPLOY, FOLDER, "v1")
+    assert f"  created  workflow {ORG}/{FOLDER} version v1" in summary.lines()
     repo = forge.repos[FULL]
     assert list(repo.tags) == ["v1", "v2"]
     assert repo.files_at("v1") == _v1()
@@ -111,7 +123,7 @@ def test_a_seeded_forge_is_read_and_not_written() -> None:
 
     summary = _seed(forge)
 
-    assert summary.lines()[0] == "created: 0, already present: 5"
+    assert summary.lines()[0] == "created: 0, already present: 8"
     assert forge.writes() == []
 
 
@@ -133,12 +145,20 @@ def test_the_repository_is_public_on_main_with_no_commit_of_forgejos_own() -> No
 
     _seed(forge)
 
-    assert forge.body_of("POST", f"/orgs/{ORG}/repos") == {
-        "name": f"{CLASSIC}.workflow",
-        "private": False,
-        "default_branch": "main",
-        "auto_init": False,
-    }
+    made = [
+        body
+        for method, path, body in forge.bodies
+        if (method, path) == ("POST", f"/orgs/{ORG}/repos")
+    ]
+    assert made == [
+        {
+            "name": f"{name}.workflow",
+            "private": False,
+            "default_branch": "main",
+            "auto_init": False,
+        }
+        for name in (CLASSIC, FOLDER)
+    ]
 
 
 def test_each_version_lands_in_one_commit_that_its_tag_points_at() -> None:
@@ -419,7 +439,7 @@ steps:
     ]
 
 
-def test_every_primitive_version_the_workflow_uses_has_to_be_pinned() -> None:
+def test_every_primitive_version_the_workflows_use_has_to_be_pinned() -> None:
     main.refuse_unpinned_primitives(DEPLOY, _pinning("v1", "v2"))
 
     with pytest.raises(main.UnpinnedPrimitive) as refused:
@@ -430,9 +450,45 @@ def test_every_primitive_version_the_workflow_uses_has_to_be_pinned() -> None:
     assert (
         f"workflows/{CLASSIC}/v2/ uses unicon/compile@v2; "
         f"workflows/{CLASSIC}/v2/ uses unicon/sandbox-run@v2; "
-        f"workflows/{CLASSIC}/v2/ uses unicon/diff-check@v2."
+        f"workflows/{CLASSIC}/v2/ uses unicon/diff-check@v2; "
+        f"workflows/{FOLDER}/v1/ uses unicon/compile@v2; "
+        f"workflows/{FOLDER}/v1/ uses unicon/sandbox-run@v2; "
+        f"workflows/{FOLDER}/v1/ uses unicon/diff-check@v2."
     ) in message
-    assert "v1/" not in message
+    assert f"{CLASSIC}/v1/" not in message
+
+
+def test_the_workflows_are_the_folders_under_workflows(tmp_path: Path) -> None:
+    assert seeded(DEPLOY) == [CLASSIC, FOLDER]
+    (tmp_path / "workflows").mkdir()
+    (tmp_path / "workflows" / "README.md").write_bytes(b"")
+
+    with pytest.raises(WorkflowError, match="not a workflow folder"):
+        seeded(tmp_path)
+
+
+def test_classic_folder_compiles_a_folder_from_its_entry_with_the_v2_primitives() -> (
+    None
+):
+    files = seed_files(DEPLOY, FOLDER, "v1")
+
+    assert set(files) == {"workflow.yaml", "README.md"}
+    definition = files["workflow.yaml"].decode().splitlines()
+    assert definition[0].startswith("# unicon/classic-folder@v1,")
+    assert primitives_used(files["workflow.yaml"]) == [
+        "unicon/compile@v2",
+        "unicon/sandbox-run@v2",
+        "unicon/diff-check@v2",
+    ]
+    for wiring in (
+        "  program: {type: folder, contestant: true}",
+        "  entry: {type: text, contestant: true}",
+        "      source: ${{ inputs.program }}",
+        "      entry: ${{ inputs.entry }}",
+        "      binary: ${{ steps.compile.binary }}",
+    ):
+        assert wiring in definition
+    assert files["README.md"].startswith(b"# classic-folder\n")
 
 
 def test_a_manifest_pinning_no_primitive_seeds_no_workflow() -> None:
