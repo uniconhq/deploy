@@ -242,7 +242,7 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     args.press("Enter")
     panel.get_by_role("button", name="Write a value into args").click()
     author.get_by_role("menuitem", name="inputs.seed").click()
-    _preview_shows(author, r'args: "--seed \$\{\{ inputs\.seed \}\}"')
+    _preview_shows(author, r'args: "?--seed \$\{\{ inputs\.seed \}\}"?')
     author.get_by_role("button", name="The output run.time_ms").click()
     author.get_by_role("menuitem", name="Report it").click()
     _preview_shows(author, r"time_ms_2: \$\{\{ steps\.run\.time_ms \}\}")
