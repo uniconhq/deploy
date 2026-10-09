@@ -1,6 +1,6 @@
 [project]
 name = "unicon-deploy"
-version = "0.3.0"
+version = "0.4.0"
 description = "Bootstrap and checks for the Unicon compose stack"
 requires-python = ">=3.14"
 dependencies = ["httpx==0.28.1"]
