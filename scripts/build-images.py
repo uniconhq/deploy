@@ -32,12 +32,13 @@ of images.json whenever it is there. Run it from the deploy directory:
 A checkout is built as it is on disk, committed or not, so a change in a
 sibling is one build and one bootstrap away from a grading. An image whose
 build did not change keeps its digest, and bootstrap then changes nothing at
-the forge. One that did change gets a new digest, and bootstrap stops before
-it seeds anything, naming the version at the forge that differs, since a
-version is never edited; `uv run bootstrap --rewrite` rewrites it in place on
-a development stack. That is why the build attaches no provenance or SBOM
-attestation: each carries the time of the build, so every build would be a
-new digest even when nothing changed.
+the forge. One that did change gets a new digest, and bootstrap moves the
+version at the forge to it when its declaration is otherwise the same, as
+for a patch release; a changed declaration stops bootstrap before it seeds
+anything, naming the version that differs, and `uv run bootstrap --rewrite`
+rewrites it in place on a development stack. That is why the build attaches
+no provenance or SBOM attestation: each carries the time of the build, so
+every build would be a new digest even when nothing changed.
 """
 
 from __future__ import annotations

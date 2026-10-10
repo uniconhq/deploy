@@ -192,7 +192,50 @@ def test_a_v1_written_the_way_bootstrap_always_has_is_present(
     assert "  present  primitive unicon/compile version v1" in summary.lines()
 
 
-def test_a_changed_pin_stops_the_run_before_anything_is_seeded(
+def test_a_new_image_alone_moves_the_version_in_place(tmp_path: Path) -> None:
+    """A patch release, a fixed image with the same ports, moves its
+    version's tag to a commit naming the new digest, with the release's
+    other files. A task already published keeps the digest its plan pinned,
+    so the old image stays on the socket filter's list.
+    """
+    forge = FakeForgejo()
+    checkout = _compile(tmp_path)
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    repo = forge.repos[FULL]
+    before = repo.tags["v1"]
+    (checkout / "compile.py").write_bytes(b"print('fixed')\n")
+
+    summary, values = _seed(
+        forge,
+        _manifest(("v1", checkout, OTHER), ("v2", _compile_v2(tmp_path), SECOND)),
+    )
+
+    assert repo.tags["v1"] != before
+    v1 = repo.files_at("v1")
+    assert f"image: {OTHER}" in v1["primitive.yaml"].decode()
+    assert f"image: {FIRST}" not in v1["primitive.yaml"].decode()
+    assert v1["compile.py"] == b"print('fixed')\n"
+    assert set(repo.files_at("v2")) == {"primitive.yaml", "Dockerfile", "compile.py"}
+    assert "  created  primitive unicon/compile version v1 (moved)" in (summary.lines())
+    assert "  created  primitive unicon/compile version v2" in summary.lines()
+    assert values["UNICON_FILTER_IMAGES"] == f"{FIRST},{OTHER},{SECOND}"
+
+
+def test_a_moved_version_is_present_on_the_next_run(tmp_path: Path) -> None:
+    forge = FakeForgejo()
+    checkout = _compile(tmp_path)
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    _seed(forge, _manifest(("v1", checkout, OTHER)))
+    forge.requests.clear()
+
+    summary, values = _seed(forge, _manifest(("v1", checkout, OTHER)))
+
+    assert forge.writes() == []
+    assert "  present  primitive unicon/compile version v1" in summary.lines()
+    assert values["UNICON_FILTER_IMAGES"] == f"{FIRST},{OTHER}"
+
+
+def test_a_new_image_with_other_ports_stops_the_run_before_anything_is_seeded(
     tmp_path: Path,
 ) -> None:
     """v2, new in the manifest, is not made either: the run stops before it
@@ -204,6 +247,9 @@ def test_a_changed_pin_stops_the_run_before_anything_is_seeded(
     repo = forge.repos[FULL]
     tags = dict(repo.tags)
     head = repo.head
+    (checkout / "primitive.yaml").write_bytes(
+        NAMED + b"outputs:\n  binary: {type: file}\n"
+    )
     forge.requests.clear()
 
     with pytest.raises(main.DifferingVersions) as refused:
@@ -308,13 +354,17 @@ def test_rewrite_on_a_development_stack_moves_the_version(tmp_path: Path) -> Non
     repo = forge.repos[FULL]
     v1 = repo.tags["v1"]
 
+    (v2 / "primitive.yaml").write_bytes(UNNAMED + b"  language: {type: text}\n")
+
     summary, _ = _seed(
         forge, _manifest(("v1", checkout, FIRST), ("v2", v2, OTHER)), rewrite=True
     )
 
     assert list(repo.tags) == ["v1", "v2"]
     assert repo.tags["v1"] == v1
-    assert f"image: {OTHER}" in repo.files_at("v2")["primitive.yaml"].decode()
+    written = repo.files_at("v2")["primitive.yaml"].decode()
+    assert f"image: {OTHER}" in written
+    assert "language: {type: text}" in written
     assert (
         "  created  primitive unicon/compile version v2 (rewritten)" in summary.lines()
     )
