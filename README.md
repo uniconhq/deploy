@@ -406,7 +406,7 @@ that holds that version, a new image under the same declaration moves the
 version to it, and any other change to the declaration stops bootstrap,
 since a version's ports never change.
 
-Today it pins runner `v0.6.0`, the primitives' `v1`, `sandbox-run` at
+Today it pins runner `v0.7.0`, the primitives' `v1`, `sandbox-run` at
 `v1.3.0` and `compile` and `diff-check` at `v1.1.1`, and their `v2`, all
 three at `v2.0.0`.
 
