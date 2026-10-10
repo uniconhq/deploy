@@ -165,7 +165,6 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     # Every seeded workflow draws with no wire behind a box, and the same
     # after a reload.
     for seeded in (
-        "classic?version=v1",
         "classic?version=v2",
         "classic-folder?version=v1",
     ):

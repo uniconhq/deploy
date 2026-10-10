@@ -9,12 +9,12 @@ any task can be published. Each is a public repository
 `unicon-workflow`, with a tag per version (platform_repos.py).
 
 Each workflow is a folder under workflows/ in this repo, and each version a
-folder in it, workflows/classic/v1/, workflows/classic/v2/ and on, holding
+folder in it, workflows/classic/v2/ and on, holding
 the two files the version's tag holds, workflow.yaml and README.md, so the
 definition is a file a person can read and yamllint checks, not a string in
 this module. classic wires the three primitives together: compile the
 submission, run it on every test under the task's limits, and compare each
-output with that test's answer; v1 wires the primitives' v1 and v2 their v2.
+output with that test's answer, over the primitives' v2.
 classic-folder does the same with compile@v2 over a folder and its entry.
 Every primitive version a definition `use:`s has to be one the image
 manifest pins, or bootstrap refuses before it writes anything, since the
