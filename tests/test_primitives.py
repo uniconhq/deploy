@@ -269,6 +269,70 @@ def test_a_new_image_with_other_ports_stops_the_run_before_anything_is_seeded(
     assert "--rewrite" in message
 
 
+@pytest.mark.parametrize(
+    "changed",
+    [
+        NAMED.replace(b"# The compile primitive.", b"# Compiles a submission."),
+        NAMED + b"description: Compiles a submission.\n",
+        NAMED.replace(
+            b"  source: {type: file}",
+            b"  source:\n    type: file  # what the contestant sends\n"
+            b"    description: the submission",
+        ),
+    ],
+    ids=["a comment", "a description", "a port's description and its layout"],
+)
+def test_a_declaration_changed_in_nothing_the_compiler_reads_moves_the_version(
+    tmp_path: Path, changed: bytes
+) -> None:
+    forge = FakeForgejo()
+    checkout = _compile(tmp_path)
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    repo = forge.repos[FULL]
+    before = repo.tags["v1"]
+    (checkout / "primitive.yaml").write_bytes(changed)
+
+    summary, values = _seed(forge, _manifest(("v1", checkout, FIRST)))
+
+    assert repo.tags["v1"] != before
+    declared = repo.files_at("v1")["primitive.yaml"]
+    assert declared == primitives.declaration(changed, "compile", "v1", FIRST)
+    assert "  created  primitive unicon/compile version v1 (moved)" in summary.lines()
+    assert values["UNICON_FILTER_IMAGES"] == FIRST
+
+
+@pytest.mark.parametrize(
+    "changed",
+    [
+        NAMED.replace(b"{type: file}", b"{type: folder}"),
+        NAMED.replace(b"batch: false", b"batch: true"),
+        NAMED + b"network: true\n",
+        NAMED + b"limits: {time_ms: 1, cpu_ms: 1, memory_mb: 1, pids: 1}\n",
+        NAMED.replace(b"batch: false", b"batch: no"),
+    ],
+    ids=[
+        "a port's type",
+        "batch",
+        "network",
+        "the limits",
+        "a word YAML 1.1 read as false",
+    ],
+)
+def test_a_declaration_changed_in_what_the_compiler_reads_stops_the_run(
+    tmp_path: Path, changed: bytes
+) -> None:
+    forge = FakeForgejo()
+    checkout = _compile(tmp_path)
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    (checkout / "primitive.yaml").write_bytes(changed)
+    forge.requests.clear()
+
+    with pytest.raises(main.DifferingVersions, match="unicon/compile@v1"):
+        _seed(forge, _manifest(("v1", checkout, OTHER)))
+
+    assert forge.writes() == []
+
+
 def test_a_changed_declaration_stops_the_run_too(tmp_path: Path) -> None:
     forge = FakeForgejo()
     checkout = _compile(tmp_path)
