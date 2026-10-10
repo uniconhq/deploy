@@ -285,10 +285,14 @@ starts with `name` and `version` lines; for it bootstrap writes `version` and
 
 A version is that file, and its ports never change. A tag already at the
 forge that holds the same declaration is left as it is, and the run makes
-nothing. One whose declaration names another image and is otherwise the same
-is a patch release, a fixed image with the same ports: bootstrap moves the
-tag to a commit of the release's files with the new digest written in. One
-whose declaration differs in anything else stops the run. Bootstrap compares
+nothing. The two are compared as the compiler reads them, parsed under YAML
+1.2's core schema: the ports with their types and options, the limits with
+`gpus`, `limits_from`, `network` and `batch`. One that differs only in
+what the compiler does not read, its image, a `description`, a comment or
+the layout, is a patch release, a fixed image with the same ports, or a
+reworded one: bootstrap moves the tag to a commit of the release's files
+with the manifest's digest written in, and says `(moved)`. One whose
+declaration differs in anything the compiler reads stops the run. Bootstrap compares
 every version with the forge before it seeds any, so a run that finds one
 differing seeds nothing and names each that differs; new ports are a new
 version in the manifest. A plan pins each step's image by digest, so a task

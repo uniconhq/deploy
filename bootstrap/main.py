@@ -622,7 +622,8 @@ def _seed_platform(
 
     Every version is compared with the forge first, so that any that differs
     stops the run before anything is seeded, unless `rewrite`. A primitive
-    version whose image alone differs is not one of them: it moves.
+    version whose declaration differs only where the compiler does not read,
+    its image, a description or a comment, is not one of them: it moves.
     """
     repos = PlatformRepos(
         Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]
@@ -642,7 +643,7 @@ def _seed_platform(
                 f"{manifest.path.name} pins for it"
                 for release, files in mirrored.items()
                 if primitives.standing_of(repos, release, files) is Standing.DIFFERENT
-                and not primitives.image_alone_differs(repos, release, files)
+                and not primitives.moves_in_place(repos, release, files)
             ]
             + [
                 f"{PLATFORM_ORG}/{name}@{version}, against workflows/{name}/{version}/"

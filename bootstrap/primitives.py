@@ -28,12 +28,17 @@ lines; for one of those, bootstrap writes `version` and `image` right under
 
 A version is what its declaration says, since that is what the forge
 compiles against. Its ports are frozen: a tag whose declaration differs from
-what the manifest gives now in anything but its `image` line stops the run
+what the manifest gives now in anything the compiler reads stops the run
 before anything is seeded (main.py), naming it, and new ports reach the forge
-as a new version in the manifest. A patch release, a fixed image with the
-same ports, is the same version with a new digest: the manifest takes it
-under the same version, and bootstrap moves the version's tag to a commit of
-the release's files with the new image written in. A task already published
+as a new version in the manifest. The two are compared as the forge reads
+them, parsed under YAML 1.2's core schema (core_yaml.py): the ports with
+their types and options, the limits with `gpus`, `limits_from`, `network`
+and `batch`; the image, a `description`, comments and layout are passed
+over. A patch release, a fixed image with the same ports, is the same
+version with a new digest: the manifest takes it under the same version, and
+bootstrap moves the version's tag to a commit of the release's files with
+the new image written in. A release that changes only a description or a
+comment moves the tag the same way. A task already published
 keeps grading with the digest its plan pinned until it is next saved, so the
 socket filter's list holds every image a version has named, read back from
 the repository's history. A change to the other files alone is no
@@ -53,6 +58,7 @@ from pathlib import PurePosixPath
 
 import httpx
 
+from bootstrap import core_yaml
 from bootstrap.images import GitHubSource, LocalSource, PrimitiveRelease
 from bootstrap.platform_repos import (
     PLATFORM_ORG,
@@ -207,13 +213,13 @@ def standing_of(
     )
 
 
-def image_alone_differs(
+def moves_in_place(
     repos: PlatformRepos, release: PrimitiveRelease, files: dict[str, bytes]
 ) -> bool:
-    """Whether the version at the forge names another image than these
-    files and is otherwise the same declaration: a patch release, a fixed
-    image with the same ports, which moves the version in place. Read
-    without writing anything.
+    """Whether the version at the forge holds another declaration than these
+    files that the compiler reads alike: a patch release, a fixed image with
+    the same ports, or a new description or comment, which moves the
+    version in place. Read without writing anything.
     """
     repo = repository(release.name)
     commit = repos.versions(PLATFORM_ORG, repo).get(release.version)
@@ -223,9 +229,37 @@ def image_alone_differs(
     if present is None:
         return False
     wanted = files[DECLARATION]
-    return image_of(present) != image_of(wanted) and _without_image(
-        present
-    ) == _without_image(wanted)
+    read = compiled(present)
+    return present != wanted and read is not None and read == compiled(wanted)
+
+
+def compiled(declaration_bytes: bytes) -> object | None:
+    """What the compiler reads of a declaration: the document as the forge
+    parses it, without its `image` and without any `description`, so a
+    comment, the layout and a description change nothing. None when it does
+    not parse as a mapping.
+    """
+    try:
+        document = core_yaml.load(declaration_bytes)
+    except core_yaml.YAMLError:
+        return None
+    if not isinstance(document, dict):
+        return None
+    return _without_descriptions(
+        {key: value for key, value in document.items() if key != "image"}
+    )
+
+
+def _without_descriptions(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            key: _without_descriptions(held)
+            for key, held in value.items()
+            if key != "description"
+        }
+    if isinstance(value, list):
+        return [_without_descriptions(held) for held in value]
+    return value
 
 
 def mirror(
@@ -236,10 +270,10 @@ def mirror(
     rewrite: bool,
 ) -> Outcome:
     """Make the version the release is under hold these files, its
-    `version_files`, and return what was done. A version whose image alone
-    differs is moved to them whether or not `rewrite`.
+    `version_files`, and return what was done. A version whose declaration
+    the compiler reads alike is moved to them whether or not `rewrite`.
     """
-    if image_alone_differs(repos, release, files):
+    if moves_in_place(repos, release, files):
         move(
             repos,
             PLATFORM_ORG,
@@ -286,15 +320,6 @@ def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
             if image:
                 found.add(image)
     return sorted(found)
-
-
-def _without_image(declaration_bytes: bytes) -> list[str]:
-    """A declaration's lines without its top-level `image` line."""
-    return [
-        line
-        for line in declaration_bytes.decode("utf-8", "replace").splitlines()
-        if _key(line) != "image"
-    ]
 
 
 def _key(line: str) -> str | None:
