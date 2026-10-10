@@ -53,10 +53,10 @@ x-backend-env: &backend-env
   # the first upload, and nobody who never submits costs a repository.
   UNICON_PLACES_AHEAD: ${UNICON_PLACES_AHEAD:-true}
   # Object storage: Garage inside the network, in the region garage/garage.toml
-  # names, the access key bootstrap made for the backend, and the two buckets
-  # bootstrap makes. What a browser uploads before a submit goes to the first,
-  # the grading logs to the second, both through presigned URLs the proxy
-  # passes to Garage untouched.
+  # names, the access key bootstrap made for the backend, and the bucket
+  # bootstrap makes for the grading run logs, which a machine writes through a
+  # presigned URL the proxy passes to Garage untouched. What a browser
+  # uploads goes through the upload door into Forgejo's large-file store.
   UNICON_S3_ENDPOINT: http://garage:3900
   UNICON_S3_REGION: garage
   UNICON_S3_ACCESS_KEY: ${UNICON_S3_ACCESS_KEY}
