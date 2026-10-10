@@ -172,6 +172,21 @@ class FakeForgejo(Compose):
             if content is None:
                 return ABSENT
             return 200, {"type": "file", "content": base64.b64encode(content).decode()}
+        if route == ("GET", "commits"):
+            # Every commit is on the default branch here, one after another.
+            assert query["sha"] == repo.default_branch
+            limit, page = int(query["limit"]), int(query["page"])
+            if repo.head is None:
+                return 409, {"message": "Git Repository is empty."}
+            shas = list(repo.commits)
+            changed = [
+                sha
+                for index, sha in enumerate(shas)
+                if repo.commits[sha].get(query["path"])
+                != (repo.commits[shas[index - 1]] if index else {}).get(query["path"])
+            ]
+            history = [{"sha": sha} for sha in reversed(changed)]
+            return 200, history[(page - 1) * limit : page * limit]
         if route == ("GET", "topics"):
             return 200, {"topics": list(repo.topics)}
         if route == ("PUT", "topics"):

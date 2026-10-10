@@ -20,8 +20,10 @@ workflow and its primitives the organiser can read, or nothing can be
 published, so a workflow version
 that uses a primitive version the manifest does not pin is refused before
 anything is written. Every version goes to its own tag, and a tag already at
-the forge is never edited: every version is compared with the forge before
-any is seeded, and one that differs stops the run there, naming each. The
+the forge is never edited, save a primitive version whose image alone
+differs, which moves to the new image: every version is compared with the
+forge before any is seeded, and one that differs otherwise stops the run
+there, naming each. The
 manifest also gives the harness, clone and socket filter images, which go into
 .env for the services that run them.
 
@@ -619,7 +621,8 @@ def _seed_platform(
     which is the socket filter's list.
 
     Every version is compared with the forge first, so that any that differs
-    stops the run before anything is seeded, unless `rewrite`.
+    stops the run before anything is seeded, unless `rewrite`. A primitive
+    version whose image alone differs is not one of them: it moves.
     """
     repos = PlatformRepos(
         Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]
@@ -639,6 +642,7 @@ def _seed_platform(
                 f"{manifest.path.name} pins for it"
                 for release, files in mirrored.items()
                 if primitives.standing_of(repos, release, files) is Standing.DIFFERENT
+                and not primitives.image_alone_differs(repos, release, files)
             ]
             + [
                 f"{PLATFORM_ORG}/{name}@{version}, against workflows/{name}/{version}/"
@@ -724,7 +728,7 @@ def refuse_differing_versions(manifest: Manifest, differing: list[str]) -> None:
         "nothing is seeded, since these versions at the forge differ from "
         "what is here and a version is never edited:\n"
         + "".join(f"  {version}\n" for version in differing)
-        + "A changed image or declaration of a primitive goes under a new "
+        + "A primitive's declaration changed beyond its image goes under a new "
         f"version in {manifest.path.name}, and a changed workflow definition "
         "in a new version folder under workflows/. On a development stack, "
         "uv run bootstrap --rewrite rewrites each version in place instead."
@@ -734,13 +738,13 @@ def refuse_differing_versions(manifest: Manifest, differing: list[str]) -> None:
 def _record_version(
     summary: Summary, what: str, version: str, outcome: Outcome
 ) -> None:
-    """One summary line for a version. A rewritten version counts as made and
-    says so.
+    """One summary line for a version. A rewritten or moved version counts
+    as made and says so.
     """
     label = f"{what} version {version}"
-    if outcome is Outcome.REWRITTEN:
+    if outcome in (Outcome.REWRITTEN, Outcome.MOVED):
         label += f" ({outcome.value})"
-    summary.record(label, outcome in (Outcome.CREATED, Outcome.REWRITTEN))
+    summary.record(label, outcome is not Outcome.PRESENT)
 
 
 def _start_woodpecker(
