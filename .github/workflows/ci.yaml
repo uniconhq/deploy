@@ -329,9 +329,9 @@ jobs:
         run: uv run scripts/check-lfs.py --exact
 
       # Nothing is made the second time: no secret, no version, no agent.
-      # Its summary lists what was already there, each primitive and
-      # unicon/classic at v1 and at v2 and unicon/classic-folder at v1 among
-      # them.
+      # Its summary lists what was already there, each primitive at v1 and
+      # v2, unicon/classic at v2 and unicon/classic-folder at v1 among them,
+      # and no unicon/classic at v1.
       - name: a second bootstrap changes nothing
         working-directory: deploy
         run: |
@@ -343,8 +343,9 @@ jobs:
             for name in unicon/compile unicon/sandbox-run unicon/diff-check; do
               grep -q "present  primitive $name version $version\$" second-run.txt
             done
-            grep -q "present  workflow unicon/classic version $version\$" second-run.txt
           done
+          grep -q "present  workflow unicon/classic version v2\$" second-run.txt
+          if grep -q "workflow unicon/classic version v1" second-run.txt; then exit 1; fi
           grep -q "present  workflow unicon/classic-folder version v1\$" second-run.txt
 
       # A version folder that no longer matches its tag at the forge stops
@@ -362,7 +363,6 @@ jobs:
           cp readme.saved workflows/classic/v2/README.md
           cat changed-run.txt
           grep -q 'unicon/classic@v2, against workflows/classic/v2/' changed-run.txt
-          if grep -q 'unicon/classic@v1, against' changed-run.txt; then exit 1; fi
 
       # After the browser test, which signs in from this machine too. A burst
       # of 300 sign-in posts from one address: 240 over the rate pass at once,

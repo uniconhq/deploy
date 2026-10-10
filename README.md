@@ -285,10 +285,14 @@ starts with `name` and `version` lines; for it bootstrap writes `version` and
 
 A version is that file, and its ports never change. A tag already at the
 forge that holds the same declaration is left as it is, and the run makes
-nothing. One whose declaration names another image and is otherwise the same
-is a patch release, a fixed image with the same ports: bootstrap moves the
-tag to a commit of the release's files with the new digest written in. One
-whose declaration differs in anything else stops the run. Bootstrap compares
+nothing. The two are compared as the compiler reads them, parsed under YAML
+1.2's core schema: the ports with their types and options, the limits with
+`gpus`, `limits_from`, `network` and `batch`. One that differs only in
+what the compiler does not read, its image, a `description`, a comment or
+the layout, is a patch release, a fixed image with the same ports, or a
+reworded one: bootstrap moves the tag to a commit of the release's files
+with the manifest's digest written in, and says `(moved)`. One whose
+declaration differs in anything the compiler reads stops the run. Bootstrap compares
 every version with the forge before it seeds any, so a run that finds one
 differing seeds nothing and names each that differs; new ports are a new
 version in the manifest. A plan pins each step's image by digest, so a task
@@ -302,16 +306,14 @@ nothing.
 Each built-in workflow is a folder under `workflows/`, and each is the
 public repository `unicon/<name>.workflow` with the topic
 `unicon-workflow`. Each of a workflow's versions is a folder in its own,
-`workflows/classic/v1/`, `workflows/classic/v2/` and
-`workflows/classic-folder/v1/`, holding the `workflow.yaml` and `README.md`
+`workflows/classic/v2/` and `workflows/classic-folder/v1/`, holding the `workflow.yaml` and `README.md`
 the version's tag holds, and bootstrap publishes each to its own tag by the
 same rule: a tag that is not there is made, one that is there is never
 edited, and one that differs from its folder stops the run the same way.
 `unicon/classic` is the built-in workflow: compile the submission, run it on
-every test, compare each output with the answer. `unicon/classic@v1` wires
-the primitives' `v1` in the format they were built for; `unicon/classic@v2`
-wires their `v2` in the format of `TASK-FORMAT.md`, with each test's `input`
-and `answer`, and reports the time and memory of every run.
+every test, compare each output with the answer. `unicon/classic@v2`
+wires the primitives' `v2` in the format of `TASK-FORMAT.md`, with each
+test's `input` and `answer`, and reports the time and memory of every run.
 `unicon/classic-folder@v1` is classic over a folder of sources: the
 contestant gives a folder, its language and the entry point `compile@v2`
 starts from (`TASK-FORMAT.md` section 4.7). A changed definition is a new folder. Every primitive version a
