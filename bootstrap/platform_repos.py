@@ -22,7 +22,11 @@ Rewriting a version in place is for a development stack only, and only when
 the person running bootstrap asks for it: the default branch gets a new commit
 and the tag is moved to it. Anything published against the old commit then
 names files that are no longer at that tag, which is exactly why it is never
-done without being told to.
+done without being told to. The one move made on any stack is a primitive's
+new image under the same ports (primitives.py), since a plan pins each
+step's image by digest and so reads nothing else of a primitive once
+published. Either way the old commit stays in the default branch's history,
+which is where the images a version has named are read back from.
 
 Every call goes through the Forgejo API from inside its container, with the
 admin token, the way forgejo.py reaches it. Anything the API answers
@@ -55,6 +59,7 @@ class Outcome(enum.Enum):
     PRESENT = "present"
     CREATED = "created"
     REWRITTEN = "rewritten"
+    MOVED = "moved"
 
 
 class Standing(enum.Enum):
@@ -192,6 +197,27 @@ class PlatformRepos:
                 break
             page += 1
         return found
+
+    def history(self, org: str, repo: str, path: str) -> list[str]:
+        """Every commit of the default branch that changed the file at
+        `path`, newest first. A repository with no commit yet has none.
+        """
+        found: list[str] = []
+        page = 1
+        while True:
+            status, listed = self._call(
+                "GET",
+                f"/repos/{org}/{repo}/commits?sha={DEFAULT_BRANCH}&path={path}"
+                f"&stat=false&verification=false&files=false"
+                f"&page={page}&limit={PAGE_SIZE}",
+            )
+            if status in (404, 409):
+                return found
+            listed = _ok((status, listed))
+            found += [str(commit["sha"]) for commit in listed or []]
+            if not listed or len(listed) < PAGE_SIZE:
+                return found
+            page += 1
 
     def read_file(self, org: str, repo: str, path: str, ref: str) -> bytes | None:
         """A file's bytes at a tag or commit, or None when it is not there."""
@@ -350,12 +376,28 @@ def publish(
                 f"{org}/{repo}@{version} at the forge differs from the files "
                 "here, and a version is never edited"
             )
-        head, _ = repos.write_tree(org, repo, files, message)
-        repos.move_tag(org, repo, version, head)
+        move(repos, org, repo, version, files, message=message)
         return Outcome.REWRITTEN
     head, _ = repos.write_tree(org, repo, files, message)
     repos.tag(org, repo, version, head)
     return Outcome.CREATED
+
+
+def move(
+    repos: PlatformRepos,
+    org: str,
+    repo: str,
+    version: str,
+    files: dict[str, bytes],
+    *,
+    message: str,
+) -> None:
+    """Point the existing tag `version` at a new commit of these files on
+    the default branch. The commit it pointed at stays in the branch's
+    history.
+    """
+    head, _ = repos.write_tree(org, repo, files, message)
+    repos.move_tag(org, repo, version, head)
 
 
 def _number(version: str) -> int:
