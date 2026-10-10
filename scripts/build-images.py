@@ -20,10 +20,8 @@ the version at the forge that is the major of the version in its
 pyproject.toml, `v2` for 2.0.0, with its source the sibling checkout; every
 other version of it is copied from images.json as released, the image by its
 digest at ghcr.io and the source its tag on GitHub. So a stack built this way
-seeds v1 of each primitive from its release and v2 from the checkout. The
-harness built here reads only a task's plans/plan.json, which a save on
-unicon/classic@v2 writes, so a task saved on v1 grades only once it is saved
-again on v2. images.local.json is git-ignored, and bootstrap reads it instead
+seeds v1 of each primitive from its release and v2 from the checkout.
+images.local.json is git-ignored, and bootstrap reads it instead
 of images.json whenever it is there. Run it from the deploy directory:
 
     uv run scripts/build-images.py
