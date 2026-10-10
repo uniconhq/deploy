@@ -157,10 +157,12 @@ uses.
 Each primitive checkout fills the version at the forge that is the major of
 its own version, `v2` for 2.0.0, and the versions it does not fill come from
 `images.json` as released. After a change in one of those checkouts, run the
-first two lines again. A version already at the forge is never edited, so a
-rebuilt image stops bootstrap before it seeds anything, naming the version
-that differs; `uv run bootstrap --rewrite` rewrites it in place instead, so
-the tasks already there grade with what was just built.
+first two lines again. A rebuilt image under the same declaration moves its
+version at the forge to the new digest, as a patch release does. A changed
+`primitive.yaml` stops bootstrap before it seeds anything, naming the version
+that differs; `uv run bootstrap --rewrite` rewrites it in place instead.
+Either way a task already published keeps grading with the image its plan
+pinned until it is saved again.
 
 `backend-migrate` runs `unicon-forge migrate`, the forge package's command,
 from the backend image, and exits; the backend image does not
@@ -281,16 +283,21 @@ manifest's digest, in as its first line. A `v1` release's declaration still
 starts with `name` and `version` lines; for it bootstrap writes `version` and
 `image` under `name`, which is how every `v1` at the forge was written.
 
-A version is that file, and a version is never edited. A tag already at the
-forge is left as it is: when it holds the same declaration the run makes
-nothing, and when it holds another, with a different digest or any other
-change, the run stops. Bootstrap compares every version with the forge before
-it seeds any, so a run that finds one differing seeds nothing and names each
-that differs. A new image for a primitive is a new version in the manifest, so
-a published task keeps grading against what it was published with. A change
-to the other files alone is no difference, since the program that runs is the
-one in the image and a rebuilt image is a new digest. A run that finds nothing
-changed makes nothing.
+A version is that file, and its ports never change. A tag already at the
+forge that holds the same declaration is left as it is, and the run makes
+nothing. One whose declaration names another image and is otherwise the same
+is a patch release, a fixed image with the same ports: bootstrap moves the
+tag to a commit of the release's files with the new digest written in. One
+whose declaration differs in anything else stops the run. Bootstrap compares
+every version with the forge before it seeds any, so a run that finds one
+differing seeds nothing and names each that differs; new ports are a new
+version in the manifest. A plan pins each step's image by digest, so a task
+already published keeps grading with the image it was published with until
+it is next saved, and the socket filter's list keeps every image a version
+has named, read from the repository's history. A change to the other files
+alone is no difference, since the program that runs is the one in the image
+and a rebuilt image is a new digest. A run that finds nothing changed makes
+nothing.
 
 Each built-in workflow is a folder under `workflows/`, and each is the
 public repository `unicon/<name>.workflow` with the topic
@@ -316,7 +323,7 @@ The one exception to both is a development stack. `uv run bootstrap
 --rewrite` rewrites every listed version of the workflow and of each
 primitive in place to what is here now, with a new commit and the tag moved
 to it, rather than stopping at the version at the forge that differs, so a
-primitive rebuilt on the laptop is what the tasks already there grade with.
+declaration changed on the laptop is what the next save compiles against.
 It refuses to run without `compose.dev.yaml` among the compose files.
 
 On a development stack, one CI agent: `laptop`, enrolled as a global agent
@@ -394,12 +401,12 @@ a tag can be moved under a running stack; a manifest that names one is
 refused before anything starts. A new release of the runner reaches a
 deployment as a commit changing this file, and so does a new major of a
 primitive, as one more version beside the ones before it. A new minor or
-patch release of a primitive is a new pin under the same version, so it
-reaches a stack that does not hold that version yet; on a stack that does,
-its other image or declaration stops bootstrap, since a version at the forge
-is never edited.
+patch release of a primitive is a new pin under the same version: on a stack
+that holds that version, a new image under the same declaration moves the
+version to it, and any other change to the declaration stops bootstrap,
+since a version's ports never change.
 
-Today it pins runner `v0.6.0`, the primitives' `v1`, `sandbox-run` at
+Today it pins runner `v0.7.0`, the primitives' `v1`, `sandbox-run` at
 `v1.3.0` and `compile` and `diff-check` at `v1.1.1`, and their `v2`, all
 three at `v2.0.0`.
 

@@ -26,16 +26,21 @@ tag. A declaration from a v1 release still starts with `name` and `version`
 lines; for one of those, bootstrap writes `version` and `image` right under
 `name`, as it always has, so a v1 already at the forge reads as the same.
 
-A version is what its declaration says, the image included, since that is
-what the forge compiles against and what a step runs. A version is frozen: a
-tag already at the forge is left as it is, and one whose declaration differs
-from what the manifest gives now stops the run before anything is seeded
-(main.py), naming it. A new image for a primitive reaches the forge as a new
-version in the manifest. A change to the other files alone is no difference,
-because it changes nothing that grades: the program that runs is the one in
-the image. A rerun with nothing changed makes nothing. The one exception is a
-development stack, where --rewrite rewrites each listed version in place
-instead.
+A version is what its declaration says, since that is what the forge
+compiles against. Its ports are frozen: a tag whose declaration differs from
+what the manifest gives now in anything but its `image` line stops the run
+before anything is seeded (main.py), naming it, and new ports reach the forge
+as a new version in the manifest. A patch release, a fixed image with the
+same ports, is the same version with a new digest: the manifest takes it
+under the same version, and bootstrap moves the version's tag to a commit of
+the release's files with the new image written in. A task already published
+keeps grading with the digest its plan pinned until it is next saved, so the
+socket filter's list holds every image a version has named, read back from
+the repository's history. A change to the other files alone is no
+difference, because it changes nothing that grades: the program that runs is
+the one in the image. A rerun with nothing changed makes nothing. On a
+development stack, --rewrite rewrites each listed version in place whatever
+differs.
 """
 
 from __future__ import annotations
@@ -54,6 +59,7 @@ from bootstrap.platform_repos import (
     Outcome,
     PlatformRepos,
     Standing,
+    move,
     publish,
     standing,
 )
@@ -201,6 +207,27 @@ def standing_of(
     )
 
 
+def image_alone_differs(
+    repos: PlatformRepos, release: PrimitiveRelease, files: dict[str, bytes]
+) -> bool:
+    """Whether the version at the forge names another image than these
+    files and is otherwise the same declaration: a patch release, a fixed
+    image with the same ports, which moves the version in place. Read
+    without writing anything.
+    """
+    repo = repository(release.name)
+    commit = repos.versions(PLATFORM_ORG, repo).get(release.version)
+    if commit is None:
+        return False
+    present = repos.read_file(PLATFORM_ORG, repo, DECLARATION, commit)
+    if present is None:
+        return False
+    wanted = files[DECLARATION]
+    return image_of(present) != image_of(wanted) and _without_image(
+        present
+    ) == _without_image(wanted)
+
+
 def mirror(
     repos: PlatformRepos,
     release: PrimitiveRelease,
@@ -209,8 +236,22 @@ def mirror(
     rewrite: bool,
 ) -> Outcome:
     """Make the version the release is under hold these files, its
-    `version_files`, and return what was done.
+    `version_files`, and return what was done. A version whose image alone
+    differs is moved to them whether or not `rewrite`.
     """
+    if image_alone_differs(repos, release, files):
+        move(
+            repos,
+            PLATFORM_ORG,
+            repository(release.name),
+            release.version,
+            files,
+            message=(
+                f"Move {PLATFORM_ORG}/{release.name}@{release.version} "
+                f"to {release.image}"
+            ),
+        )
+        return Outcome.MOVED
     return publish(
         repos,
         PLATFORM_ORG,
@@ -227,20 +268,33 @@ def mirror(
 
 
 def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
-    """Every image any version of these primitives names at the forge,
-    sorted and without repeats: the list a socket filter lets containers be
-    made from, since a task published against an older version still runs
-    that version's image.
+    """Every image any version of these primitives names or has named at
+    the forge, sorted and without repeats: the list a socket filter lets
+    containers be made from, since a task published against an older version,
+    or before its version moved to a new image, still runs the image its
+    plan pinned. Read from every commit that changed a declaration, and
+    from each version's own commit in case one is off the default branch.
     """
     found: set[str] = set()
     for name in names:
         repo = repository(name)
-        for version in repos.versions(PLATFORM_ORG, repo):
-            content = repos.read_file(PLATFORM_ORG, repo, DECLARATION, version)
+        commits = repos.history(PLATFORM_ORG, repo, DECLARATION)
+        commits += list(repos.versions(PLATFORM_ORG, repo).values())
+        for commit in dict.fromkeys(commits):
+            content = repos.read_file(PLATFORM_ORG, repo, DECLARATION, commit)
             image = image_of(content) if content is not None else None
             if image:
                 found.add(image)
     return sorted(found)
+
+
+def _without_image(declaration_bytes: bytes) -> list[str]:
+    """A declaration's lines without its top-level `image` line."""
+    return [
+        line
+        for line in declaration_bytes.decode("utf-8", "replace").splitlines()
+        if _key(line) != "image"
+    ]
 
 
 def _key(line: str) -> str | None:

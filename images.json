@@ -1,9 +1,9 @@
 {
   "images": {
-    "harness": "ghcr.io/uniconhq/harness@sha256:9296f7cf066382927284d2eea27e31712ae5607371b49ae771a8ede753124044",
-    "clone": "ghcr.io/uniconhq/clone@sha256:1b03bcd3c6e6864b98f471eeca08dfc5107d217f29aad5d2081465eb028e6fd8",
-    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:c1770aeda6271fdc75181706fa8ed222e4ae473a448b0dd104166cc9d31d2334",
-    "worker": "ghcr.io/uniconhq/worker@sha256:c541889485d2a28155c9165fd07a744b3ce1e44b128c13480cccd289e5d7d0a6"
+    "harness": "ghcr.io/uniconhq/harness@sha256:4e9836351b3c83a8c7ffe9f6d946c36e6cf15c62f8ebaf8cdd2909f0bb631df9",
+    "clone": "ghcr.io/uniconhq/clone@sha256:b2e4510fcd5918aa5c5a66e1c62a46cdffbc159416417c07b5bfe9af67d5c0fb",
+    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:8caa9b111dfb737707a796644b39ab9648c618b868ce219920c041c3458713a7",
+    "worker": "ghcr.io/uniconhq/worker@sha256:2d4046535d0791aa6c344647eb30fc45da3ffeb7cd649d1edad0c83dee6cdba3"
   },
   "primitives": {
     "compile": {
