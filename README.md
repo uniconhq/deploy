@@ -575,19 +575,25 @@ UNICON_E2E_URL=http://localhost:8080 uv run pytest tests/e2e
 
 `tests/e2e/test_submit_and_grade.py` drives Chromium through the running
 stack, both profiles up, from a new org to two verdicts. It makes an
-organiser and a contestant with `unicon create-account` and signs both in
+organiser and an entrant with `unicon create-account` and signs both in
 through Forgejo's pages. The organiser creates an org, a contest and a task
-from the organiser pages, opening each one's page as soon as it is made, saves `task.yaml` so the task publishes (with a
-looser submission rate than the starter's one per 30 seconds, so the second
-submit is not refused), checks that making the task added it to
-`contest.yaml`'s tasks, and saves `contest.yaml` so the contest is published
-and running. The contestant registers, the organiser approves them from the
-contestants table, and the contestant submits the sample solution and then a
-wrong one from the submit panel; the test expects `ACCEPTED` and then
+from the organiser pages' New buttons, opening each one's page as soon as it
+is made, saves the task from its page so it publishes (with a looser
+submission rate than the starter's one per 30 seconds, so the second submit
+is not refused), sets the contest running now in its settings and opens it
+from its status card. The entrant registers, the organiser approves them
+from the Entrants page, and the entrant submits the sample solution and then
+a wrong one from the submit panel; the test expects `ACCEPTED` and then
 `WRONG ANSWER` in their submissions list. Both are graded by the real CI on
 the dev agent, through the socket filter, with the primitives at the forge.
-Last, the contestant signs out, and signing in again asks Forgejo for their
-password: signing out of the app signed the browser out of Forgejo too.
+The organiser then replaces the task's test from its Tests card, publishes
+the change the running contest asks about, and the gradings feed shows the
+sample solution graded again. Last, the entrant signs out, and signing in
+again asks Forgejo for their password: signing out of the app signed the
+browser out of Forgejo too. Beside it, `test_boards.py` ranks a contest on
+three leaderboards built on its Leaderboards page, before and after a test
+group's reveal, and `test_workflows.py` builds a workflow in the editor,
+publishes and shares a version of it and grades with it.
 Every name carries a random suffix, so it runs again on the same stack
 without clearing anything; it takes about a minute. Without `UNICON_E2E_URL`
 it is skipped, so `uv run pytest` stays a unit run. `UNICON_E2E_COMPOSE` is
