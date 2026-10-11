@@ -511,7 +511,10 @@ the app, so a sign-out leaves nobody signed in to Forgejo either; Forgejo takes
 a sign-out of its own only as a form post with its own token. Every forge
 page people see starts with a "Back to Unicon" link: to the proxy's
 `/-/back`, which sends them to the app's Account page, or for someone not
-signed in at the forge to `/-/home`, the app's home. The forge's own front
+signed in at the forge to `/-/home`, the app's home. The page asking them to
+approve an app also links to `/-/home`: they are signed in at the forge
+there but not yet in the app, whose Account page would lead them back to
+it. The forge's own front
 page, `/`, sends the browser to the app's sign-in and back to the app's
 home, which is where Forgejo sends a new account once its address is
 confirmed, so confirming lands the person in the app, signed in. Someone

@@ -1,4 +1,4 @@
 <nav class="unicon-back" aria-label="Unicon">
-	{{if .IsSigned}}<a href="{{AppSubUrl}}/-/back">&larr; Back to Unicon</a>{{else}}<a href="{{AppSubUrl}}/-/home">&larr; Back to Unicon</a>{{end}}
+	{{if and .IsSigned (not .Application)}}<a href="{{AppSubUrl}}/-/back">&larr; Back to Unicon</a>{{else}}<a href="{{AppSubUrl}}/-/home">&larr; Back to Unicon</a>{{end}}
 </nav>
 {{if and .Application (eq .Application.Name "Unicon")}}<p class="unicon-once">Unicon asks for this once, the first time you sign in. Approving it lets Unicon act for you in the contests you organise or enter.</p>{{end}}
