@@ -141,7 +141,7 @@ def leaderboards(page: Page, org: str) -> None:
     )
 
     form.get_by_role("button", name="Add a leaderboard").click()
-    added = form.get_by_role("group", name=re.compile("^Board 2"))
+    added = form.get_by_role("group", name=re.compile("^Leaderboard 2"))
     added.get_by_role("textbox", name="Name", exact=True).fill("ICPC")
     icpc = form.get_by_role("group", name="ICPC", exact=True)
     icpc.get_by_role("combobox", name="Shown to").select_option(label="Entrants")
@@ -151,7 +151,7 @@ def leaderboards(page: Page, org: str) -> None:
     then.get_by_role("textbox", name="Minutes per earlier attempt").fill("20")
 
     form.get_by_role("button", name="Add a leaderboard").click()
-    added = form.get_by_role("group", name=re.compile("^Board 3"))
+    added = form.get_by_role("group", name=re.compile("^Leaderboard 3"))
     added.get_by_role("textbox", name="Name", exact=True).fill("Final")
     final = form.get_by_role("group", name="Final", exact=True)
     final.get_by_role("combobox", name="Shown to").select_option(label="Entrants")
