@@ -130,11 +130,26 @@ jobs:
       - run: uv sync --frozen
         working-directory: deploy
 
+      # A buildx builder of the job's own, since Docker's own builder cannot
+      # keep layers in the Actions cache, and the Actions runtime's variables
+      # the cache is reached with, which a run step is otherwise not given.
+      # `use: false` leaves Docker's own builder the default, so compose
+      # builds the app as it did.
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069  # v4.4.1
+        id: buildx
+        with:
+          use: false
+      - uses: crazy-max/ghaction-github-runtime@04d248b84655b509d8c44dc1d6f990c879747487  # v4.0.0
+
       # Into a registry on localhost, for real digests; images.local.json
-      # then tells bootstrap what to seed the forge with.
+      # then tells bootstrap what to seed the forge with. Each image's layers
+      # are kept in the Actions cache, so a layer whose inputs did not change
+      # since an earlier run is not built again.
       - name: build the grading images
         working-directory: deploy
-        run: uv run scripts/build-images.py
+        env:
+          BUILDER: ${{ steps.buildx.outputs.name }}
+        run: uv run scripts/build-images.py --builder "$BUILDER" --gha-cache
 
       - name: bootstrap a fresh stack
         working-directory: deploy
