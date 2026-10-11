@@ -210,6 +210,36 @@
 }
 
 /*
+ * The way back to the app, in place of Forgejo's navigation bar
+ * (templates/custom/body_inner_pre.tmpl), and the line on Unicon's consent
+ * page saying it is asked once.
+ */
+.unicon-back {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px 16px 0;
+}
+
+.unicon-back a {
+  color: var(--color-primary);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.unicon-back a:hover,
+.unicon-back a:focus-visible {
+  text-decoration: underline;
+}
+
+.unicon-once {
+  max-width: 420px;
+  margin: 24px auto 0;
+  padding: 0 16px;
+  color: var(--color-text-light);
+  text-align: center;
+}
+
+/*
  * The settings menu lists every page Forgejo has, and the proxy routes three
  * of them (proxy/nginx.conf): Profile, Account and Security. Every other item
  * is hidden by default rather than by name, so a page a later Forgejo adds to

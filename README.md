@@ -288,8 +288,8 @@ forge that holds the same declaration is left as it is, and the run makes
 nothing. The two are compared as the compiler reads them, parsed under YAML
 1.2's core schema: the ports with their types and options, the limits with
 `gpus`, `limits_from`, `network` and `batch`. One that differs only in
-what the compiler does not read, its image, a `description`, a comment or
-the layout, is a patch release, a fixed image with the same ports, or a
+what the compiler does not read, its image, its `title`, its own or a port's
+`description`, a comment or the layout, is a patch release, a fixed image with the same ports, or a
 reworded one: bootstrap moves the tag to a commit of the release's files
 with the manifest's digest written in, and says `(moved)`. One whose
 declaration differs in anything the compiler reads stops the run. Bootstrap compares
@@ -308,15 +308,23 @@ public repository `unicon/<name>.workflow` with the topic
 `unicon-workflow`. Each of a workflow's versions is a folder in its own,
 `workflows/classic/v2/` and `workflows/classic-folder/v1/`, holding the `workflow.yaml` and `README.md`
 the version's tag holds, and bootstrap publishes each to its own tag by the
-same rule: a tag that is not there is made, one that is there is never
-edited, and one that differs from its folder stops the run the same way.
+same rule: a tag that is not there is made, and one that is there and holds
+the same files is left as it is. One whose definition differs only in what
+does not grade, an input's `title`, `help` or `unit`, a comment or the
+layout, or whose README differs, is moved to the new files, and the run
+says `(moved)`; so a version is fixed in how it grades, while the words a
+person reads at its tag can change. One whose definition differs in
+anything that grades stops the run the same way. The definitions are
+compared as the forge reads them: an input or test field written as a bare
+type, `time_limit: number`, is `{type: number}`, and a flag set `false` is
+one left out.
 `unicon/classic` is the built-in workflow: compile the submission, run it on
 every test, compare each output with the answer. `unicon/classic@v2`
 wires the primitives' `v2` in the format of `TASK-FORMAT.md`, with each
 test's `input` and `answer`, and reports the time and memory of every run.
 `unicon/classic-folder@v1` is classic over a folder of sources: the
 contestant gives a folder, its language and the entry point `compile@v2`
-starts from (`TASK-FORMAT.md` section 4.7). A changed definition is a new folder. Every primitive version a
+starts from (`TASK-FORMAT.md` section 4.7). A definition changed in how it grades is a new folder. Every primitive version a
 definition `use:`s has to be one the manifest pins: bootstrap refuses one
 that is not before it writes anything, since the forge would refuse every
 task saved against that workflow version.
@@ -508,7 +516,16 @@ pages, and people see them whenever the app sends them to the forge. Signing
 out of the app ends at the proxy's `/-/sign-out` on the forge's host, which
 clears Forgejo's `session` and `persistent` cookies and sends the browser back to
 the app, so a sign-out leaves nobody signed in to Forgejo either; Forgejo takes
-a sign-out of its own only as a form post with its own token. Someone
+a sign-out of its own only as a form post with its own token. Every forge
+page people see starts with a "Back to Unicon" link: to the proxy's
+`/-/back`, which sends them to the app's Account page, or for someone not
+signed in at the forge to `/-/home`, the app's home. The page asking them to
+approve an app also links to `/-/home`: they are signed in at the forge
+there but not yet in the app, whose Account page would lead them back to
+it. The forge's own front
+page, `/`, sends the browser to the app's sign-in and back to the app's
+home, which is where Forgejo sends a new account once its address is
+confirmed, so confirming lands the person in the app, signed in. Someone
 the operator made with `unicon create-account` also meets its page for
 changing the first password, at their first sign-in. What makes
 those pages look like Unicon is under `forgejo/custom/`, which compose mounts
@@ -525,9 +542,11 @@ read-only into Forgejo's custom path, `/data/gitea`:
   look.
   The font families are named with fallbacks only, and the page fetches
   nothing from outside.
-- `templates/custom/header.tmpl` is the one template, and it is Forgejo's
-  extension point rather than one of its pages: Forgejo includes it at the end
-  of `<head>`, and it carries the link to the stylesheet.
+- `templates/custom/header.tmpl` and `templates/custom/body_inner_pre.tmpl`
+  are Forgejo's extension points rather than its pages: Forgejo includes the
+  first at the end of `<head>`, where it links the stylesheet, and the second
+  at the top of every page's body, where it puts the "Back to Unicon" link
+  and, on Unicon's consent page, a line saying it is asked once.
 
 `forgejo/app.ini` turns off what those pages would offer and nothing here
 supports: deleting the account, which is Unicon's flow, SSH and GPG keys,
@@ -567,19 +586,25 @@ UNICON_E2E_URL=http://localhost:8080 uv run pytest tests/e2e
 
 `tests/e2e/test_submit_and_grade.py` drives Chromium through the running
 stack, both profiles up, from a new org to two verdicts. It makes an
-organiser and a contestant with `unicon create-account` and signs both in
+organiser and an entrant with `unicon create-account` and signs both in
 through Forgejo's pages. The organiser creates an org, a contest and a task
-from the organiser pages, opening each one's page as soon as it is made, saves `task.yaml` so the task publishes (with a
-looser submission rate than the starter's one per 30 seconds, so the second
-submit is not refused), checks that making the task added it to
-`contest.yaml`'s tasks, and saves `contest.yaml` so the contest is published
-and running. The contestant registers, the organiser approves them from the
-contestants table, and the contestant submits the sample solution and then a
-wrong one from the submit panel; the test expects `ACCEPTED` and then
+from the organiser pages' New buttons, opening each one's page as soon as it
+is made, saves the task from its page so it publishes (with a looser
+submission rate than the starter's one per 30 seconds, so the second submit
+is not refused), sets the contest running now in its settings and opens it
+from its status card. The entrant registers, the organiser approves them
+from the Entrants page, and the entrant submits the sample solution and then
+a wrong one from the submit panel; the test expects `ACCEPTED` and then
 `WRONG ANSWER` in their submissions list. Both are graded by the real CI on
 the dev agent, through the socket filter, with the primitives at the forge.
-Last, the contestant signs out, and signing in again asks Forgejo for their
-password: signing out of the app signed the browser out of Forgejo too.
+The organiser then replaces the task's test from its Tests card, publishes
+the change the running contest asks about, and the gradings feed shows the
+sample solution graded again. Last, the entrant signs out, and signing in
+again asks Forgejo for their password: signing out of the app signed the
+browser out of Forgejo too. Beside it, `test_boards.py` ranks a contest on
+three leaderboards built on its Leaderboards page, before and after a test
+group's reveal, and `test_workflows.py` builds a workflow in the editor,
+publishes and shares a version of it and grades with it.
 Every name carries a random suffix, so it runs again on the same stack
 without clearing anything; it takes about a minute. Without `UNICON_E2E_URL`
 it is skipped, so `uv run pytest` stays a unit run. `UNICON_E2E_COMPOSE` is

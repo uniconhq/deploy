@@ -20,17 +20,24 @@ Every primitive version a definition `use:`s has to be one the image
 manifest pins, or bootstrap refuses before it writes anything, since the
 forge would refuse every task saved against it.
 
-Bootstrap publishes every version folder to its own tag. A version is frozen:
-a tag already at the forge is left as it is, and one whose folder here has
-changed since stops the run before anything is seeded, naming it; a changed
-definition is a new folder. The one exception is a development stack, where
-bootstrap rewrites each version in place when it is run with --rewrite.
+Bootstrap publishes every version folder to its own tag. A version is frozen
+in what grades: a tag already at the forge is left as it is, and one whose
+definition here has changed since in anything the compiler reads stops the
+run before anything is seeded, naming it; such a change is a new folder. A
+change only to what the definition tells the task's form (an input's
+`title`, `help` and `unit`), to its comments or layout, or to the README
+changes nothing that grades, so it moves the tag to the new files instead.
+The one exception is a development stack, where bootstrap rewrites each
+version in place whatever differs when it is run with --rewrite.
 """
 
 from __future__ import annotations
 
 import re
 from pathlib import Path
+
+from bootstrap import core_yaml
+from bootstrap.platform_repos import PLATFORM_ORG, PlatformRepos
 
 WORKFLOW_TOPIC = "unicon-workflow"
 
@@ -96,6 +103,78 @@ def seed_files(directory: Path, name: str, version: str) -> dict[str, bytes]:
     """The files version `version` of the workflow `name` is seeded with."""
     root = directory / "workflows" / name / version
     return {path: (root / path).read_bytes() for path in SEED_FILES}
+
+
+FORM_TEXT = ("title", "help", "unit")
+"""What an input tells the task's form and nothing else."""
+
+
+def moves_in_place(
+    repos: PlatformRepos, name: str, version: str, files: dict[str, bytes]
+) -> bool:
+    """Whether the version at the forge holds other files than these that
+    grade alike: the same definition but for its inputs' form text, its
+    comments or its layout, whatever the README says. Read without writing
+    anything.
+    """
+    repo = repository(name)
+    commit = repos.versions(PLATFORM_ORG, repo).get(version)
+    if commit is None or repos.holds(PLATFORM_ORG, repo, commit, files, None):
+        return False
+    present = repos.read_file(PLATFORM_ORG, repo, DEFINITION, commit)
+    if present is None:
+        return False
+    read = graded(present)
+    return read is not None and read == graded(files[DEFINITION])
+
+
+def graded(definition: bytes) -> object | None:
+    """What grades of a definition: the document as the forge parses it,
+    without any input's form text, so a comment, the layout and that text
+    change nothing. The forge reads a declaration given as a bare type,
+    `time_limit: number`, as `{type: number}`, and a flag left out as
+    false, so both are read that way here. None when it does not parse as a
+    mapping.
+    """
+    try:
+        document = core_yaml.load(definition)
+    except core_yaml.YAMLError:
+        return None
+    if not isinstance(document, dict):
+        return None
+    for section, dropped in (("inputs", FORM_TEXT), ("test", ())):
+        declarations = document.get(section)
+        if isinstance(declarations, dict):
+            document[section] = {
+                key: _long_form(value, dropped) for key, value in declarations.items()
+            }
+    steps = document.get("steps")
+    if isinstance(steps, list):
+        document["steps"] = [_without(step, ()) for step in steps]
+    return document
+
+
+def _long_form(declared: object, dropped: tuple[str, ...]) -> object:
+    """A declaration as the forge reads it: a bare type name is `{type:
+    <name>}`, and a flag set false is the same as one left out; the parts
+    `dropped` are left out.
+    """
+    return _without(
+        {"type": declared} if isinstance(declared, str) else declared, dropped
+    )
+
+
+def _without(declared: object, dropped: tuple[str, ...]) -> object:
+    """A mapping without the parts `dropped` and without a flag set false,
+    which is the same as one left out; anything else as it is.
+    """
+    if not isinstance(declared, dict):
+        return declared
+    return {
+        part: held
+        for part, held in declared.items()
+        if part not in dropped and held is not False
+    }
 
 
 def primitives_used(definition: bytes) -> list[str]:
