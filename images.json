@@ -1,9 +1,9 @@
 {
   "images": {
-    "harness": "ghcr.io/uniconhq/harness@sha256:4e9836351b3c83a8c7ffe9f6d946c36e6cf15c62f8ebaf8cdd2909f0bb631df9",
-    "clone": "ghcr.io/uniconhq/clone@sha256:b2e4510fcd5918aa5c5a66e1c62a46cdffbc159416417c07b5bfe9af67d5c0fb",
-    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:8caa9b111dfb737707a796644b39ab9648c618b868ce219920c041c3458713a7",
-    "worker": "ghcr.io/uniconhq/worker@sha256:2d4046535d0791aa6c344647eb30fc45da3ffeb7cd649d1edad0c83dee6cdba3"
+    "harness": "ghcr.io/uniconhq/harness@sha256:93863bd64759c5f7e39e91946dddc0827346cdc5cf457ea72ead71f04d61d0d6",
+    "clone": "ghcr.io/uniconhq/clone@sha256:ed7658cf9c9262ced18ee1904adf6172f26c92f83d97af31497eea89d2179fa6",
+    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:79db4bb4a4e8a46f1eae99ce7be8815cfc55e1eb35f343591de12f41aa15a4ad",
+    "worker": "ghcr.io/uniconhq/worker@sha256:5df06c67654bff1346e6fdbfc2306f4116af9e1a12d389d11073220baee9b159"
   },
   "primitives": {
     "compile": {
@@ -31,10 +31,10 @@
         }
       },
       "v2": {
-        "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:9aa99d4b52bff18642b88659e4c35ecd39412bde64f49bd1e0cd5b360a03a57d",
+        "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:6a7882a824364be27443b78b49402ec70f74ff150cd0d9a7ac331656e7d9693b",
         "source": {
           "github": "uniconhq/primitive-sandbox-run",
-          "tag": "v2.0.0"
+          "tag": "v2.0.1"
         }
       }
     },

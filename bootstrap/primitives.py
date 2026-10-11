@@ -235,8 +235,9 @@ def moves_in_place(
 
 def compiled(declaration_bytes: bytes) -> object | None:
     """What the compiler reads of a declaration: the document as the forge
-    parses it, without its `image` and without any `description`, so a
-    comment, the layout and a description change nothing. None when it does
+    parses it, without its `image` and without the `description` of the
+    declaration or of any port, so a comment, the layout and a description
+    change nothing. None when it does
     not parse as a mapping.
     """
     try:
@@ -250,16 +251,30 @@ def compiled(declaration_bytes: bytes) -> object | None:
     )
 
 
-def _without_descriptions(value: object) -> object:
-    if isinstance(value, dict):
-        return {
-            key: _without_descriptions(held)
-            for key, held in value.items()
-            if key != "description"
-        }
-    if isinstance(value, list):
-        return [_without_descriptions(held) for held in value]
-    return value
+PORTS = ("inputs", "outputs")
+"""The keys whose mappings are ports by name, where a port may itself be
+named `description`."""
+
+
+def _without_descriptions(document: dict[str, object]) -> object:
+    """The declaration without its own `description` and without each
+    port's: a port named `description` is a port and stays.
+    """
+    found: dict[str, object] = {}
+    for key, value in document.items():
+        if key == "description":
+            continue
+        if key in PORTS and isinstance(value, dict):
+            value = {
+                name: (
+                    {part: held for part, held in port.items() if part != "description"}
+                    if isinstance(port, dict)
+                    else port
+                )
+                for name, port in value.items()
+            }
+        found[key] = value
+    return found
 
 
 def mirror(

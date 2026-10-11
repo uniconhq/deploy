@@ -27,6 +27,14 @@ of images.json whenever it is there. Run it from the deploy directory:
     uv run scripts/build-images.py
     uv run bootstrap
 
+The CI builds through a buildx builder of its own, `--builder NAME
+--gha-cache`, which reads each image's layers from the GitHub Actions cache
+and writes them back, under a scope per image, so a layer whose inputs did
+not change since an earlier run is not built again. The image is loaded into
+Docker and pushed from there, as a laptop's build is, so its digest is read
+the same way and Docker holds the image, which bootstrap then finds without
+a pull.
+
 A checkout is built as it is on disk, committed or not, so a change in a
 sibling is one build and one bootstrap away from a grading. An image whose
 build did not change keeps its digest, and bootstrap then changes nothing at
@@ -49,6 +57,7 @@ import subprocess
 import sys
 import time
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -84,15 +93,30 @@ def main(argv: list[str] | None = None) -> int:
         default=None,
         help="where the runner and primitive checkouts are. Default: beside deploy",
     )
+    parser.add_argument(
+        "--builder",
+        default=None,
+        help="the buildx builder to build with, the image loaded into Docker "
+        "from it before the push. Default: Docker's own",
+    )
+    parser.add_argument(
+        "--gha-cache",
+        action="store_true",
+        help="read and write each image's layers in the GitHub Actions cache; "
+        "needs --builder and the Actions runtime's variables",
+    )
     options = parser.parse_args(argv)
+    if options.gha_cache and options.builder is None:
+        parser.error("--gha-cache needs --builder: Docker's own cannot write to it")
     directory = options.directory.resolve()
     siblings = (options.siblings or directory.parent).resolve()
+    build = Build(builder=options.builder, gha_cache=options.gha_cache)
 
     try:
         released = _released_primitives(directory)
         _ensure_registry()
         built = {
-            name: _build(
+            name: build.image(
                 name,
                 context=siblings / "runner",
                 dockerfile=siblings / "runner" / "images" / name / "Dockerfile",
@@ -105,7 +129,7 @@ def main(argv: list[str] | None = None) -> int:
             version = _version_of(checkout)
             versions = dict(released.get(name, {}))
             versions[version] = {
-                "image": _build(
+                "image": build.image(
                     f"primitive-{name}",
                     context=checkout,
                     dockerfile=checkout / "Dockerfile",
@@ -208,24 +232,63 @@ def _ensure_registry() -> None:
     raise BuildFailed(f"the registry on {REGISTRY} did not answer within 60s")
 
 
-def _build(name: str, *, context: Path, dockerfile: Path) -> str:
-    """Build, push and return the image as a reference by digest."""
-    if not dockerfile.is_file():
-        raise BuildFailed(f"{dockerfile} is missing; is the checkout beside deploy?")
-    repository = f"{REGISTRY}/{NAMESPACE}/{name}"
-    print(f"building {repository}")
-    _docker(
-        f"build {name}",
-        "build",
-        "--provenance=false",
-        "--sbom=false",
-        "--file",
-        str(dockerfile),
-        "--tag",
-        f"{repository}:{TAG}",
-        str(context),
-        quiet=True,
-    )
+@dataclass(frozen=True)
+class Build:
+    """How an image is built: by Docker's own builder, or by a buildx builder
+    of `builder`'s name, loading the image into Docker, and with
+    `gha_cache` reading and writing its layers in the GitHub Actions cache.
+    """
+
+    builder: str | None = None
+    gha_cache: bool = False
+
+    def image(self, name: str, *, context: Path, dockerfile: Path) -> str:
+        """Build, push and return the image as a reference by digest."""
+        if not dockerfile.is_file():
+            raise BuildFailed(
+                f"{dockerfile} is missing; is the checkout beside deploy?"
+            )
+        repository = f"{REGISTRY}/{NAMESPACE}/{name}"
+        print(f"building {repository}")
+        _docker(
+            f"build {name}",
+            *self.command(name),
+            "--provenance=false",
+            "--sbom=false",
+            "--file",
+            str(dockerfile),
+            "--tag",
+            f"{repository}:{TAG}",
+            str(context),
+            quiet=True,
+        )
+        return _push(name, repository)
+
+    def command(self, name: str) -> list[str]:
+        """The docker command and the options that choose the builder and
+        the cache, ahead of the ones every build has.
+        """
+        if self.builder is None:
+            return ["build"]
+        command = ["buildx", "build", "--builder", self.builder, "--load"]
+        if self.gha_cache:
+            # A scope per image, since a scope holds one build's cache and
+            # each write replaces the last. A failed write costs the next
+            # run its reuse and nothing else, so it does not fail the build.
+            scope = f"scope=build-images-{name}"
+            command += [
+                "--cache-from",
+                f"type=gha,{scope}",
+                "--cache-to",
+                f"type=gha,{scope},mode=max,ignore-error=true",
+            ]
+        return command
+
+
+def _push(name: str, repository: str) -> str:
+    """Push the image built as `repository`'s dev tag and return it as a
+    reference by the digest the registry gave it.
+    """
     pushed = _docker(f"push {name}", "push", f"{repository}:{TAG}", quiet=True)
     digest = _PUSHED_DIGEST.search(pushed)
     if digest is None:
