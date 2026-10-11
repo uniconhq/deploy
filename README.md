@@ -288,8 +288,8 @@ forge that holds the same declaration is left as it is, and the run makes
 nothing. The two are compared as the compiler reads them, parsed under YAML
 1.2's core schema: the ports with their types and options, the limits with
 `gpus`, `limits_from`, `network` and `batch`. One that differs only in
-what the compiler does not read, its image, a `description`, a comment or
-the layout, is a patch release, a fixed image with the same ports, or a
+what the compiler does not read, its image, its `title`, its own or a port's
+`description`, a comment or the layout, is a patch release, a fixed image with the same ports, or a
 reworded one: bootstrap moves the tag to a commit of the release's files
 with the manifest's digest written in, and says `(moved)`. One whose
 declaration differs in anything the compiler reads stops the run. Bootstrap compares
@@ -308,15 +308,23 @@ public repository `unicon/<name>.workflow` with the topic
 `unicon-workflow`. Each of a workflow's versions is a folder in its own,
 `workflows/classic/v2/` and `workflows/classic-folder/v1/`, holding the `workflow.yaml` and `README.md`
 the version's tag holds, and bootstrap publishes each to its own tag by the
-same rule: a tag that is not there is made, one that is there is never
-edited, and one that differs from its folder stops the run the same way.
+same rule: a tag that is not there is made, and one that is there and holds
+the same files is left as it is. One whose definition differs only in what
+does not grade, an input's `title`, `help` or `unit`, a comment or the
+layout, or whose README differs, is moved to the new files, and the run
+says `(moved)`; so a version is fixed in how it grades, while the words a
+person reads at its tag can change. One whose definition differs in
+anything that grades stops the run the same way. The definitions are
+compared as the forge reads them: an input or test field written as a bare
+type, `time_limit: number`, is `{type: number}`, and a flag set `false` is
+one left out.
 `unicon/classic` is the built-in workflow: compile the submission, run it on
 every test, compare each output with the answer. `unicon/classic@v2`
 wires the primitives' `v2` in the format of `TASK-FORMAT.md`, with each
 test's `input` and `answer`, and reports the time and memory of every run.
 `unicon/classic-folder@v1` is classic over a folder of sources: the
 contestant gives a folder, its language and the entry point `compile@v2`
-starts from (`TASK-FORMAT.md` section 4.7). A changed definition is a new folder. Every primitive version a
+starts from (`TASK-FORMAT.md` section 4.7). A definition changed in how it grades is a new folder. Every primitive version a
 definition `use:`s has to be one the manifest pins: bootstrap refuses one
 that is not before it writes anything, since the forge would refuse every
 task saved against that workflow version.
