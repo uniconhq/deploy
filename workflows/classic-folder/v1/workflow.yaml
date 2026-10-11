@@ -6,11 +6,32 @@
 # the forge, at the tag v1. The format is TASK-FORMAT.md section 1.3, and
 # the workflow is section 4.7's.
 inputs:
-  program: {type: folder, contestant: true}
-  language: {type: enum, options: [c, cpp, java, python], contestant: true}
-  entry: {type: text, contestant: true}
-  time_limit: number
-  memory_limit: number
+  program:
+    type: folder
+    contestant: true
+    title: Program
+    help: The folder of source files the contestant submits.
+  language:
+    type: enum
+    options: [c, cpp, java, python]
+    contestant: true
+    title: Language
+    help: The languages a contestant may write their program in.
+  entry:
+    type: text
+    contestant: true
+    title: Entry point
+    help: The file in the program that runs first, such as main.py.
+  time_limit:
+    type: number
+    title: Time limit
+    unit: seconds
+    help: The CPU time the program may use on each test.
+  memory_limit:
+    type: number
+    title: Memory limit
+    unit: MB
+    help: The memory the program may use on each test.
 test:
   input: file
   answer: file

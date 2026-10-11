@@ -274,13 +274,19 @@ def test_a_new_image_with_other_ports_stops_the_run_before_anything_is_seeded(
     [
         NAMED.replace(b"# The compile primitive.", b"# Compiles a submission."),
         NAMED + b"description: Compiles a submission.\n",
+        NAMED + b"title: Compile\n",
         NAMED.replace(
             b"  source: {type: file}",
             b"  source:\n    type: file  # what the contestant sends\n"
             b"    description: the submission",
         ),
     ],
-    ids=["a comment", "a description", "a port's description and its layout"],
+    ids=[
+        "a comment",
+        "a description",
+        "a title",
+        "a port's description and its layout",
+    ],
 )
 def test_a_declaration_changed_in_nothing_the_compiler_reads_moves_the_version(
     tmp_path: Path, changed: bytes
