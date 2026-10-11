@@ -279,6 +279,59 @@ def test_rewrite_moves_each_version_that_differs(tmp_path: Path) -> None:
     assert forge.writes() == []
 
 
+def _without_form_text(definition: bytes) -> bytes:
+    """classic's definition as it was before its inputs gave the task's form
+    a title, help and unit.
+    """
+    kept = [
+        line
+        for line in definition.decode().splitlines(keepends=True)
+        if line.strip().split(":")[0] not in ("title", "help", "unit")
+    ]
+    return "".join(kept).encode()
+
+
+@pytest.mark.parametrize(
+    "older",
+    [
+        {**_v2(), "workflow.yaml": _without_form_text(_v2()["workflow.yaml"])},
+        {**_v2(), "README.md": b"# classic, as it read before\n"},
+    ],
+    ids=["its inputs' form text", "its README"],
+)
+def test_a_version_changed_in_nothing_that_grades_moves_to_the_new_files(
+    older: dict[str, bytes],
+) -> None:
+    forge = FakeForgejo()
+    repo = forge.seed(FULL, older, tags=("v2",), topics=("unicon-workflow",))
+    before = repo.tags["v2"]
+
+    summary = _seed(forge)
+
+    assert repo.tags["v2"] != before
+    assert repo.files_at("v2") == _v2()
+    assert before in repo.commits
+    assert any(
+        f"workflow {ORG}/{CLASSIC} version v2" in line and "moved" in line
+        for line in summary.lines()
+    )
+    forge.requests.clear()
+    _seed(forge)
+    assert forge.writes() == []
+
+
+def test_a_version_changed_in_what_grades_still_stops_the_run() -> None:
+    forge = FakeForgejo()
+    changed = _v2()["workflow.yaml"].replace(b"fold: max", b"fold: sum", 1)
+    forge.seed(FULL, {**_v2(), "workflow.yaml": changed}, tags=("v2",))
+    forge.requests.clear()
+
+    with pytest.raises(main.DifferingVersions, match=f"{ORG}/{CLASSIC}@v2"):
+        _seed(forge)
+
+    assert forge.writes() == []
+
+
 def test_the_mark_is_added_beside_topics_already_there() -> None:
     forge = FakeForgejo()
     repo = forge.seed(FULL, topics=("other",))
@@ -352,6 +405,30 @@ def test_v2_wires_the_v2_primitives_over_tests_and_reports() -> None:
         "unicon/diff-check@v2",
     ]
     at = definition.index
+    assert definition[at("inputs:") : at("test:")] == [
+        "inputs:",
+        "  submission:",
+        "    type: file",
+        "    contestant: true",
+        "    title: Solution",
+        "    help: The source file the contestant submits.",
+        "  language:",
+        "    type: enum",
+        "    options: [c, cpp, java, python]",
+        "    contestant: true",
+        "    title: Language",
+        "    help: The languages a contestant may write their solution in.",
+        "  time_limit:",
+        "    type: number",
+        "    title: Time limit",
+        "    unit: seconds",
+        "    help: The CPU time the program may use on each test.",
+        "  memory_limit:",
+        "    type: number",
+        "    title: Memory limit",
+        "    unit: MB",
+        "    help: The memory the program may use on each test.",
+    ]
     assert definition[at("test:") : at("test:") + 3] == [
         "test:",
         "  input: file",
@@ -364,8 +441,6 @@ def test_v2_wires_the_v2_primitives_over_tests_and_reports() -> None:
         "  log: ${{ steps.compile.compile_log }}",
     ]
     for wiring in (
-        "  submission: {type: file, contestant: true}",
-        "  language: {type: enum, options: [c, cpp, java, python], contestant: true}",
         "      source: ${{ inputs.submission }}",
         "      language: ${{ inputs.language }}",
         "      binary: ${{ steps.compile.binary }}",
@@ -461,9 +536,20 @@ def test_classic_folder_compiles_a_folder_from_its_entry_with_the_v2_primitives(
         "unicon/sandbox-run@v2",
         "unicon/diff-check@v2",
     ]
+    at = definition.index
+    assert definition[at("  program:") : at("  language:")] == [
+        "  program:",
+        "    type: folder",
+        "    contestant: true",
+        "    title: Program",
+        "    help: The folder of source files the contestant submits.",
+    ]
+    assert definition[at("  entry:") : at("  entry:") + 3] == [
+        "  entry:",
+        "    type: text",
+        "    contestant: true",
+    ]
     for wiring in (
-        "  program: {type: folder, contestant: true}",
-        "  entry: {type: text, contestant: true}",
         "      source: ${{ inputs.program }}",
         "      entry: ${{ inputs.entry }}",
         "      binary: ${{ steps.compile.binary }}",
