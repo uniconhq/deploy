@@ -7,7 +7,7 @@ only once the task closes, so `main` and `final` each carry 50 of the
 task's 100 points, and builds the contest's three leaderboards on its
 Leaderboards page: `IOI`, on points, shown to everyone; `ICPC`, on points
 and then penalty at 20 minutes an earlier attempt, shown to entrants; and
-`Final`, over the results shown after the contest ends, counting the
+`Final`, over the results shown once the task closes, counting the
 submission each entrant marked, shown to entrants. Two people register
 and are approved; the second, the rival, has a browser whose clock is
 three hours fast, and reads the task's countdown by Unicon's clock all the
@@ -156,7 +156,7 @@ def leaderboards(page: Page, org: str) -> None:
     final = form.get_by_role("group", name="Final", exact=True)
     final.get_by_role("combobox", name="Shown to").select_option(label="Entrants")
     final.get_by_role("combobox", name="Counts", exact=True).select_option(
-        label="Results shown after the contest ends"
+        "after_close"
     )
     final.get_by_role("combobox", name="Which submission counts").select_option(
         label="Best of the submissions an entrant marks"
