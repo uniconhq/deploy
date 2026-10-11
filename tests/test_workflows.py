@@ -24,6 +24,7 @@ from bootstrap.summary import Summary
 from bootstrap.workflows import (
     CLASSIC,
     WorkflowError,
+    graded,
     primitives_used,
     seed_files,
     seed_versions,
@@ -318,6 +319,67 @@ def test_a_version_changed_in_nothing_that_grades_moves_to_the_new_files(
     forge.requests.clear()
     _seed(forge)
     assert forge.writes() == []
+
+
+RELEASED = Path(__file__).resolve().parent / "released" / "v0.7.1"
+"""Each built-in workflow version as deploy v0.7.1 published it, copied
+byte for byte from that tag: its inputs are written in the short form,
+`time_limit: number`, as the stacks bootstrapped from it hold them.
+"""
+
+
+def _released(name: str, version: str) -> dict[str, bytes]:
+    root = RELEASED / name / version
+    return {path: (root / path).read_bytes() for path in ("workflow.yaml", "README.md")}
+
+
+def test_the_versions_v0_7_1_published_move_to_their_inputs_form_text() -> None:
+    forge = FakeForgejo()
+    classic = forge.seed(
+        FULL, _released(CLASSIC, "v2"), tags=("v2",), topics=("unicon-workflow",)
+    )
+    folder = forge.seed(
+        f"{ORG}/{FOLDER}.workflow",
+        _released(FOLDER, "v1"),
+        tags=("v1",),
+        topics=("unicon-workflow",),
+    )
+
+    summary = _seed(forge)
+
+    assert classic.files_at("v2") == _v2()
+    assert folder.files_at("v1") == seed_files(DEPLOY, FOLDER, "v1")
+    for name, version in ((CLASSIC, "v2"), (FOLDER, "v1")):
+        assert any(
+            f"workflow {ORG}/{name} version {version}" in line and "moved" in line
+            for line in summary.lines()
+        )
+
+
+@pytest.mark.parametrize(
+    ("older", "newer"),
+    [
+        (b"inputs:\n  limit: number\n", b"inputs:\n  limit: {type: number, unit: s}\n"),
+        (b"test:\n  answer: file\n", b"test:\n  answer: {type: file}\n"),
+        (
+            b"inputs:\n  limit: number\n",
+            b"inputs:\n  limit: {type: number, optional: false}\n",
+        ),
+        (
+            b"steps:\n  - {id: a, use: x}\n",
+            b"steps:\n  - {id: a, use: x, per_test: false}\n",
+        ),
+    ],
+    ids=["a short input", "a short test field", "a false flag", "a false step flag"],
+)
+def test_a_declaration_reads_as_the_forge_reads_it(older: bytes, newer: bytes) -> None:
+    assert graded(older) == graded(newer)
+
+
+def test_a_flag_set_true_still_grades_differently() -> None:
+    assert graded(b"inputs:\n  limit: number\n") != graded(
+        b"inputs:\n  limit: {type: number, optional: true}\n"
+    )
 
 
 def test_a_version_changed_in_what_grades_still_stops_the_run() -> None:

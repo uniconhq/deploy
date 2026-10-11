@@ -131,7 +131,10 @@ def moves_in_place(
 def graded(definition: bytes) -> object | None:
     """What grades of a definition: the document as the forge parses it,
     without any input's form text, so a comment, the layout and that text
-    change nothing. None when it does not parse as a mapping.
+    change nothing. The forge reads a declaration given as a bare type,
+    `time_limit: number`, as `{type: number}`, and a flag left out as
+    false, so both are read that way here. None when it does not parse as a
+    mapping.
     """
     try:
         document = core_yaml.load(definition)
@@ -139,17 +142,39 @@ def graded(definition: bytes) -> object | None:
         return None
     if not isinstance(document, dict):
         return None
-    inputs = document.get("inputs")
-    if isinstance(inputs, dict):
-        document["inputs"] = {
-            key: (
-                {part: held for part, held in declared.items() if part not in FORM_TEXT}
-                if isinstance(declared, dict)
-                else declared
-            )
-            for key, declared in inputs.items()
-        }
+    for section, dropped in (("inputs", FORM_TEXT), ("test", ())):
+        declarations = document.get(section)
+        if isinstance(declarations, dict):
+            document[section] = {
+                key: _long_form(value, dropped) for key, value in declarations.items()
+            }
+    steps = document.get("steps")
+    if isinstance(steps, list):
+        document["steps"] = [_without(step, ()) for step in steps]
     return document
+
+
+def _long_form(declared: object, dropped: tuple[str, ...]) -> object:
+    """A declaration as the forge reads it: a bare type name is `{type:
+    <name>}`, and a flag set false is the same as one left out; the parts
+    `dropped` are left out.
+    """
+    return _without(
+        {"type": declared} if isinstance(declared, str) else declared, dropped
+    )
+
+
+def _without(declared: object, dropped: tuple[str, ...]) -> object:
+    """A mapping without the parts `dropped` and without a flag set false,
+    which is the same as one left out; anything else as it is.
+    """
+    if not isinstance(declared, dict):
+        return declared
+    return {
+        part: held
+        for part, held in declared.items()
+        if part not in dropped and held is not False
+    }
 
 
 def primitives_used(definition: bytes) -> list[str]:
