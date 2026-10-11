@@ -508,7 +508,13 @@ pages, and people see them whenever the app sends them to the forge. Signing
 out of the app ends at the proxy's `/-/sign-out` on the forge's host, which
 clears Forgejo's `session` and `persistent` cookies and sends the browser back to
 the app, so a sign-out leaves nobody signed in to Forgejo either; Forgejo takes
-a sign-out of its own only as a form post with its own token. Someone
+a sign-out of its own only as a form post with its own token. Every forge
+page people see starts with a "Back to Unicon" link: to the proxy's
+`/-/back`, which sends them to the app's Account page, or for someone not
+signed in at the forge to `/-/home`, the app's home. The forge's own front
+page, `/`, sends the browser to the app's sign-in and back to the app's
+home, which is where Forgejo sends a new account once its address is
+confirmed, so confirming lands the person in the app, signed in. Someone
 the operator made with `unicon create-account` also meets its page for
 changing the first password, at their first sign-in. What makes
 those pages look like Unicon is under `forgejo/custom/`, which compose mounts
@@ -525,9 +531,11 @@ read-only into Forgejo's custom path, `/data/gitea`:
   look.
   The font families are named with fallbacks only, and the page fetches
   nothing from outside.
-- `templates/custom/header.tmpl` is the one template, and it is Forgejo's
-  extension point rather than one of its pages: Forgejo includes it at the end
-  of `<head>`, and it carries the link to the stylesheet.
+- `templates/custom/header.tmpl` and `templates/custom/body_inner_pre.tmpl`
+  are Forgejo's extension points rather than its pages: Forgejo includes the
+  first at the end of `<head>`, where it links the stylesheet, and the second
+  at the top of every page's body, where it puts the "Back to Unicon" link
+  and, on Unicon's consent page, a line saying it is asked once.
 
 `forgejo/app.ini` turns off what those pages would offer and nothing here
 supports: deleting the account, which is Unicon's flow, SSH and GPG keys,
