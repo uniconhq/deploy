@@ -1,0 +1,39 @@
+# unicon/classic-folder@v1, the built-in workflow for a program of several
+# files: compile the contestant's folder of sources once, starting from the
+# entry point they name, run the program on every test under the task's
+# limits, and compare each run's output with that test's answer. Seeded by
+# `uv run bootstrap` into the repository unicon/classic-folder.workflow at
+# the forge, at the tag v1. The format is TASK-FORMAT.md section 1.3, and
+# the workflow is section 4.7's.
+inputs:
+  program: {type: folder, contestant: true}
+  language: {type: enum, options: [c, cpp, java, python], contestant: true}
+  entry: {type: text, contestant: true}
+  time_limit: number
+  memory_limit: number
+test:
+  input: file
+  answer: file
+steps:
+  - id: compile
+    use: unicon/compile@v2
+    with:
+      source: ${{ inputs.program }}
+      entry: ${{ inputs.entry }}
+      language: ${{ inputs.language }}
+  - id: run
+    use: unicon/sandbox-run@v2
+    per_test: true
+    with:
+      binary: ${{ steps.compile.binary }}
+      input: ${{ test.input }}
+      time_limit: ${{ inputs.time_limit }}
+      memory_limit: ${{ inputs.memory_limit }}
+  - id: check
+    use: unicon/diff-check@v2
+    per_test: true
+    with: {actual: "${{ steps.run.output }}", expected: "${{ test.answer }}"}
+report:
+  time_ms: {from: "${{ steps.run.time_ms }}", fold: max, better: lower, at_least: 0}
+  memory_kb: {from: "${{ steps.run.memory_kb }}", fold: max, better: lower, at_least: 0}
+  log: ${{ steps.compile.compile_log }}

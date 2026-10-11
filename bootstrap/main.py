@@ -80,6 +80,7 @@ from bootstrap.platform_repos import (
     Outcome,
     PlatformRepos,
     Standing,
+    move,
     publish,
     standing,
 )
@@ -623,7 +624,9 @@ def _seed_platform(
     Every version is compared with the forge first, so that any that differs
     stops the run before anything is seeded, unless `rewrite`. A primitive
     version whose declaration differs only where the compiler does not read,
-    its image, a description or a comment, is not one of them: it moves.
+    its image, a title, a description or a comment, is not one of them: it
+    moves. Nor is a workflow version whose files differ only in its inputs'
+    form text, a comment or its README.
     """
     repos = PlatformRepos(
         Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]
@@ -653,6 +656,7 @@ def _seed_platform(
                     repos, PLATFORM_ORG, workflows.repository(name), version, files
                 )
                 is Standing.DIFFERENT
+                and not workflows.moves_in_place(repos, name, version, files)
             ],
         )
 
@@ -703,15 +707,26 @@ def _seed_workflow(
         repos.ensure_repository(PLATFORM_ORG, workflow_repo),
     )
     for version, files in versions.items():
-        outcome = publish(
-            repos,
-            PLATFORM_ORG,
-            workflow_repo,
-            version,
-            files,
-            message=f"Seed {workflow}@{version}",
-            rewrite=rewrite,
-        )
+        if workflows.moves_in_place(repos, name, version, files):
+            move(
+                repos,
+                PLATFORM_ORG,
+                workflow_repo,
+                version,
+                files,
+                message=f"Move {workflow}@{version} to text that grades alike",
+            )
+            outcome = Outcome.MOVED
+        else:
+            outcome = publish(
+                repos,
+                PLATFORM_ORG,
+                workflow_repo,
+                version,
+                files,
+                message=f"Seed {workflow}@{version}",
+                rewrite=rewrite,
+            )
         _record_version(summary, f"workflow {workflow}", version, outcome)
     summary.record(
         f"workflow {workflow} mark {workflows.WORKFLOW_TOPIC}",

@@ -228,6 +228,13 @@ jobs:
           expect 404 "$app/index.html"
           expect 200 "$forge/user/login"
           expect 200 "$forge/assets/css/unicon.css"
+          expect 302 "$forge/"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/")" = "$app/api/v1/auth/login?next=/"
+          expect 302 "$forge/-/back"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/-/back")" = "$app/account"
+          expect 302 "$forge/-/home"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/-/home")" = "$app/"
+          curl -fsS $resolve "$forge/user/login" | grep -q 'href="/-/home"'
           expect 303 "$forge/user/settings"
           expect 303 "$forge/user/settings/change_password"
           expect 303 "$forge/login/oauth/authorize"
@@ -399,7 +406,7 @@ jobs:
           ) < /dev/null > "$RUNNER_TEMP/live-tests.log" 2>&1 &
 
       # A browser from a new org to two verdicts: the organiser pages, the
-      # contestant's registration and approval, the submit panel, and a real
+      # entrant's registration and approval, the submit panel, and a real
       # grading run on the dev agent for the sample solution and a wrong one.
       - name: submit and grade from the browser
         working-directory: deploy
@@ -445,19 +452,27 @@ jobs:
 
       # A version folder that no longer matches its tag at the forge stops
       # bootstrap before it seeds anything, naming the version.
+      # A version that differs in how it grades stops the run; one that
+      # differs only in words (its README, its inputs' form text) moves.
       - name: a changed version stops bootstrap
         working-directory: deploy
         run: |
-          cp workflows/classic/v2/README.md readme.saved
-          echo "changed" >> workflows/classic/v2/README.md
+          cp workflows/classic/v2/workflow.yaml workflow.saved
+          sed -i '0,/fold: max/s//fold: sum/' workflows/classic/v2/workflow.yaml
           if uv run bootstrap > changed-run.txt; then
             cat changed-run.txt
             echo "bootstrap seeded over a version that differs"
             exit 1
           fi
-          cp readme.saved workflows/classic/v2/README.md
+          cp workflow.saved workflows/classic/v2/workflow.yaml
           cat changed-run.txt
           grep -q 'unicon/classic@v2, against workflows/classic/v2/' changed-run.txt
+          cp workflows/classic/v2/README.md readme.saved
+          echo "Reworded." >> workflows/classic/v2/README.md
+          uv run bootstrap > reworded-run.txt
+          cat reworded-run.txt
+          grep -q 'workflow unicon/classic version v2.*moved' reworded-run.txt
+          cp readme.saved workflows/classic/v2/README.md
 
       # After the browser test, which signs in from this machine too. A burst
       # of 300 sign-in posts from one address: 240 over the rate pass at once,

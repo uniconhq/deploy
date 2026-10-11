@@ -1,22 +1,22 @@
-"""Run a contest from the organiser's forms and grade on the running
-compose stack, from the browser.
+"""Run a contest from the organiser's pages and grade on the running compose
+stack, from the browser.
 
-An organiser and a contestant, each made with the operator's command and
+An organiser and an entrant, each made with the operator's command and
 signed in through Forgejo's own pages. The organiser creates an org, a
-contest and a task from the organiser pages, sets the task's submission
-rate in the task's settings form so the task publishes, and publishes the
-contest, running now, from the contest's settings form. The contestant
-registers, the organiser approves them from the contestants table, and the
-contestant submits the task's sample solution and then a wrong one from the
-submit panel. The first comes back `accepted` and the second
-`wrong_answer`, graded by the real CI, a real grading machine and the
-primitives at the forge. The organiser then uploads a new input for the
-task's test through the upload door and saves it in; since the contest is
-running and the data grades, the save asks first, the organiser publishes
-the change, and every submission is graded again, which the contest's
-gradings feed shows as a second attempt of the sample solution, accepted.
-Then the contestant signs out, and signing in again asks Forgejo for their
-password: signing out of the app signed the browser out of Forgejo too.
+contest and a task from the organiser pages, checks the task grades with
+unicon/classic@v2, sets its submission rate on the task's page so the task
+publishes, sets the contest running now from its settings and opens it
+from its status card. The entrant registers, the organiser approves them
+from the Entrants page, and the entrant submits the task's sample solution
+and then a wrong one from the submit panel. The first comes back accepted
+and the second wrong answer, graded by the real CI, a real grading machine
+and the primitives at the forge. The organiser then replaces the input of
+the task's test from its Tests card; since the contest is running and the
+test grades, the save asks first, the organiser publishes the change, and
+every submission is graded again, which the contest's gradings feed shows
+as a second attempt of the sample solution, accepted. Then the entrant
+signs out, and signing in again asks Forgejo for their password: signing
+out of the app signed the browser out of Forgejo too.
 
 It runs against a stack that is already up with both profiles, `app` and
 `agent`, and is skipped unless `UNICON_E2E_URL` names the app, for example
@@ -40,14 +40,20 @@ from tests.e2e.stack import (
     SAMPLE,
     VERDICT_TIMEOUT_MS,
     WRONG,
+    approve,
+    contest_settings,
     create,
     create_account,
+    create_org,
     local,
     needs_stack,
-    open_settings,
+    open_contest,
+    register,
+    replace_test,
+    save_task,
     sign_in,
+    submission_rate,
     submit,
-    upload_into_task,
     verdict_of,
 )
 
@@ -56,72 +62,59 @@ pytestmark = [needs_stack]
 
 def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> None:
     stamp = secrets.token_hex(3)
-    organiser_name, contestant_name = f"e2e-o-{stamp}", f"e2e-c-{stamp}"
+    organiser_name, entrant_name = f"e2e-o-{stamp}", f"e2e-c-{stamp}"
     org = f"e2e-org-{stamp}"
     organiser_password = create_account(organiser_name)
-    contestant_password = create_account(contestant_name)
+    entrant_password = create_account(entrant_name)
 
     viewport: ViewportSize = {"width": 1280, "height": 900}
     organiser = browser.new_context(viewport=viewport).new_page()
-    contestant = browser.new_context(viewport=viewport).new_page()
-    for page in (organiser, contestant):
+    entrant = browser.new_context(viewport=viewport).new_page()
+    for page in (organiser, entrant):
         page.set_default_timeout(30_000)
 
     sign_in(organiser, organiser_name, organiser_password)
-    organiser.goto(f"{APP}/orgs/new")
-    create(organiser, org, "Create org")
+    create_org(organiser, org)
     create(organiser, "spring", "Create contest", "New contest")
-    contest_page = organiser.url
     create(organiser, "sum", "Create task", "New task")
 
     task_page = organiser.url
-    settings = open_settings(organiser, "Task settings")
-    expect(settings.get_by_label("Workflow")).to_have_value("unicon/classic@v2")
-    expect(settings.get_by_label("Rate: count")).to_have_value("")
-    settings.get_by_label("Rate: count").fill("10")
-    settings.get_by_label("Rate: per seconds").fill("60")
-    settings.get_by_role("button", name="Save settings").click()
-    expect(
-        organiser.get_by_text(re.compile(r"Published as publication \d+\."))
-    ).to_be_visible()
-
-    organiser.goto(contest_page)
-    now = datetime.now(UTC).replace(second=0, microsecond=0)
-    settings = open_settings(organiser, "Contest settings")
-    settings.get_by_label("Name", exact=True).fill(f"Spring {stamp}")
-    settings.get_by_label("State", exact=True).select_option("published")
-    settings.get_by_label("Start", exact=True).fill(local(now - timedelta(hours=1)))
-    settings.get_by_label("End", exact=True).fill(local(now + timedelta(hours=3)))
-    settings.get_by_role("button", name="Save settings").click()
-    expect(organiser.get_by_text(re.compile(r"Saved as version"))).to_be_visible()
-
-    sign_in(contestant, contestant_name, contestant_password)
-    contestant.goto(f"{APP}/contests/{org}/spring")
-    contestant.get_by_role("button", name="Register").click()
-    expect(contestant.get_by_text("Your registration is waiting")).to_be_visible()
-
-    organiser.goto(f"{APP}/orgs/{org}/contests/spring/contestants")
-    expect(organiser.get_by_role("table", name="Registrations")).to_be_visible()
-    organiser.get_by_role("button", name=re.compile("^Approve")).click()
-    expect(organiser.get_by_text("Approved")).to_be_visible()
-
-    expect(contestant.get_by_text("You are in")).to_be_visible(
-        timeout=CREATE_TIMEOUT_MS
+    workflow = organiser.get_by_role("region", name="Workflow")
+    expect(workflow.get_by_role("link", name="Open unicon/classic@v2")).to_be_visible()
+    rules = organiser.get_by_role("region", name="Submission rules")
+    expect(rules.get_by_role("textbox", name="Submissions in a window")).to_have_value(
+        ""
     )
-    contestant.goto(f"{APP}/contests/{org}/spring/tasks/sum")
-    expect(contestant.get_by_role("form", name="Submit")).to_be_visible()
+    submission_rate(organiser, 10, 60)
+    save_task(organiser)
 
-    submit(contestant, 1, SAMPLE)
-    assert verdict_of(contestant, 1) == "ACCEPTED"
-    submit(contestant, 2, WRONG)
-    assert verdict_of(contestant, 2) == "WRONG ANSWER"
+    now = datetime.now(UTC).replace(second=0, microsecond=0)
+    contest_settings(
+        organiser,
+        org,
+        "spring",
+        Name=f"Spring {stamp}",
+        Start=local(now - timedelta(hours=1)),
+        End=local(now + timedelta(hours=3)),
+    )
+    open_contest(organiser, org, "spring")
 
-    organiser.goto(task_page)
-    upload_into_task(organiser, "tests/main/1/input", b"2 1\n")
-    organiser.get_by_role("button", name="Publish the change").click()
-    expect(
-        organiser.get_by_text(re.compile(r"Published as publication \d+\."))
-    ).to_be_visible()
+    sign_in(entrant, entrant_name, entrant_password)
+    register(entrant, org, "spring")
+    approve(organiser, org, "spring", entrant_name)
+
+    expect(entrant.get_by_text("You are in")).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    entrant.goto(f"{APP}/contests/{org}/spring/tasks/sum")
+    expect(entrant.get_by_role("form", name="Submit")).to_be_visible()
+
+    submit(entrant, 1, SAMPLE)
+    assert verdict_of(entrant, 1) == "ACCEPTED"
+    submit(entrant, 2, WRONG)
+    assert verdict_of(entrant, 2) == "WRONG ANSWER"
+
+    organiser.goto(f"{task_page}?card=tests")
+    replace_test(organiser, "main", "1", {"input": b"2 1\n"})
+    save_task(organiser)
 
     organiser.goto(f"{APP}/orgs/{org}/contests/spring/gradings")
     first = (
@@ -130,15 +123,15 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
         .filter(has_text="Submission 1")
         .filter(has_text="Show earlier attempts (1)")
     )
-    expect(first).to_contain_text("accepted", timeout=VERDICT_TIMEOUT_MS)
+    expect(first).to_contain_text("ACCEPTED", timeout=VERDICT_TIMEOUT_MS)
 
-    contestant.get_by_role("button", name="Account menu").click()
-    with contestant.expect_event("load"):
-        contestant.get_by_role("menuitem", name="Sign out").click()
-    assert contestant.url == f"{APP}/"
-    contestant.goto(f"{APP}/login?next=%2F")
-    contestant.get_by_role("main").get_by_role(
+    entrant.get_by_role("button", name="Account menu").click()
+    with entrant.expect_event("load"):
+        entrant.get_by_role("menuitem", name="Sign out").click()
+    assert entrant.url == f"{APP}/"
+    entrant.goto(f"{APP}/login?next=%2F")
+    entrant.get_by_role("main").get_by_role(
         "link", name=re.compile("sign in", re.I)
     ).first.click()
-    contestant.wait_for_url(re.compile(r"/user/login"))
-    expect(contestant.locator('input[name="password"]')).to_be_visible()
+    entrant.wait_for_url(re.compile(r"/user/login"))
+    expect(entrant.locator('input[name="password"]')).to_be_visible()
