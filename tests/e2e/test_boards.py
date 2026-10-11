@@ -280,8 +280,9 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
 
     # A close is refused before a submission already made, and the field
     # takes whole minutes: the task closes at the first minute after the
-    # last submission, once that minute has come.
-    reveal = datetime.now(UTC).replace(second=0, microsecond=0) + timedelta(minutes=1)
+    # last submission, the rival's, once that minute has come.
+    last = submitted_at(rival, org, 1)
+    reveal = last.replace(second=0, microsecond=0) + timedelta(minutes=1)
     time.sleep(max(0.0, (reveal - datetime.now(UTC)).total_seconds()) + 1)
     organiser.goto(contest_page)
     settings = open_settings(organiser, "Contest settings")
