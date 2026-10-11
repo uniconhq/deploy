@@ -568,3 +568,23 @@ def test_an_archive_naming_a_path_outside_the_repository_is_refused(
 
     with pytest.raises(PrimitiveError, match="not a path inside"):
         primitives.source_files(release)
+
+
+def test_a_port_named_description_is_a_port_and_its_change_stops_the_run(
+    tmp_path: Path,
+) -> None:
+    """Only a description of the declaration or of a port is passed over; a
+    port may itself be named `description`."""
+    forge = FakeForgejo()
+    with_port = NAMED + b"  description: {type: text}\n"
+    checkout = _compile(tmp_path, **{"primitive.yaml": with_port})
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    (checkout / "primitive.yaml").write_bytes(
+        with_port.replace(b"description: {type: text}", b"description: {type: number}")
+    )
+    forge.requests.clear()
+
+    with pytest.raises(main.DifferingVersions, match="unicon/compile@v1"):
+        _seed(forge, _manifest(("v1", checkout, OTHER)))
+
+    assert forge.writes() == []
