@@ -228,6 +228,13 @@ jobs:
           expect 404 "$app/index.html"
           expect 200 "$forge/user/login"
           expect 200 "$forge/assets/css/unicon.css"
+          expect 302 "$forge/"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/")" = "$app/api/v1/auth/login?next=/"
+          expect 302 "$forge/-/back"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/-/back")" = "$app/account"
+          expect 302 "$forge/-/home"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/-/home")" = "$app/"
+          curl -fsS $resolve "$forge/user/login" | grep -q 'href="/-/home"'
           expect 303 "$forge/user/settings"
           expect 303 "$forge/user/settings/change_password"
           expect 303 "$forge/login/oauth/authorize"
