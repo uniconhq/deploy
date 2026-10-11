@@ -452,19 +452,27 @@ jobs:
 
       # A version folder that no longer matches its tag at the forge stops
       # bootstrap before it seeds anything, naming the version.
+      # A version that differs in how it grades stops the run; one that
+      # differs only in words (its README, its inputs' form text) moves.
       - name: a changed version stops bootstrap
         working-directory: deploy
         run: |
-          cp workflows/classic/v2/README.md readme.saved
-          echo "changed" >> workflows/classic/v2/README.md
+          cp workflows/classic/v2/workflow.yaml workflow.saved
+          sed -i '0,/fold: max/s//fold: sum/' workflows/classic/v2/workflow.yaml
           if uv run bootstrap > changed-run.txt; then
             cat changed-run.txt
             echo "bootstrap seeded over a version that differs"
             exit 1
           fi
-          cp readme.saved workflows/classic/v2/README.md
+          cp workflow.saved workflows/classic/v2/workflow.yaml
           cat changed-run.txt
           grep -q 'unicon/classic@v2, against workflows/classic/v2/' changed-run.txt
+          cp workflows/classic/v2/README.md readme.saved
+          echo "Reworded." >> workflows/classic/v2/README.md
+          uv run bootstrap > reworded-run.txt
+          cat reworded-run.txt
+          grep -q 'workflow unicon/classic version v2.*moved' reworded-run.txt
+          cp readme.saved workflows/classic/v2/README.md
 
       # After the browser test, which signs in from this machine too. A burst
       # of 300 sign-in posts from one address: 240 over the rate pass at once,
