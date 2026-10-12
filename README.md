@@ -230,6 +230,18 @@ refusals name the object store's address in them, so every answer but a
 success and the size refusal becomes a bare 403. The door is on the app's own
 origin, so it needs no CORS and the session cookie goes with it.
 
+Downloads come back the same way. `/-/downloads/<org>/<contest>/<task>/<number>/files/...`
+is one file of a contestant's own submission, and
+`/-/downloads/<org>/<contest>/<task>/versions/<commit>/<path>` one of a task's
+own files at a version, for whoever holds a role reaching the task. Each takes
+GET alone, and nginx asks the backend first; the backend answers with the
+forge's media endpoint for that file, in a submission's repository or the
+task's, and the person's own credential, and nginx streams Forgejo's answer
+whatever its size, a range included, as an attachment with its own security
+headers and the app's cookie dropped. Two maps hold each answer to the one
+shape its address may lead to, and every refusal, nginx's, the backend's or
+Forgejo's, reads as 404.
+
 The app is at `http://localhost:8080`, Forgejo at `http://forge.localhost:8080`,
 on the same proxy under its own hostname, so the two never share cookies. Any
 name under `.localhost` is loopback for browsers and most resolvers, so no
