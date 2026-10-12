@@ -130,6 +130,45 @@ Postgres is published on **55432**, not 5432: a developer machine often already
 runs a PostgreSQL of its own, and two listeners on 5432 do not fail, they make
 `psql -h localhost` a coin toss.
 
+## Upgrading a running stack
+
+After a new release, with this repo at the release:
+
+```sh
+COMPOSE="docker compose -f compose.yaml --profile app"
+$COMPOSE pull backend-migrate backend frontend
+$COMPOSE up -d backend-migrate backend frontend
+uv run bootstrap
+$COMPOSE exec -T backend unicon-forge reconcile
+```
+
+The first two lines bring the app to the new images; `backend` waits for
+`backend-migrate` to apply the release's migrations. Bootstrap then seeds
+any new primitive or workflow version and moves a seeded version that
+differs only in its words, as [What bootstrap made](#what-bootstrap-made)
+says. It comes after the backend, since an older backend may not read what
+the new versions say.
+
+The last line runs the forge's `reconcile` once. Like `backend-migrate`'s
+`unicon-forge migrate`, it is the forge package's command from the backend
+image, but it reads every `UNICON_*` setting the backend has, so it runs in
+the running `backend` container rather than a job of its own. It puts back
+whatever keeps each contest and task right at the forge where it is missing
+or wrong, so places made before the upgrade get what the release now gives
+each new one. Among those is the protection on each contest's and task's
+branch that lets the platform's account alone push or merge to it, which
+contests and tasks made before that protection came in lack until it runs.
+It also activates every published task at the CI and gives every
+submission at the forge without a grading its grading, which on a stack
+that kept running finds nothing to do. It logs what it did as
+`reconcile.done`, with how many places it secured again, and running it
+again does no harm. A stack bootstrapped fresh on the release needs none of
+this: every contest and task is secured as it is made.
+
+On a development stack the same holds with `-f compose.dev.yaml` added to
+`COMPOSE`, the `pull` line left out and `--build` added to the `up` line;
+[Back to a known state](#back-to-a-known-state) starts from nothing instead.
+
 ## Running the stack in development
 
 The whole sequence, from nothing to a signed-in browser and a machine that
