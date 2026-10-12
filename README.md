@@ -277,8 +277,8 @@ and one contest to try things on:
 - the org `demo`, alice its admin, and its contest `sample`, "Sample
   contest", running from an hour before the reset for 30 days, open to
   anyone who signs up and approved by an organiser;
-- its task `sum`, the starter on `unicon/classic@v2` with three tests,
-  published, so a submission grades.
+- its task `sum`, the starter on `unicon/classic@v2` with a statement of
+  A + B and three tests, published, so a submission grades.
 
 Bob has not registered. It takes about three minutes, and it refuses before
 throwing anything away when a key is missing. Sign in again from a new tab

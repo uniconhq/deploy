@@ -143,6 +143,18 @@ def save_task(page: Page) -> Locator:
     return bar
 
 
+def write_statement(page: Page, task_page: str, text: str) -> None:
+    """Write the task's statement on its Statement card and save it, which
+    publishes it while the contest is not running.
+    """
+    page.goto(f"{task_page}?card=statement")
+    page.get_by_role("textbox", name="Statement source").fill(text)
+    page.get_by_role("button", name="Save statement").click()
+    expect(page.get_by_role("status").filter(has_text=PUBLISHED)).to_be_visible(
+        timeout=CREATE_TIMEOUT_MS
+    )
+
+
 def submission_rate(page: Page, count: int, per: int) -> None:
     """The task's submission rate, in its Submission rules, before a save."""
     rules = page.get_by_role("region", name="Submission rules")

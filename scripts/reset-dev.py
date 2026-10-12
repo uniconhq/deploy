@@ -10,8 +10,9 @@ What it leaves, every time:
 - its contest `sample`, "Sample contest", running from an hour ago for 30
   days, open to anyone who signs up, each sign-up approved by an organiser
   (a new contest's own registration);
-- its task `sum`, the starter task on unicon/classic@v2, with two tests more
-  than the starter's one, saved and published so it grades.
+- its task `sum`, the starter task on unicon/classic@v2, with a statement
+  of A + B in place of the starter's placeholder and two tests more than
+  the starter's one, saved and published so it grades.
 
 Bob has not registered, so signing up as him and approving him as alice is
 the first thing there is to try.
@@ -59,6 +60,30 @@ ORG = "demo"
 CONTEST = "sample"
 CONTEST_NAME = "Sample contest"
 TASK = "sum"
+STATEMENT = """\
+# A + B
+
+Read two integers *a* and *b*, and print their sum.
+
+## Input
+
+One line with *a* and *b*, separated by a space, each between -1000000000
+and 1000000000.
+
+## Output
+
+One line with *a* + *b*.
+
+## Example
+
+Input:
+
+    1 2
+
+Output:
+
+    3
+"""
 EXTRA_TESTS = (
     {"input": b"10 32\n", "answer": b"42\n"},
     {"input": b"-7 7\n", "answer": b"0\n"},
@@ -174,6 +199,9 @@ def seed(people: dict[str, tuple[str, str]]) -> None:
             stack.create_org(alice, ORG)
             stack.create(alice, CONTEST, "Create contest", "New contest")
             stack.create(alice, TASK, "Create task", "New task")
+            task_page = alice.url
+            stack.write_statement(alice, task_page, STATEMENT)
+            alice.goto(f"{task_page}?card=tests")
             for files in EXTRA_TESTS:
                 stack.add_test(alice, "main", dict(files))
             stack.submission_rate(alice, 10, 60)
