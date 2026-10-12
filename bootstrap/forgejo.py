@@ -18,9 +18,11 @@ The user accounts are the one exception the Forgejo binary forces: its
 `admin user` commands take the password only as an argument.
 
 The admin token, UNICON_FORGE_ADMIN_TOKEN, carries all scopes. It creates
-organisations, repositories, teams and protected tags, and administers
-accounts. It is never used to act for a person; that is the person's own
-OAuth token.
+organisations, repositories, teams, protected tags and protected branches,
+administers accounts, and writes each change an organiser saves to a contest
+or a task, naming the organiser as its author, since only the platform's
+account may push to those. It is otherwise never used to act for a person;
+that is the person's own OAuth token.
 """
 
 from __future__ import annotations

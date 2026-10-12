@@ -197,9 +197,11 @@ Each primitive checkout fills the version at the forge that is the major of
 its own version, `v2` for 2.0.0, and the versions it does not fill come from
 `images.json` as released. After a change in one of those checkouts, run the
 first two lines again. A rebuilt image under the same declaration moves its
-version at the forge to the new digest, as a patch release does. A changed
-`primitive.yaml` stops bootstrap before it seeds anything, naming the version
-that differs; `uv run bootstrap --rewrite` rewrites it in place instead.
+version at the forge to the new digest, as a patch release does, and so does
+a `primitive.yaml` changed only in its words, a title, a description or what
+an outcome means. One changed in anything else stops bootstrap before it
+seeds anything, naming the version that differs; `uv run bootstrap
+--rewrite` rewrites it in place instead.
 Either way a task already published keeps grading with the image its plan
 pinned until it is saved again.
 
@@ -335,10 +337,16 @@ it needs `uv run playwright install chromium` once.
 
 Two Forgejo accounts. `unicon-backend` is a site administrator and holds the
 admin token, `UNICON_FORGE_ADMIN_TOKEN`: the backend uses it to create
-organisations, repositories, teams and protected tags, and never to act for a
-person.
+organisations, repositories, teams, protected tags and protected branches,
+and to write each change an organiser saves to a contest or a task, with
+the organiser named as the change's author; it is otherwise never used to
+act for a person.
 `compose.yaml` names it to the backend as `UNICON_FORGE_PLATFORM_ACCOUNT`, and
-the backend reserves the protected tags for that one account. `unicon-ci` is an
+the backend reserves the protected tags for that one account and lets it
+alone push or merge to a contest's or a task's branch, repository admins
+included, so an organiser changes those files only through the app's save.
+The name has to be the account the admin token belongs to, or every save is
+refused at the forge. `unicon-ci` is an
 ordinary account that Woodpecker signs in as. Two accounts rather than one,
 because Woodpecker insists on a real forge login for its own user and the
 site-administrator token must not sit in Woodpecker's database.
@@ -411,7 +419,9 @@ one left out.
 `unicon/classic` is the built-in workflow: compile the submission, run it on
 every test, compare each output with the answer. `unicon/classic@v2`
 wires the primitives' `v2` in the format of `TASK-FORMAT.md`, with each
-test's `input` and `answer`, and reports the time and memory of every run.
+test's `input` and `answer`, and reports the time and memory of every run,
+which pages name "Run time", in ms, and "Memory used", in KB, and the
+compiler's "Compile log"; `unicon/classic-folder@v1` reports the same.
 `unicon/classic-folder@v1` is classic over a folder of sources: the
 contestant gives a folder, its language and the entry point `compile@v2`
 starts from (`TASK-FORMAT.md` section 4.7). A definition changed in how it grades is a new folder. Every primitive version a
