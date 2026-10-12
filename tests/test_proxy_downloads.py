@@ -7,7 +7,9 @@ and the forge names each at the submission's commit, so both patterns take
 every such path and nothing else. A task's own files are asked for at
 `versions/<commit>/<path>`, any file of the task at any depth, and the forge
 names each in the task's own repository at that commit. Neither kind's
-patterns take the other's addresses.
+patterns take the other's addresses. Everything else the two locations do
+is written once, in `download.conf`, which compose mounts where they
+include it.
 """
 
 from __future__ import annotations
@@ -16,8 +18,12 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml  # type: ignore[import-untyped]
 
-CONFIG = (Path(__file__).resolve().parent.parent / "proxy" / "nginx.conf").read_text()
+DEPLOY = Path(__file__).resolve().parent.parent
+CONFIG = (DEPLOY / "proxy" / "nginx.conf").read_text()
+SHARED = (DEPLOY / "proxy" / "download.conf").read_text()
+SHARED_AT = "/etc/nginx/download.conf"
 
 
 def _locations() -> list[str]:
@@ -190,3 +196,58 @@ def test_neither_kind_of_address_is_taken_by_the_others_location() -> None:
     assert all(_task_location().match(asked) for asked in task_files)
     assert not any(_task_location().match(asked) for asked in submitted)
     assert not any(_location().match(asked) for asked in task_files)
+
+
+def _location_body(pattern: str) -> str:
+    start = CONFIG.index(f'location ~ "{pattern}" {{')
+    return CONFIG[start : CONFIG.index("\n    }\n", start)]
+
+
+def _directives(text: str) -> set[str]:
+    """Each directive's name, comments and the `if` block's own lines left
+    out, as a way to tell what a block sets."""
+    names = set()
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if line and line[0].isalpha():
+            names.add(line.split()[0])
+    return names
+
+
+@pytest.mark.parametrize("pattern", _locations(), ids=["submission", "task file"])
+def test_both_download_locations_share_one_file_of_directives(pattern: str) -> None:
+    body = _location_body(pattern)
+    own = _directives(body)
+
+    assert f"include {SHARED_AT};" in body
+    assert own == {
+        "location",
+        "auth_request_set",
+        "proxy_set_header",
+        "include",
+        "proxy_pass",
+    }
+    assert re.findall(r"^\s*proxy_set_header (\S+)", body, re.M) == ["Host"]
+    assert len(re.findall(r"^\s*auth_request_set ", body, re.M)) == 1
+
+
+def test_the_shared_file_says_what_a_download_is() -> None:
+    for header in (
+        "add_header Content-Type application/octet-stream always;",
+        "add_header Content-Disposition $download_disposition always;",
+        'add_header Cache-Control "private, no-store" always;',
+        "add_header X-Content-Type-Options nosniff always;",
+        "add_header Content-Security-Policy \"default-src 'none'; sandbox\" always;",
+        "auth_request /-/downloads/door;",
+        "= @download_refused;",
+    ):
+        assert header in SHARED, header
+
+
+def test_compose_mounts_the_shared_file_where_the_site_includes_it() -> None:
+    compose = yaml.safe_load((DEPLOY / "compose.yaml").read_text(encoding="utf-8"))
+
+    assert (
+        f"./proxy/download.conf:{SHARED_AT}:ro"
+        in compose["services"]["proxy"]["volumes"]
+    )
