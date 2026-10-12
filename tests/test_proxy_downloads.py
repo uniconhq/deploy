@@ -244,6 +244,25 @@ def test_the_shared_file_says_what_a_download_is() -> None:
         assert header in SHARED, header
 
 
+def test_no_header_a_download_sets_is_also_passed_on_from_the_forge() -> None:
+    """Forgejo's media endpoint sends its own `X-Content-Type-Options`, and
+    names the object and the headers its own pages read; a header the door
+    sets would otherwise reach the browser twice, and the rest are Forgejo's
+    and not this site's."""
+    hidden = {
+        name.lower() for name in re.findall(r"^proxy_hide_header (\S+);", SHARED, re.M)
+    }
+    added = {name.lower() for name in re.findall(r"^add_header (\S+) ", SHARED, re.M)}
+
+    assert added <= hidden, added - hidden
+    assert {
+        "set-cookie",
+        "access-control-expose-headers",
+        "x-forgejo-object-type",
+        "x-gitea-object-type",
+    } <= hidden
+
+
 def test_compose_mounts_the_shared_file_where_the_site_includes_it() -> None:
     compose = yaml.safe_load((DEPLOY / "compose.yaml").read_text(encoding="utf-8"))
 
