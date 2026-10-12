@@ -281,7 +281,10 @@ and one contest to try things on:
   published, so a submission grades.
 
 Bob has not registered. It takes about three minutes, and it refuses before
-throwing anything away when a key is missing. The contest and task are made
+throwing anything away when a key is missing. Sign in again from a new tab
+on the app: bootstrap registers the app at Forgejo afresh, so a page open from
+before the reset sends Forgejo a client id it no longer has ("Client ID not
+registered"). The contest and task are made
 from the pages, with the browser tests' own steps (`tests/e2e/stack.py`), so
 it needs `uv run playwright install chromium` once.
 

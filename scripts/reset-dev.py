@@ -105,7 +105,9 @@ def main(argv: list[str] | None = None) -> int:
     app = os.environ["UNICON_E2E_URL"]
     print(
         f"\nReady at {app}: alice and bob, and {CONTEST_NAME} at "
-        f"{app}/contests/{ORG}/{CONTEST}, which bob has not registered for."
+        f"{app}/contests/{ORG}/{CONTEST}, which bob has not registered for.\n"
+        "Sign in from a new tab on the app: a page open from before the reset "
+        "holds the app's old client id at Forgejo, which no longer exists."
     )
     return 0
 
