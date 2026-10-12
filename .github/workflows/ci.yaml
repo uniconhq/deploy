@@ -414,6 +414,9 @@ jobs:
       # A browser from a new org to two verdicts: the organiser pages, the
       # entrant's registration and approval, the submit panel, and a real
       # grading run on the dev agent for the sample solution and a wrong one.
+      # The rest of tests/e2e runs here too, among it a task's file downloaded
+      # through the download door with an organiser's session, which the
+      # checks above, made with none, cannot reach.
       - name: submit and grade from the browser
         working-directory: deploy
         env:

@@ -615,8 +615,12 @@ sample solution graded again. Last, the entrant signs out, and signing in
 again asks Forgejo for their password: signing out of the app signed the
 browser out of Forgejo too. Beside it, `test_boards.py` ranks a contest on
 three leaderboards built on its Leaderboards page, before and after a test
-group's reveal, and `test_workflows.py` builds a workflow in the editor,
-publishes and shares a version of it and grades with it.
+group's reveal, `test_workflows.py` builds a workflow in the editor,
+publishes and shares a version of it and grades with it, and
+`test_downloads.py` downloads one of a task's files through the proxy's
+download door, an uploaded one and a typed one, as the organiser, checking
+the bytes and the door's headers, and finds that an entrant and someone
+signed out get no such file.
 Every name carries a random suffix, so it runs again on the same stack
 without clearing anything; it takes about a minute. Without `UNICON_E2E_URL`
 it is skipped, so `uv run pytest` stays a unit run. `UNICON_E2E_COMPOSE` is
