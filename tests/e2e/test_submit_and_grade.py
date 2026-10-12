@@ -5,7 +5,8 @@ An organiser and an entrant, each made with the operator's command and
 signed in through Forgejo's own pages. The organiser creates an org, a
 contest and a task from the organiser pages, checks the task grades with
 unicon/classic@v2, sets its submission rate on the task's page so the task
-publishes, sets the contest running now from its settings and opens it
+publishes, writes its statement, since a contest does not open on the
+starter's, sets the contest running now from its settings and opens it
 from its status card. The entrant registers, the organiser approves them
 from the Entrants page, and the entrant submits the task's sample solution
 and then a wrong one from the submit panel. The first comes back accepted
@@ -38,6 +39,7 @@ from tests.e2e.stack import (
     APP,
     CREATE_TIMEOUT_MS,
     SAMPLE,
+    STATEMENT,
     VERDICT_TIMEOUT_MS,
     WRONG,
     approve,
@@ -55,6 +57,7 @@ from tests.e2e.stack import (
     submission_rate,
     submit,
     verdict_of,
+    write_statement,
 )
 
 pytestmark = [needs_stack]
@@ -87,6 +90,7 @@ def test_a_right_and_a_wrong_solution_get_their_verdicts(browser: Browser) -> No
     )
     submission_rate(organiser, 10, 60)
     save_task(organiser)
+    write_statement(organiser, task_page, STATEMENT)
 
     now = datetime.now(UTC).replace(second=0, microsecond=0)
     contest_settings(

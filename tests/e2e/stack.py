@@ -36,6 +36,10 @@ CREATE_TIMEOUT_MS = 60_000
 SAMPLE = "a, b = map(int, input().split())\nprint(a + b)\n"
 WRONG = "a, b = map(int, input().split())\nprint(a - b)\n"
 
+# A statement of the task's own: a contest does not open while a task's
+# published statement is still the one a new task starts with.
+STATEMENT = "# A + B\n\nRead two integers and print their sum.\n"
+
 PUBLISHED = re.compile(r"Saved and published as publication \d+\.")
 
 needs_stack = pytest.mark.skipif(
@@ -145,14 +149,19 @@ def save_task(page: Page) -> Locator:
 
 def write_statement(page: Page, task_page: str, text: str) -> None:
     """Write the task's statement on its Statement card and save it, which
-    publishes it while the contest is not running.
+    publishes it, publishing the change when the contest is running and the
+    save asks. A contest opens only once each task's published statement is
+    written, not the starter's placeholder.
     """
     page.goto(f"{task_page}?card=statement")
     page.get_by_role("textbox", name="Statement source").fill(text)
     page.get_by_role("button", name="Save statement").click()
-    expect(page.get_by_role("status").filter(has_text=PUBLISHED)).to_be_visible(
-        timeout=CREATE_TIMEOUT_MS
-    )
+    published = page.get_by_role("status").filter(has_text=PUBLISHED)
+    publish = page.get_by_role("alert").get_by_role("button", name="Publish the change")
+    expect(published.or_(publish).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    if publish.is_visible():
+        publish.click()
+        expect(published).to_be_visible(timeout=CREATE_TIMEOUT_MS)
 
 
 def submission_rate(page: Page, count: int, per: int) -> None:
