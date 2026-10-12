@@ -356,13 +356,14 @@ public repository `unicon/<name>.workflow` with the topic
 the version's tag holds, and bootstrap publishes each to its own tag by the
 same rule: a tag that is not there is made, and one that is there and holds
 the same files is left as it is. One whose definition differs only in what
-does not grade, an input's `title`, `help` or `unit`, a comment or the
-layout, or whose README differs, is moved to the new files, and the run
+does not grade, an input's `title`, `help` or `unit`, a reported value's
+`title` or `unit`, a comment or the layout, or whose README differs, is moved to the new files, and the run
 says `(moved)`; so a version is fixed in how it grades, while the words a
 person reads at its tag can change. One whose definition differs in
 anything that grades stops the run the same way. The definitions are
 compared as the forge reads them: an input or test field written as a bare
-type, `time_limit: number`, is `{type: number}`, and a flag set `false` is
+type, `time_limit: number`, is `{type: number}`, a reported value written
+as a bare reference is one given `from` alone, and a flag set `false` is
 one left out.
 `unicon/classic` is the built-in workflow: compile the submission, run it on
 every test, compare each output with the answer. `unicon/classic@v2`
