@@ -11,8 +11,10 @@ What it leaves, every time:
   days, open to anyone who signs up, each sign-up approved by an organiser
   (a new contest's own registration);
 - its task `sum`, the starter task on unicon/classic@v2, with a statement
-  of A + B in place of the starter's placeholder and two tests more than
-  the starter's one, saved and published so it grades.
+  of A + B in place of the starter's placeholder, written first since a
+  contest does not open while a task's published statement is the
+  starter's, and two tests more than the starter's one, saved and
+  published so it grades.
 
 Bob has not registered, so signing up as him and approving him as alice is
 the first thing there is to try.

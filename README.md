@@ -278,7 +278,11 @@ and one contest to try things on:
   contest", running from an hour before the reset for 30 days, open to
   anyone who signs up and approved by an organiser;
 - its task `sum`, the starter on `unicon/classic@v2` with a statement of
-  A + B and three tests, published, so a submission grades.
+  A + B and three tests, published, so a submission grades. The statement
+  is written before the contest opens, since a contest does not open while
+  a task's published statement is the starter's placeholder, and every
+  save comes before the contest opens, so none of them asks before it
+  publishes.
 
 Bob has not registered. It takes about three minutes, and it refuses before
 throwing anything away when a key is missing. Sign in again from a new tab
@@ -638,7 +642,9 @@ through Forgejo's pages. The organiser creates an org, a contest and a task
 from the organiser pages' New buttons, opening each one's page as soon as it
 is made, saves the task from its page so it publishes (with a looser
 submission rate than the starter's one per 30 seconds, so the second submit
-is not refused), sets the contest running now in its settings and opens it
+is not refused), writes its statement on its Statement card, since a
+contest does not open while a task's statement is the starter's
+placeholder, sets the contest running now in its settings and opens it
 from its status card. The entrant registers, the organiser approves them
 from the Entrants page, and the entrant submits the sample solution and then
 a wrong one from the submit panel; the test expects `ACCEPTED` and then
