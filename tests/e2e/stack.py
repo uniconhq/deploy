@@ -239,23 +239,24 @@ def open_contest(page: Page, org: str, contest: str) -> None:
 def task_timeline(
     page: Page, org: str, contest: str, row: str, **times: datetime
 ) -> None:
-    """A task's timeline from its row on the contest's page: each of
-    `opens`, `due` and `closes` given set at that time.
+    """A task's timeline from the line on its row on the contest's page,
+    which opens the task's place in the contest: each of `opens`, `due` and
+    `closes` given set at that time.
     """
     page.goto(f"{APP}/orgs/{org}/contests/{contest}")
-    page.get_by_role("button", name=f"Edit the timeline of {row}").click()
-    dialog = page.get_by_role("dialog", name=f"Timeline of {row}")
+    page.get_by_role("button", name=f"Change {row} in this contest").click()
+    dialog = page.get_by_role("dialog", name=f"{row} in this contest")
     for which, moment in times.items():
         word = which.capitalize()
         dialog.get_by_role("radiogroup", name=word).get_by_role(
             "radio", name="At a time"
         ).check()
         dialog.get_by_label(f"{word} at", exact=True).fill(local(moment))
-    dialog.get_by_role("button", name="Save the timeline").click()
-    expect(dialog.get_by_role("status")).to_contain_text(
-        "Saved", timeout=CREATE_TIMEOUT_MS
+    dialog.get_by_role("button", name="Save", exact=True).click()
+    expect(dialog.get_by_role("status").filter(has_text="Saved")).to_be_visible(
+        timeout=CREATE_TIMEOUT_MS
     )
-    dialog.get_by_role("button", name="Close").click()
+    dialog.get_by_role("button", name="Close", exact=True).click()
     expect(dialog).to_be_hidden()
 
 

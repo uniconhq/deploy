@@ -148,8 +148,8 @@ def leaderboards(page: Page, org: str) -> None:
         "radio", name="Entrants", exact=True
     ).check()
     form.get_by_role("button", name="Add a way to rank ICPC").click()
-    then = icpc.get_by_role("group", name="Then by (2)")
-    then.get_by_role("radio", name="Penalty minutes, fewest first").check()
+    then = icpc.get_by_role("group", name="Way to rank 2", exact=True)
+    expect(then.get_by_role("combobox", name="Way to rank 2")).to_have_value("penalty")
     then.get_by_role("textbox", name="Minutes per earlier attempt").fill("20")
 
     form.get_by_role("button", name="Add a leaderboard").click()
@@ -201,8 +201,8 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     group_rule(organiser, "main", "Points for each test passed", "50")
     group_rule(organiser, "final", "Points for each test passed", "50")
     organiser.get_by_role("group", name="final", exact=True).get_by_role(
-        "radiogroup", name="When entrants see results"
-    ).get_by_role("radio", name="Once the task closes", exact=True).check()
+        "combobox", name="When entrants see results"
+    ).select_option("after_close")
     submission_rate(organiser, 10, 60)
     save_task(organiser)
 
