@@ -254,6 +254,37 @@ confirmation link for an account you make, and every invite, is at http://localh
 publishes Forgejo on `127.0.0.1:3300` for `scripts/check-lfs.py`, which
 drives its API from this machine; nothing else uses that port.
 
+### Back to a known state
+
+```sh
+uv run scripts/reset-dev.py            # --build to rebuild the backend and frontend too
+```
+
+throws the dev stack's data away (`down -v`), bootstraps an empty stack,
+starts both profiles from the images already built, and leaves two people
+and one contest to try things on:
+
+- `alice` and `bob`, with the passwords and email addresses in `.env`,
+  which you add by hand and bootstrap keeps:
+
+  ```sh
+  DEV_ALICE_PASSWORD=...
+  DEV_ALICE_EMAIL=...
+  DEV_BOB_PASSWORD=...
+  DEV_BOB_EMAIL=...
+  ```
+
+- the org `demo`, alice its admin, and its contest `sample`, "Sample
+  contest", running from an hour before the reset for 30 days, open to
+  anyone who signs up and approved by an organiser;
+- its task `sum`, the starter on `unicon/classic@v2` with three tests,
+  published, so a submission grades.
+
+Bob has not registered. It takes about three minutes, and it refuses before
+throwing anything away when a key is missing. The contest and task are made
+from the pages, with the browser tests' own steps (`tests/e2e/stack.py`), so
+it needs `uv run playwright install chromium` once.
+
 ## What bootstrap made
 
 Two Forgejo accounts. `unicon-backend` is a site administrator and holds the
