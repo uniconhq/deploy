@@ -335,7 +335,7 @@ nothing. The two are compared as the compiler reads them, parsed under YAML
 1.2's core schema: the ports with their types and options, the limits with
 `gpus`, `limits_from`, `network` and `batch`. One that differs only in
 what the compiler does not read, its image, its `title`, its own or a port's
-`description`, a comment or the layout, is a patch release, a fixed image with the same ports, or a
+`description`, the outcome port's `outcomes`, a comment or the layout, is a patch release, a fixed image with the same ports, or a
 reworded one: bootstrap moves the tag to a commit of the release's files
 with the manifest's digest written in, and says `(moved)`. One whose
 declaration differs in anything the compiler reads stops the run. Bootstrap compares
