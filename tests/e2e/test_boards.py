@@ -136,31 +136,35 @@ def leaderboards(page: Page, org: str) -> None:
     first = form.get_by_role("group", name="Standings", exact=True)
     first.get_by_role("textbox", name="Name", exact=True).fill("IOI")
     ioi = form.get_by_role("group", name="IOI", exact=True)
-    ioi.get_by_role("combobox", name="Shown to").select_option(
-        label="Everyone who can see the contest"
-    )
+    ioi.get_by_role("radiogroup", name="Shown to").get_by_role(
+        "radio", name="Everyone who can see the contest"
+    ).check()
 
     form.get_by_role("button", name="Add a leaderboard").click()
     added = form.get_by_role("group", name=re.compile("^Leaderboard 2"))
     added.get_by_role("textbox", name="Name", exact=True).fill("ICPC")
     icpc = form.get_by_role("group", name="ICPC", exact=True)
-    icpc.get_by_role("combobox", name="Shown to").select_option(label="Entrants")
+    icpc.get_by_role("radiogroup", name="Shown to").get_by_role(
+        "radio", name="Entrants", exact=True
+    ).check()
     form.get_by_role("button", name="Add a way to rank ICPC").click()
     then = icpc.get_by_role("group", name="Then by (2)")
-    then.get_by_role("combobox", name="Then by (2)").select_option("penalty")
+    then.get_by_role("radio", name="Penalty minutes, fewest first").check()
     then.get_by_role("textbox", name="Minutes per earlier attempt").fill("20")
 
     form.get_by_role("button", name="Add a leaderboard").click()
     added = form.get_by_role("group", name=re.compile("^Leaderboard 3"))
     added.get_by_role("textbox", name="Name", exact=True).fill("Final")
     final = form.get_by_role("group", name="Final", exact=True)
-    final.get_by_role("combobox", name="Shown to").select_option(label="Entrants")
-    final.get_by_role("combobox", name="Counts", exact=True).select_option(
-        "after_close"
-    )
-    final.get_by_role("combobox", name="Which submission counts").select_option(
-        label="Best of the submissions an entrant marks"
-    )
+    final.get_by_role("radiogroup", name="Shown to").get_by_role(
+        "radio", name="Entrants", exact=True
+    ).check()
+    final.get_by_role("radiogroup", name="Counts", exact=True).get_by_role(
+        "radio", name="Results shown once each task closes"
+    ).check()
+    final.get_by_role("radiogroup", name="Which submission counts").get_by_role(
+        "radio", name="Best of the submissions an entrant marks"
+    ).check()
     form.get_by_role("button", name="Save leaderboards").click()
     expect(page.get_by_text("Saved.", exact=True)).to_be_visible(
         timeout=CREATE_TIMEOUT_MS
@@ -197,8 +201,8 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     group_rule(organiser, "main", "Points for each test passed", "50")
     group_rule(organiser, "final", "Points for each test passed", "50")
     organiser.get_by_role("group", name="final", exact=True).get_by_role(
-        "combobox", name="When entrants see results"
-    ).select_option(label="Once the task closes")
+        "radiogroup", name="When entrants see results"
+    ).get_by_role("radio", name="Once the task closes", exact=True).check()
     submission_rate(organiser, 10, 60)
     save_task(organiser)
 

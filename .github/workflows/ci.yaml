@@ -222,6 +222,8 @@ jobs:
           expect 404 "$app/-/downloads/door"
           expect 404 "$app/-/downloads/acme/spring/sum/1/files/submission/main.py"
           expect 404 "$app/-/downloads/acme/spring/sum/1/submission.json"
+          expect 404 "$app/-/downloads/acme/spring/sum/versions/0123456789abcdef0123456789abcdef01234567/task.yaml"
+          expect 404 "$app/-/downloads/acme/spring/sum/versions/main/task.yaml"
           expect 404 "$app/forgejo-lfs/lfs/x"
           expect 404 "$app/some/unlisted/path"
           expect 404 "$app/.env"
@@ -294,10 +296,14 @@ jobs:
           expect 404 PUT "$app/-/uploads/not-a-slot"
           expect 404 GET "$app/-/uploads/door"
           expect 404 POST "$app/-/uploads/door"
-          # The download door: without a session its one shape is no such
-          # file, and nothing but a read is routed.
+          # The download door: without a session each of its two shapes, a
+          # submission's file and a task's file at a commit, is no such file,
+          # and nothing but a read is routed.
           expect 404 GET "$app/-/downloads/acme/spring/sum/1/files/submission/main.py"
           expect 404 PUT "$app/-/downloads/acme/spring/sum/1/files/submission/main.py"
+          commit="0123456789abcdef0123456789abcdef01234567"
+          expect 404 GET "$app/-/downloads/acme/spring/sum/versions/$commit/tests/main/1/answer"
+          expect 404 PUT "$app/-/downloads/acme/spring/sum/versions/$commit/tests/main/1/answer"
           expect 404 GET "$app/-/downloads/door"
 
       # The development git listener every grading step has as its HTTP
@@ -408,6 +414,9 @@ jobs:
       # A browser from a new org to two verdicts: the organiser pages, the
       # entrant's registration and approval, the submit panel, and a real
       # grading run on the dev agent for the sample solution and a wrong one.
+      # The rest of tests/e2e runs here too, among it a task's file downloaded
+      # through the download door with an organiser's session, which the
+      # checks above, made with none, cannot reach.
       - name: submit and grade from the browser
         working-directory: deploy
         env:

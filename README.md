@@ -230,6 +230,18 @@ refusals name the object store's address in them, so every answer but a
 success and the size refusal becomes a bare 403. The door is on the app's own
 origin, so it needs no CORS and the session cookie goes with it.
 
+Downloads come back the same way. `/-/downloads/<org>/<contest>/<task>/<number>/files/...`
+is one file of a contestant's own submission, and
+`/-/downloads/<org>/<contest>/<task>/versions/<commit>/<path>` one of a task's
+own files at a version, for whoever holds a role reaching the task. Each takes
+GET alone, and nginx asks the backend first; the backend answers with the
+forge's media endpoint for that file, in a submission's repository or the
+task's, and the person's own credential, and nginx streams Forgejo's answer
+whatever its size, a range included, as an attachment with its own security
+headers and the app's cookie dropped. Two maps hold each answer to the one
+shape its address may lead to, and every refusal, nginx's, the backend's or
+Forgejo's, reads as 404.
+
 The app is at `http://localhost:8080`, Forgejo at `http://forge.localhost:8080`,
 on the same proxy under its own hostname, so the two never share cookies. Any
 name under `.localhost` is loopback for browsers and most resolvers, so no
@@ -603,8 +615,12 @@ sample solution graded again. Last, the entrant signs out, and signing in
 again asks Forgejo for their password: signing out of the app signed the
 browser out of Forgejo too. Beside it, `test_boards.py` ranks a contest on
 three leaderboards built on its Leaderboards page, before and after a test
-group's reveal, and `test_workflows.py` builds a workflow in the editor,
-publishes and shares a version of it and grades with it.
+group's reveal, `test_workflows.py` builds a workflow in the editor,
+publishes and shares a version of it and grades with it, and
+`test_downloads.py` downloads one of a task's files through the proxy's
+download door, an uploaded one and a typed one, as the organiser, checking
+the bytes and the door's headers, and finds that an entrant and someone
+signed out get no such file.
 Every name carries a random suffix, so it runs again on the same stack
 without clearing anything; it takes about a minute. Without `UNICON_E2E_URL`
 it is skipped, so `uv run pytest` stays a unit run. `UNICON_E2E_COMPOSE` is
