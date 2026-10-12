@@ -1,9 +1,9 @@
 {
   "images": {
-    "harness": "ghcr.io/uniconhq/harness@sha256:93863bd64759c5f7e39e91946dddc0827346cdc5cf457ea72ead71f04d61d0d6",
-    "clone": "ghcr.io/uniconhq/clone@sha256:ed7658cf9c9262ced18ee1904adf6172f26c92f83d97af31497eea89d2179fa6",
-    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:79db4bb4a4e8a46f1eae99ce7be8815cfc55e1eb35f343591de12f41aa15a4ad",
-    "worker": "ghcr.io/uniconhq/worker@sha256:5df06c67654bff1346e6fdbfc2306f4116af9e1a12d389d11073220baee9b159"
+    "harness": "ghcr.io/uniconhq/harness@sha256:1bcaada78a892343e6dd08c411e5bea6142fe7b5e03f7fa3eac374d05c8b0fff",
+    "clone": "ghcr.io/uniconhq/clone@sha256:ab7c5372ffcc777d68d33deb8f8bcb82f8edbc61b0c523262bd84b35739b737e",
+    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:a255ed89451c3a368ea39a077d8a8990d95eae338a48ee4792055a4f8b252065",
+    "worker": "ghcr.io/uniconhq/worker@sha256:4e72b660ae5f3c83d842b31823e6435f3ea957ae13a0ba75de5705053215ba1c"
   },
   "primitives": {
     "compile": {
@@ -15,10 +15,10 @@
         }
       },
       "v2": {
-        "image": "ghcr.io/uniconhq/primitive-compile@sha256:fd36c1f04aca23bed70ef9ecf2d3ed732514c96735313aa6631528adafe034e3",
+        "image": "ghcr.io/uniconhq/primitive-compile@sha256:07f52ace4511b217441795d48156af1a6e2fe5adafaa55f87a858b643b800935",
         "source": {
           "github": "uniconhq/primitive-compile",
-          "tag": "v2.0.0"
+          "tag": "v2.1.0"
         }
       }
     },
@@ -31,10 +31,10 @@
         }
       },
       "v2": {
-        "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:6a7882a824364be27443b78b49402ec70f74ff150cd0d9a7ac331656e7d9693b",
+        "image": "ghcr.io/uniconhq/primitive-sandbox-run@sha256:01613410f35433d6c602daea7d47ec91759304a76f5e3b04997c35a603c83a23",
         "source": {
           "github": "uniconhq/primitive-sandbox-run",
-          "tag": "v2.0.1"
+          "tag": "v2.1.0"
         }
       }
     },
@@ -47,10 +47,10 @@
         }
       },
       "v2": {
-        "image": "ghcr.io/uniconhq/primitive-diff-check@sha256:adb98447ddc54643f2aa833bb3b41186bd9c17d2ae9086ca7af96417b7c0b40b",
+        "image": "ghcr.io/uniconhq/primitive-diff-check@sha256:f3c58057a6440885736eb20b6c28191e028da130cd7e55103f83269f7e9ae264",
         "source": {
           "github": "uniconhq/primitive-diff-check",
-          "tag": "v2.0.0"
+          "tag": "v2.1.0"
         }
       }
     }
