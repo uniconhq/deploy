@@ -517,9 +517,9 @@ that holds that version, a new image under the same declaration moves the
 version to it, and any other change to the declaration stops bootstrap,
 since a version's ports never change.
 
-Today it pins runner `v0.8.0`, the primitives' `v1`, `sandbox-run` at
+Today it pins runner `v0.9.0`, the primitives' `v1`, `sandbox-run` at
 `v1.3.0` and `compile` and `diff-check` at `v1.1.1`, and their `v2`, all
-three at `v2.1.0`.
+three at `v2.2.0`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
