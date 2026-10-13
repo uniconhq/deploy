@@ -28,7 +28,8 @@ x-backend-env: &backend-env
   UNICON_INTERNAL_URL: http://backend:8000
   UNICON_FORGE_ADMIN_TOKEN: ${UNICON_FORGE_ADMIN_TOKEN}
   # The account bootstrap makes and the admin token belongs to, the one
-  # account protected tags are reserved for.
+  # account protected tags are reserved for and the only one that may push or
+  # merge to a contest's or a task's branch.
   UNICON_FORGE_PLATFORM_ACCOUNT: unicon-backend
   UNICON_FORGE_OAUTH_CLIENT_ID: ${UNICON_FORGE_OAUTH_CLIENT_ID}
   UNICON_FORGE_OAUTH_CLIENT_SECRET: ${UNICON_FORGE_OAUTH_CLIENT_SECRET}

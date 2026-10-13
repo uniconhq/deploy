@@ -4,7 +4,8 @@ compose stack, as the organiser who made it, and not as anyone else.
 The organiser creates an org, a contest and a task, replaces the input of
 the task's test from its Tests card with bytes that are not text and past
 what the page saves inline (256 KiB), so the file goes into the forge's
-large-file store through the upload door, and opens the contest. The page's
+large-file store through the upload door, writes the task's statement and
+opens the contest. The page's
 own read of the file names the version it was read at, and the download
 address is the one the organiser's page builds from it,
 `/-/downloads/<org>/<contest>/<task>/versions/<commit>/<path>`. Through the
@@ -31,6 +32,7 @@ from playwright.sync_api import APIResponse, Browser, Page, ViewportSize
 
 from tests.e2e.stack import (
     APP,
+    STATEMENT,
     approve,
     contest_settings,
     create,
@@ -44,6 +46,7 @@ from tests.e2e.stack import (
     save_task,
     sign_in,
     submission_rate,
+    write_statement,
 )
 
 pytestmark = [needs_stack]
@@ -151,6 +154,7 @@ def test_an_organiser_downloads_a_tasks_file_and_an_entrant_does_not(
     assert got.body() == _bytes_of(typed)
     assert _headers(got, "content-disposition") == ['attachment; filename="task.yaml"']
 
+    write_statement(organiser, task_page, STATEMENT)
     now = datetime.now(UTC).replace(second=0, microsecond=0)
     contest_settings(
         organiser,

@@ -36,6 +36,10 @@ CREATE_TIMEOUT_MS = 60_000
 SAMPLE = "a, b = map(int, input().split())\nprint(a + b)\n"
 WRONG = "a, b = map(int, input().split())\nprint(a - b)\n"
 
+# A statement of the task's own: a contest does not open while a task's
+# published statement is still the one a new task starts with.
+STATEMENT = "# A + B\n\nRead two integers and print their sum.\n"
+
 PUBLISHED = re.compile(r"Saved and published as publication \d+\.")
 
 needs_stack = pytest.mark.skipif(
@@ -143,6 +147,23 @@ def save_task(page: Page) -> Locator:
     return bar
 
 
+def write_statement(page: Page, task_page: str, text: str) -> None:
+    """Write the task's statement on its Statement card and save it, which
+    publishes it, publishing the change when the contest is running and the
+    save asks. A contest opens only once each task's published statement is
+    written, not the starter's placeholder.
+    """
+    page.goto(f"{task_page}?card=statement")
+    page.get_by_role("textbox", name="Statement source").fill(text)
+    page.get_by_role("button", name="Save statement").click()
+    published = page.get_by_role("status").filter(has_text=PUBLISHED)
+    publish = page.get_by_role("alert").get_by_role("button", name="Publish the change")
+    expect(published.or_(publish).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    if publish.is_visible():
+        publish.click()
+        expect(published).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+
+
 def submission_rate(page: Page, count: int, per: int) -> None:
     """The task's submission rate, in its Submission rules, before a save."""
     rules = page.get_by_role("region", name="Submission rules")
@@ -227,23 +248,24 @@ def open_contest(page: Page, org: str, contest: str) -> None:
 def task_timeline(
     page: Page, org: str, contest: str, row: str, **times: datetime
 ) -> None:
-    """A task's timeline from its row on the contest's page: each of
-    `opens`, `due` and `closes` given set at that time.
+    """A task's timeline from the line on its row on the contest's page,
+    which opens the task's place in the contest: each of `opens`, `due` and
+    `closes` given set at that time.
     """
     page.goto(f"{APP}/orgs/{org}/contests/{contest}")
-    page.get_by_role("button", name=f"Edit the timeline of {row}").click()
-    dialog = page.get_by_role("dialog", name=f"Timeline of {row}")
+    page.get_by_role("button", name=f"Change {row} in this contest").click()
+    dialog = page.get_by_role("dialog", name=f"{row} in this contest")
     for which, moment in times.items():
         word = which.capitalize()
         dialog.get_by_role("radiogroup", name=word).get_by_role(
             "radio", name="At a time"
         ).check()
         dialog.get_by_label(f"{word} at", exact=True).fill(local(moment))
-    dialog.get_by_role("button", name="Save the timeline").click()
-    expect(dialog.get_by_role("status")).to_contain_text(
-        "Saved", timeout=CREATE_TIMEOUT_MS
+    dialog.get_by_role("button", name="Save", exact=True).click()
+    expect(dialog.get_by_role("status").filter(has_text="Saved")).to_be_visible(
+        timeout=CREATE_TIMEOUT_MS
     )
-    dialog.get_by_role("button", name="Close").click()
+    dialog.get_by_role("button", name="Close", exact=True).click()
     expect(dialog).to_be_hidden()
 
 
@@ -300,7 +322,7 @@ def submit(page: Page, number: int, source: str) -> None:
 
 FINAL = re.compile(
     r"ACCEPTED|WRONG ANSWER|TIME LIMIT|MEMORY LIMIT|OUTPUT LIMIT|RUNTIME ERROR|"
-    r"COMPILE ERROR|SYSTEM ERROR|FAILED|CANCELLED"
+    r"COMPILE ERROR|SYSTEM ERROR|FAILED|CANCELLED|OVER THE LIMIT"
 )
 
 

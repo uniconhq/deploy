@@ -307,6 +307,47 @@ def test_a_declaration_changed_in_nothing_the_compiler_reads_moves_the_version(
     assert values["UNICON_FILTER_IMAGES"] == FIRST
 
 
+WITH_OUTCOME = NAMED + b"outputs:\n  outcome:\n    type: outcome\n"
+
+
+def test_saying_what_each_outcome_means_moves_the_version(tmp_path: Path) -> None:
+    forge = FakeForgejo()
+    checkout = _compile(tmp_path)
+    (checkout / "primitive.yaml").write_bytes(WITH_OUTCOME)
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    repo = forge.repos[FULL]
+    before = repo.tags["v1"]
+    changed = WITH_OUTCOME + (
+        b"    outcomes:\n"
+        b"      accepted: the source compiles\n"
+        b"      compile_error: it does not compile\n"
+    )
+    (checkout / "primitive.yaml").write_bytes(changed)
+
+    summary, _ = _seed(forge, _manifest(("v1", checkout, FIRST)))
+
+    assert repo.tags["v1"] != before
+    declared = repo.files_at("v1")["primitive.yaml"]
+    assert declared == primitives.declaration(changed, "compile", "v1", FIRST)
+    assert "  created  primitive unicon/compile version v1 (moved)" in summary.lines()
+
+
+def test_an_outcome_port_of_another_type_still_stops_the_run(tmp_path: Path) -> None:
+    forge = FakeForgejo()
+    checkout = _compile(tmp_path)
+    (checkout / "primitive.yaml").write_bytes(WITH_OUTCOME)
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    (checkout / "primitive.yaml").write_bytes(
+        WITH_OUTCOME.replace(b"type: outcome", b"type: text")
+    )
+    forge.requests.clear()
+
+    with pytest.raises(main.DifferingVersions, match="unicon/compile@v1"):
+        _seed(forge, _manifest(("v1", checkout, FIRST)))
+
+    assert forge.writes() == []
+
+
 @pytest.mark.parametrize(
     "changed",
     [

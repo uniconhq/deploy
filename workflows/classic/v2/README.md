@@ -14,8 +14,9 @@ A submission that does not compile stops the run, and every test is
 over a limit or crashed, or else the check's: `accepted` when the output
 matches the answer, `wrong_answer` when it does not.
 
-Each test reports `time_ms`, the program's CPU time, at least the time limit
-when it ran out of time, and `memory_kb`, its peak memory. Both fold over
-tests by their largest, and lower is better, so a board can rank on a task's
-slowest test. The compiler's output is reported once as `log`, so a submission
-that does not compile says why.
+Each test reports `time_ms`, "Run time" in ms, the program's CPU time, at
+least the time limit when it ran out of time, and `memory_kb`, "Memory used"
+in KB, its peak memory. Both fold over tests by their largest, and lower is
+better, so a board can rank on a task's slowest test. The compiler's output
+is reported once as `log`, "Compile log", so a submission that does not
+compile says why. The titles and units are what pages name the values by.

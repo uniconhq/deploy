@@ -626,7 +626,8 @@ def _seed_platform(
     version whose declaration differs only where the compiler does not read,
     its image, a title, a description or a comment, is not one of them: it
     moves. Nor is a workflow version whose files differ only in its inputs'
-    form text, a comment or its README.
+    form text, its reported values' titles and units, a comment or its
+    README.
     """
     repos = PlatformRepos(
         Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]

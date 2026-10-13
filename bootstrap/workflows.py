@@ -24,9 +24,10 @@ Bootstrap publishes every version folder to its own tag. A version is frozen
 in what grades: a tag already at the forge is left as it is, and one whose
 definition here has changed since in anything the compiler reads stops the
 run before anything is seeded, naming it; such a change is a new folder. A
-change only to what the definition tells the task's form (an input's
-`title`, `help` and `unit`), to its comments or layout, or to the README
-changes nothing that grades, so it moves the tag to the new files instead.
+change only to what the definition tells a person (an input's `title`,
+`help` and `unit`, a reported value's `title` and `unit`), to its comments
+or layout, or to the README changes nothing that grades, so it moves the
+tag to the new files instead.
 The one exception is a development stack, where bootstrap rewrites each
 version in place whatever differs when it is run with --rewrite.
 """
@@ -108,14 +109,17 @@ def seed_files(directory: Path, name: str, version: str) -> dict[str, bytes]:
 FORM_TEXT = ("title", "help", "unit")
 """What an input tells the task's form and nothing else."""
 
+VALUE_TEXT = ("title", "unit")
+"""What a reported value tells the pages that name it and nothing else."""
+
 
 def moves_in_place(
     repos: PlatformRepos, name: str, version: str, files: dict[str, bytes]
 ) -> bool:
     """Whether the version at the forge holds other files than these that
     grade alike: the same definition but for its inputs' form text, its
-    comments or its layout, whatever the README says. Read without writing
-    anything.
+    reported values' titles and units, its comments or its layout, whatever
+    the README says. Read without writing anything.
     """
     repo = repository(name)
     commit = repos.versions(PLATFORM_ORG, repo).get(version)
@@ -130,11 +134,12 @@ def moves_in_place(
 
 def graded(definition: bytes) -> object | None:
     """What grades of a definition: the document as the forge parses it,
-    without any input's form text, so a comment, the layout and that text
-    change nothing. The forge reads a declaration given as a bare type,
-    `time_limit: number`, as `{type: number}`, and a flag left out as
-    false, so both are read that way here. None when it does not parse as a
-    mapping.
+    without any input's form text or any reported value's title and unit,
+    so a comment, the layout and that text change nothing. The forge reads
+    a declaration given as a bare type, `time_limit: number`, as `{type:
+    number}`, a flag left out as false, and a reported value given as a
+    bare reference as one given `from` alone, so each is read that way
+    here. None when it does not parse as a mapping.
     """
     try:
         document = core_yaml.load(definition)
@@ -151,6 +156,14 @@ def graded(definition: bytes) -> object | None:
     steps = document.get("steps")
     if isinstance(steps, list):
         document["steps"] = [_without(step, ()) for step in steps]
+    report = document.get("report")
+    if isinstance(report, dict):
+        document["report"] = {
+            name: _without(
+                {"from": entry} if isinstance(entry, str) else entry, VALUE_TEXT
+            )
+            for name, entry in report.items()
+        }
     return document
 
 
