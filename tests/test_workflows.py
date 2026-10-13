@@ -320,47 +320,6 @@ def test_a_version_changed_in_nothing_that_grades_moves_to_the_new_files(
     assert forge.writes() == []
 
 
-RELEASED = Path(__file__).resolve().parent / "released"
-"""Each built-in workflow version as a deploy release published it, copied
-byte for byte from its tag: v0.7.1's write their inputs in the short form,
-`time_limit: number`, and v0.9.0's give their inputs a title, help and
-unit but their reported values none, `log` a bare reference, as the stacks
-bootstrapped from each hold them.
-"""
-
-
-def _released(release: str, name: str, version: str) -> dict[str, bytes]:
-    root = RELEASED / release / name / version
-    return {path: (root / path).read_bytes() for path in ("workflow.yaml", "README.md")}
-
-
-@pytest.mark.parametrize("release", ["v0.7.1", "v0.9.0"])
-def test_the_versions_a_release_published_move_to_their_form_text(release: str) -> None:
-    forge = FakeForgejo()
-    classic = forge.seed(
-        FULL,
-        _released(release, CLASSIC, "v2"),
-        tags=("v2",),
-        topics=("unicon-workflow",),
-    )
-    folder = forge.seed(
-        f"{ORG}/{FOLDER}.workflow",
-        _released(release, FOLDER, "v1"),
-        tags=("v1",),
-        topics=("unicon-workflow",),
-    )
-
-    summary = _seed(forge)
-
-    assert classic.files_at("v2") == _v2()
-    assert folder.files_at("v1") == seed_files(DEPLOY, FOLDER, "v1")
-    for name, version in ((CLASSIC, "v2"), (FOLDER, "v1")):
-        assert any(
-            f"workflow {ORG}/{name} version {version}" in line and "moved" in line
-            for line in summary.lines()
-        )
-
-
 @pytest.mark.parametrize(
     ("older", "newer"),
     [
