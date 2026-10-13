@@ -437,6 +437,13 @@ to it, rather than stopping at the version at the forge that differs, so a
 declaration changed on the laptop is what the next save compiles against.
 It refuses to run without `compose.dev.yaml` among the compose files.
 
+`unicon/classic@v2` and `unicon/classic-folder@v1` were edited in place
+when a board's value key took over choosing how a value combines across
+tests: their `time_ms` and `memory_kb` no longer say `fold: max`. A
+development stack bootstrapped before that holds the old tags and stops
+at them, so run `uv run bootstrap --rewrite` once, or start the stack
+fresh.
+
 On a development stack, one CI agent: `laptop`, enrolled as a global agent
 through Woodpecker's administrator API, its token written to
 `WOODPECKER_DEV_AGENT_TOKEN` for the dev overlay to hand it. A rerun finds it
