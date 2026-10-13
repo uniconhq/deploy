@@ -332,10 +332,20 @@ def test_saying_what_each_outcome_means_moves_the_version(tmp_path: Path) -> Non
     assert "  created  primitive unicon/compile version v1 (moved)" in summary.lines()
 
 
-def test_an_outcome_port_of_another_type_still_stops_the_run() -> None:
-    assert primitives.compiled(WITH_OUTCOME) != primitives.compiled(
+def test_an_outcome_port_of_another_type_still_stops_the_run(tmp_path: Path) -> None:
+    forge = FakeForgejo()
+    checkout = _compile(tmp_path)
+    (checkout / "primitive.yaml").write_bytes(WITH_OUTCOME)
+    _seed(forge, _manifest(("v1", checkout, FIRST)))
+    (checkout / "primitive.yaml").write_bytes(
         WITH_OUTCOME.replace(b"type: outcome", b"type: text")
     )
+    forge.requests.clear()
+
+    with pytest.raises(main.DifferingVersions, match="unicon/compile@v1"):
+        _seed(forge, _manifest(("v1", checkout, FIRST)))
+
+    assert forge.writes() == []
 
 
 @pytest.mark.parametrize(
