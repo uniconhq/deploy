@@ -130,6 +130,45 @@ Postgres is published on **55432**, not 5432: a developer machine often already
 runs a PostgreSQL of its own, and two listeners on 5432 do not fail, they make
 `psql -h localhost` a coin toss.
 
+## Upgrading a running stack
+
+After a new release, with this repo at the release:
+
+```sh
+COMPOSE="docker compose -f compose.yaml --profile app"
+$COMPOSE pull backend-migrate backend frontend
+$COMPOSE up -d backend-migrate backend frontend
+uv run bootstrap
+$COMPOSE exec -T backend unicon-forge reconcile
+```
+
+The first two lines bring the app to the new images; `backend` waits for
+`backend-migrate` to apply the release's migrations. Bootstrap then seeds
+any new primitive or workflow version and moves a seeded version that
+differs only in its words, as [What bootstrap made](#what-bootstrap-made)
+says. It comes after the backend, since an older backend may not read what
+the new versions say.
+
+The last line runs the forge's `reconcile` once. Like `backend-migrate`'s
+`unicon-forge migrate`, it is the forge package's command from the backend
+image, but it reads every `UNICON_*` setting the backend has, so it runs in
+the running `backend` container rather than a job of its own. It puts back
+whatever keeps each contest and task right at the forge where it is missing
+or wrong, so places made before the upgrade get what the release now gives
+each new one. Among those is the protection on each contest's and task's
+branch that lets the platform's account alone push or merge to it, which
+contests and tasks made before that protection came in lack until it runs.
+It also activates every published task at the CI and gives every
+submission at the forge without a grading its grading, which on a stack
+that kept running finds nothing to do. It logs what it did as
+`reconcile.done`, with how many places it secured again, and running it
+again does no harm. A stack bootstrapped fresh on the release needs none of
+this: every contest and task is secured as it is made.
+
+On a development stack the same holds with `-f compose.dev.yaml` added to
+`COMPOSE`, the `pull` line left out and `--build` added to the `up` line;
+[Back to a known state](#back-to-a-known-state) starts from nothing instead.
+
 ## Running the stack in development
 
 The whole sequence, from nothing to a signed-in browser and a machine that
@@ -158,9 +197,11 @@ Each primitive checkout fills the version at the forge that is the major of
 its own version, `v2` for 2.0.0, and the versions it does not fill come from
 `images.json` as released. After a change in one of those checkouts, run the
 first two lines again. A rebuilt image under the same declaration moves its
-version at the forge to the new digest, as a patch release does. A changed
-`primitive.yaml` stops bootstrap before it seeds anything, naming the version
-that differs; `uv run bootstrap --rewrite` rewrites it in place instead.
+version at the forge to the new digest, as a patch release does, and so does
+a `primitive.yaml` changed only in its words, a title, a description or what
+an outcome means. One changed in anything else stops bootstrap before it
+seeds anything, naming the version that differs; `uv run bootstrap
+--rewrite` rewrites it in place instead.
 Either way a task already published keeps grading with the image its plan
 pinned until it is saved again.
 
@@ -254,14 +295,59 @@ confirmation link for an account you make, and every invite, is at http://localh
 publishes Forgejo on `127.0.0.1:3300` for `scripts/check-lfs.py`, which
 drives its API from this machine; nothing else uses that port.
 
+### Back to a known state
+
+```sh
+uv run scripts/reset-dev.py            # --build to rebuild the backend and frontend too
+```
+
+throws the dev stack's data away (`down -v`), bootstraps an empty stack,
+starts both profiles from the images already built, and leaves two people
+and one contest to try things on:
+
+- `alice` and `bob`, with the passwords and email addresses in `.env`,
+  which you add by hand and bootstrap keeps:
+
+  ```sh
+  DEV_ALICE_PASSWORD=...
+  DEV_ALICE_EMAIL=...
+  DEV_BOB_PASSWORD=...
+  DEV_BOB_EMAIL=...
+  ```
+
+- the org `demo`, alice its admin, and its contest `sample`, "Sample
+  contest", running from an hour before the reset for 30 days, open to
+  anyone who signs up and approved by an organiser;
+- its task `sum`, the starter on `unicon/classic@v2` with a statement of
+  A + B, three tests and a submission rate of 10 in any 60 seconds,
+  published, so a submission grades. The statement
+  is written before the contest opens, since a contest does not open while
+  a task's published statement is the starter's placeholder, and every
+  save comes before the contest opens, so none of them asks before it
+  publishes.
+
+Bob has not registered. It takes about three minutes, and it refuses before
+throwing anything away when a key is missing. Sign in again from a new tab
+on the app: bootstrap registers the app at Forgejo afresh, so a page open from
+before the reset sends Forgejo a client id it no longer has ("Client ID not
+registered"). The contest and task are made
+from the pages, with the browser tests' own steps (`tests/e2e/stack.py`), so
+it needs `uv run playwright install chromium` once.
+
 ## What bootstrap made
 
 Two Forgejo accounts. `unicon-backend` is a site administrator and holds the
 admin token, `UNICON_FORGE_ADMIN_TOKEN`: the backend uses it to create
-organisations, repositories, teams and protected tags, and never to act for a
-person.
+organisations, repositories, teams, protected tags and protected branches,
+and to write each change an organiser saves to a contest or a task, with
+the organiser named as the change's author; it is otherwise never used to
+act for a person.
 `compose.yaml` names it to the backend as `UNICON_FORGE_PLATFORM_ACCOUNT`, and
-the backend reserves the protected tags for that one account. `unicon-ci` is an
+the backend reserves the protected tags for that one account and lets it
+alone push or merge to a contest's or a task's branch, repository admins
+included, so an organiser changes those files only through the app's save.
+The name has to be the account the admin token belongs to, or every save is
+refused at the forge. `unicon-ci` is an
 ordinary account that Woodpecker signs in as. Two accounts rather than one,
 because Woodpecker insists on a real forge login for its own user and the
 site-administrator token must not sit in Woodpecker's database.
@@ -301,7 +387,7 @@ nothing. The two are compared as the compiler reads them, parsed under YAML
 1.2's core schema: the ports with their types and options, the limits with
 `gpus`, `limits_from`, `network` and `batch`. One that differs only in
 what the compiler does not read, its image, its `title`, its own or a port's
-`description`, a comment or the layout, is a patch release, a fixed image with the same ports, or a
+`description`, the outcome port's `outcomes`, a comment or the layout, is a patch release, a fixed image with the same ports, or a
 reworded one: bootstrap moves the tag to a commit of the release's files
 with the manifest's digest written in, and says `(moved)`. One whose
 declaration differs in anything the compiler reads stops the run. Bootstrap compares
@@ -322,18 +408,21 @@ public repository `unicon/<name>.workflow` with the topic
 the version's tag holds, and bootstrap publishes each to its own tag by the
 same rule: a tag that is not there is made, and one that is there and holds
 the same files is left as it is. One whose definition differs only in what
-does not grade, an input's `title`, `help` or `unit`, a comment or the
-layout, or whose README differs, is moved to the new files, and the run
+does not grade, an input's `title`, `help` or `unit`, a reported value's
+`title` or `unit`, a comment or the layout, or whose README differs, is moved to the new files, and the run
 says `(moved)`; so a version is fixed in how it grades, while the words a
 person reads at its tag can change. One whose definition differs in
 anything that grades stops the run the same way. The definitions are
 compared as the forge reads them: an input or test field written as a bare
-type, `time_limit: number`, is `{type: number}`, and a flag set `false` is
+type, `time_limit: number`, is `{type: number}`, a reported value written
+as a bare reference is one given `from` alone, and a flag set `false` is
 one left out.
 `unicon/classic` is the built-in workflow: compile the submission, run it on
 every test, compare each output with the answer. `unicon/classic@v2`
 wires the primitives' `v2` in the format of `TASK-FORMAT.md`, with each
-test's `input` and `answer`, and reports the time and memory of every run.
+test's `input` and `answer`, and reports the time and memory of every run,
+which pages name "Run time", in ms, and "Memory used", in KB, and the
+compiler's "Compile log"; `unicon/classic-folder@v1` reports the same.
 `unicon/classic-folder@v1` is classic over a folder of sources: the
 contestant gives a folder, its language and the entry point `compile@v2`
 starts from (`TASK-FORMAT.md` section 4.7). A definition changed in how it grades is a new folder. Every primitive version a
@@ -428,9 +517,9 @@ that holds that version, a new image under the same declaration moves the
 version to it, and any other change to the declaration stops bootstrap,
 since a version's ports never change.
 
-Today it pins runner `v0.8.0`, the primitives' `v1`, `sandbox-run` at
+Today it pins runner `v0.9.0`, the primitives' `v1`, `sandbox-run` at
 `v1.3.0` and `compile` and `diff-check` at `v1.1.1`, and their `v2`, all
-three at `v2.1.0`.
+three at `v2.2.0`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
@@ -603,7 +692,9 @@ through Forgejo's pages. The organiser creates an org, a contest and a task
 from the organiser pages' New buttons, opening each one's page as soon as it
 is made, saves the task from its page so it publishes (with a looser
 submission rate than the starter's one per 30 seconds, so the second submit
-is not refused), sets the contest running now in its settings and opens it
+is not refused), writes its statement on its Statement card, since a
+contest does not open while a task's statement is the starter's
+placeholder, sets the contest running now in its settings and opens it
 from its status card. The entrant registers, the organiser approves them
 from the Entrants page, and the entrant submits the sample solution and then
 a wrong one from the submit panel; the test expects `ACCEPTED` and then
