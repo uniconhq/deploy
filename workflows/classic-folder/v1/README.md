@@ -19,5 +19,6 @@ over a limit or crashed, or else the check's: `accepted` when the output
 matches the answer, `wrong_answer` when it does not.
 
 Each test reports `time_ms`, "Run time" in ms, and `memory_kb`, "Memory
-used" in KB, which fold over tests by their largest, lower being better, and
-the compiler's output is reported once as `log`, "Compile log".
+used" in KB, lower being better, each board that ranks on one choosing how
+it combines a task's tests, and the compiler's output is reported once as
+`log`, "Compile log".
