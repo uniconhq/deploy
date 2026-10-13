@@ -18,6 +18,6 @@ A submission that does not compile stops the run, and every test is
 over a limit or crashed, or else the check's: `accepted` when the output
 matches the answer, `wrong_answer` when it does not.
 
-Each test reports `time_ms` and `memory_kb`, which fold over tests by their
-largest, lower being better, and the compiler's output is reported once as
-`log`.
+Each test reports `time_ms`, "Run time" in ms, and `memory_kb`, "Memory
+used" in KB, which fold over tests by their largest, lower being better, and
+the compiler's output is reported once as `log`, "Compile log".

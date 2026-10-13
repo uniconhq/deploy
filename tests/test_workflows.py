@@ -48,7 +48,6 @@ NO_PRIMITIVES = Manifest(
     },
     primitives=(),
 )
-REPORTED = "fold: max, better: lower, at_least: 0}"
 
 
 FIRST = {"workflow.yaml": b"steps: [0]\n", "README.md": b"# classic\n"}
@@ -282,7 +281,7 @@ def test_rewrite_moves_each_version_that_differs(tmp_path: Path) -> None:
 
 def _without_form_text(definition: bytes) -> bytes:
     """classic's definition as it was before its inputs gave the task's form
-    a title, help and unit.
+    a title, help and unit, and its reported values a title and unit.
     """
     kept = [
         line
@@ -298,7 +297,7 @@ def _without_form_text(definition: bytes) -> bytes:
         {**_v2(), "workflow.yaml": _without_form_text(_v2()["workflow.yaml"])},
         {**_v2(), "README.md": b"# classic, as it read before\n"},
     ],
-    ids=["its inputs' form text", "its README"],
+    ids=["its form text", "its README"],
 )
 def test_a_version_changed_in_nothing_that_grades_moves_to_the_new_files(
     older: dict[str, bytes],
@@ -321,26 +320,32 @@ def test_a_version_changed_in_nothing_that_grades_moves_to_the_new_files(
     assert forge.writes() == []
 
 
-RELEASED = Path(__file__).resolve().parent / "released" / "v0.7.1"
-"""Each built-in workflow version as deploy v0.7.1 published it, copied
-byte for byte from that tag: its inputs are written in the short form,
-`time_limit: number`, as the stacks bootstrapped from it hold them.
+RELEASED = Path(__file__).resolve().parent / "released"
+"""Each built-in workflow version as a deploy release published it, copied
+byte for byte from its tag: v0.7.1's write their inputs in the short form,
+`time_limit: number`, and v0.9.0's give their inputs a title, help and
+unit but their reported values none, `log` a bare reference, as the stacks
+bootstrapped from each hold them.
 """
 
 
-def _released(name: str, version: str) -> dict[str, bytes]:
-    root = RELEASED / name / version
+def _released(release: str, name: str, version: str) -> dict[str, bytes]:
+    root = RELEASED / release / name / version
     return {path: (root / path).read_bytes() for path in ("workflow.yaml", "README.md")}
 
 
-def test_the_versions_v0_7_1_published_move_to_their_inputs_form_text() -> None:
+@pytest.mark.parametrize("release", ["v0.7.1", "v0.9.0"])
+def test_the_versions_a_release_published_move_to_their_form_text(release: str) -> None:
     forge = FakeForgejo()
     classic = forge.seed(
-        FULL, _released(CLASSIC, "v2"), tags=("v2",), topics=("unicon-workflow",)
+        FULL,
+        _released(release, CLASSIC, "v2"),
+        tags=("v2",),
+        topics=("unicon-workflow",),
     )
     folder = forge.seed(
         f"{ORG}/{FOLDER}.workflow",
-        _released(FOLDER, "v1"),
+        _released(release, FOLDER, "v1"),
         tags=("v1",),
         topics=("unicon-workflow",),
     )
@@ -369,8 +374,23 @@ def test_the_versions_v0_7_1_published_move_to_their_inputs_form_text() -> None:
             b"steps:\n  - {id: a, use: x}\n",
             b"steps:\n  - {id: a, use: x, per_test: false}\n",
         ),
+        (
+            b"report:\n  log: ${{ steps.c.log }}\n",
+            b"report:\n  log: {from: '${{ steps.c.log }}', title: Compile log}\n",
+        ),
+        (
+            b"report:\n  t: {from: x, fold: max}\n",
+            b"report:\n  t: {from: x, title: Run time, unit: ms, fold: max}\n",
+        ),
     ],
-    ids=["a short input", "a short test field", "a false flag", "a false step flag"],
+    ids=[
+        "a short input",
+        "a short test field",
+        "a false flag",
+        "a false step flag",
+        "a short reported value",
+        "a reported value's title and unit",
+    ],
 )
 def test_a_declaration_reads_as_the_forge_reads_it(older: bytes, newer: bytes) -> None:
     assert graded(older) == graded(newer)
@@ -379,6 +399,12 @@ def test_a_declaration_reads_as_the_forge_reads_it(older: bytes, newer: bytes) -
 def test_a_flag_set_true_still_grades_differently() -> None:
     assert graded(b"inputs:\n  limit: number\n") != graded(
         b"inputs:\n  limit: {type: number, optional: true}\n"
+    )
+
+
+def test_a_reported_values_meaning_still_grades_differently() -> None:
+    assert graded(b"report:\n  t: {from: x, title: T, fold: max}\n") != graded(
+        b"report:\n  t: {from: x, title: T, fold: sum}\n"
     )
 
 
@@ -498,9 +524,23 @@ def test_v2_wires_the_v2_primitives_over_tests_and_reports() -> None:
     ]
     assert definition[at("report:") :] == [
         "report:",
-        f'  time_ms: {{from: "${{{{ steps.run.time_ms }}}}", {REPORTED}',
-        f'  memory_kb: {{from: "${{{{ steps.run.memory_kb }}}}", {REPORTED}',
-        "  log: ${{ steps.compile.compile_log }}",
+        "  time_ms:",
+        "    from: ${{ steps.run.time_ms }}",
+        "    title: Run time",
+        "    unit: ms",
+        "    fold: max",
+        "    better: lower",
+        "    at_least: 0",
+        "  memory_kb:",
+        "    from: ${{ steps.run.memory_kb }}",
+        "    title: Memory used",
+        "    unit: KB",
+        "    fold: max",
+        "    better: lower",
+        "    at_least: 0",
+        "  log:",
+        "    from: ${{ steps.compile.compile_log }}",
+        "    title: Compile log",
     ]
     for wiring in (
         "      source: ${{ inputs.submission }}",

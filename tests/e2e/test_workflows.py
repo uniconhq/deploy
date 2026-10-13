@@ -13,8 +13,9 @@ saved and published, the version keeps the file's comment. The author
 shares it with an organiser, who chooses it for a task: that task's save
 writes one `plans/plan.json` in which each per-test step over a primitive
 that takes a batch is a single step. A second task, of a program of
-several files, grades with unicon/classic-folder@v1. An entrant's solution
-to each grades accepted; the forge takes a run's `result.json` only when
+several files, grades with unicon/classic-folder@v1. With each task's
+statement written, the contest opens, and an entrant's solution to each
+grades accepted; the forge takes a run's `result.json` only when
 it validates against the runner's `result.schema.json`, and grades
 anything else a system error, so an accepted verdict is a result that
 validated. Every seeded workflow draws with no wire behind a box, the same
@@ -42,6 +43,7 @@ from tests.e2e.stack import (
     APP,
     CREATE_TIMEOUT_MS,
     SAMPLE,
+    STATEMENT,
     approve,
     contest_settings,
     create,
@@ -57,6 +59,7 @@ from tests.e2e.stack import (
     submission_rate,
     submit,
     verdict_of,
+    write_statement,
 )
 
 pytestmark = [needs_stack]
@@ -369,6 +372,7 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     create(organiser, "spring", "Create contest", "New contest")
     contest_page = organiser.url
     create(organiser, "made", "Create task", "New task")
+    made_page = organiser.url
     workflow = organiser.get_by_role("region", name="Workflow")
     workflow.get_by_role("combobox", name="Workflow").select_option(
         label=f"{owner}/graded"
@@ -404,6 +408,7 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
         lambda workflow: workflow == "unicon/classic-folder@v1",
         "the task's workflow",
     )
+    multi_page = organiser.url
     organiser.reload()
     submitted = organiser.get_by_role("region", name="What entrants submit")
     submitted.get_by_role("group", name="Program").get_by_role(
@@ -414,6 +419,8 @@ def test_a_workflow_is_built_versioned_shared_and_graded_with(
     ).fill("main.py")
     submission_rate(organiser, 10, 60)
     save_task(organiser)
+    for task_page in (made_page, multi_page):
+        write_statement(organiser, task_page, STATEMENT)
 
     # The contest runs now, and the entrant is in.
     now = datetime.now(UTC).replace(second=0, microsecond=0)

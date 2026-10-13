@@ -33,13 +33,14 @@ before anything is seeded (main.py), naming it, and new ports reach the forge
 as a new version in the manifest. The two are compared as the forge reads
 them, parsed under YAML 1.2's core schema (core_yaml.py): the ports with
 their types and options, the limits with `gpus`, `limits_from`, `network`
-and `batch`; the image, a `title`, a `description`, comments and layout
-are passed over. A patch release, a fixed image with the same ports, is the same
-version with a new digest: the manifest takes it under the same version, and
-bootstrap moves the version's tag to a commit of the release's files with
-the new image written in. A release that changes only a title, a
-description or a comment moves the tag the same way. A task already published
-keeps grading with the digest its plan pinned until it is next saved, so the
+and `batch`; the image, a `title`, a `description`, the outcome port's
+`outcomes`, comments and layout are passed over. A patch release, a fixed
+image with the same ports, is the same version with a new digest: the
+manifest takes it under the same version, and bootstrap moves the version's
+tag to a commit of the release's files with the new image written in. A
+release that changes only a title, a description, what its outcomes mean or
+a comment moves the tag the same way. A task already published keeps
+grading with the digest its plan pinned until it is next saved, so the
 socket filter's list holds every image a version has named, read back from
 the repository's history. A change to the other files alone is no
 difference, because it changes nothing that grades: the program that runs is
@@ -218,8 +219,8 @@ def moves_in_place(
 ) -> bool:
     """Whether the version at the forge holds another declaration than these
     files that the compiler reads alike: a patch release, a fixed image with
-    the same ports, or a new title, description or comment, which moves
-    the version in place. Read without writing anything.
+    the same ports, or a new title, description, meaning of an outcome or
+    comment, which moves the version in place. Read without writing anything.
     """
     repo = repository(release.name)
     commit = repos.versions(PLATFORM_ORG, repo).get(release.version)
@@ -236,9 +237,9 @@ def moves_in_place(
 def compiled(declaration_bytes: bytes) -> object | None:
     """What the compiler reads of a declaration: the document as the forge
     parses it, without its `image`, without the declaration's `title` and
-    `description` and without any port's `description`, so a comment, the
-    layout and the editor's text change nothing. None when it does not parse
-    as a mapping.
+    `description` and without any port's `description` or `outcomes`, so a
+    comment, the layout and the editor's text change nothing. None when it
+    does not parse as a mapping.
     """
     try:
         document = core_yaml.load(declaration_bytes)
@@ -259,11 +260,15 @@ named `description`."""
 EDITOR_TEXT = ("title", "description")
 """What a declaration tells the workflow editor and nothing else."""
 
+PORT_TEXT = ("description", "outcomes")
+"""What a port tells the workflow editor and nothing else: what it takes or
+gives back, and on the outcome port what each outcome means."""
+
 
 def _without_editor_text(document: dict[str, object]) -> object:
     """The declaration without its own `title` and `description` and without
-    each port's `description`: a port named `description` is a port and
-    stays.
+    each port's `description` and `outcomes`: a port named `description` is
+    a port and stays.
     """
     found: dict[str, object] = {}
     for key, value in document.items():
@@ -272,7 +277,7 @@ def _without_editor_text(document: dict[str, object]) -> object:
         if key in PORTS and isinstance(value, dict):
             value = {
                 name: (
-                    {part: held for part, held in port.items() if part != "description"}
+                    {part: held for part, held in port.items() if part not in PORT_TEXT}
                     if isinstance(port, dict)
                     else port
                 )
