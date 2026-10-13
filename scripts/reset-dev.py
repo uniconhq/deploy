@@ -13,8 +13,8 @@ What it leaves, every time:
 - its task `sum`, the starter task on unicon/classic@v2, with a statement
   of A + B in place of the starter's placeholder, written first since a
   contest does not open while a task's published statement is the
-  starter's, and two tests more than the starter's one, saved and
-  published so it grades.
+  starter's, two tests more than the starter's one, and a submission rate
+  of 10 in any 60 seconds, saved and published so it grades.
 
 Bob has not registered, so signing up as him and approving him as alice is
 the first thing there is to try.

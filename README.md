@@ -319,7 +319,8 @@ and one contest to try things on:
   contest", running from an hour before the reset for 30 days, open to
   anyone who signs up and approved by an organiser;
 - its task `sum`, the starter on `unicon/classic@v2` with a statement of
-  A + B and three tests, published, so a submission grades. The statement
+  A + B, three tests and a submission rate of 10 in any 60 seconds,
+  published, so a submission grades. The statement
   is written before the contest opens, since a contest does not open while
   a task's published statement is the starter's placeholder, and every
   save comes before the contest opens, so none of them asks before it
