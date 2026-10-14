@@ -467,7 +467,7 @@ jobs:
         working-directory: deploy
         run: |
           cp workflows/classic/v2/workflow.yaml workflow.saved
-          sed -i '0,/fold: max/s//fold: sum/' workflows/classic/v2/workflow.yaml
+          sed -i '0,/at_least: 0/s//at_least: 1/' workflows/classic/v2/workflow.yaml
           if uv run bootstrap > changed-run.txt; then
             cat changed-run.txt
             echo "bootstrap seeded over a version that differs"

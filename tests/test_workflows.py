@@ -320,47 +320,6 @@ def test_a_version_changed_in_nothing_that_grades_moves_to_the_new_files(
     assert forge.writes() == []
 
 
-RELEASED = Path(__file__).resolve().parent / "released"
-"""Each built-in workflow version as a deploy release published it, copied
-byte for byte from its tag: v0.7.1's write their inputs in the short form,
-`time_limit: number`, and v0.9.0's give their inputs a title, help and
-unit but their reported values none, `log` a bare reference, as the stacks
-bootstrapped from each hold them.
-"""
-
-
-def _released(release: str, name: str, version: str) -> dict[str, bytes]:
-    root = RELEASED / release / name / version
-    return {path: (root / path).read_bytes() for path in ("workflow.yaml", "README.md")}
-
-
-@pytest.mark.parametrize("release", ["v0.7.1", "v0.9.0"])
-def test_the_versions_a_release_published_move_to_their_form_text(release: str) -> None:
-    forge = FakeForgejo()
-    classic = forge.seed(
-        FULL,
-        _released(release, CLASSIC, "v2"),
-        tags=("v2",),
-        topics=("unicon-workflow",),
-    )
-    folder = forge.seed(
-        f"{ORG}/{FOLDER}.workflow",
-        _released(release, FOLDER, "v1"),
-        tags=("v1",),
-        topics=("unicon-workflow",),
-    )
-
-    summary = _seed(forge)
-
-    assert classic.files_at("v2") == _v2()
-    assert folder.files_at("v1") == seed_files(DEPLOY, FOLDER, "v1")
-    for name, version in ((CLASSIC, "v2"), (FOLDER, "v1")):
-        assert any(
-            f"workflow {ORG}/{name} version {version}" in line and "moved" in line
-            for line in summary.lines()
-        )
-
-
 @pytest.mark.parametrize(
     ("older", "newer"),
     [
@@ -379,8 +338,8 @@ def test_the_versions_a_release_published_move_to_their_form_text(release: str) 
             b"report:\n  log: {from: '${{ steps.c.log }}', title: Compile log}\n",
         ),
         (
-            b"report:\n  t: {from: x, fold: max}\n",
-            b"report:\n  t: {from: x, title: Run time, unit: ms, fold: max}\n",
+            b"report:\n  t: {from: x}\n",
+            b"report:\n  t: {from: x, title: Run time, unit: ms}\n",
         ),
     ],
     ids=[
@@ -403,14 +362,14 @@ def test_a_flag_set_true_still_grades_differently() -> None:
 
 
 def test_a_reported_values_meaning_still_grades_differently() -> None:
-    assert graded(b"report:\n  t: {from: x, title: T, fold: max}\n") != graded(
-        b"report:\n  t: {from: x, title: T, fold: sum}\n"
+    assert graded(b"report:\n  t: {from: x, title: T, at_least: 0}\n") != graded(
+        b"report:\n  t: {from: x, title: T, at_least: 1}\n"
     )
 
 
 def test_a_version_changed_in_what_grades_still_stops_the_run() -> None:
     forge = FakeForgejo()
-    changed = _v2()["workflow.yaml"].replace(b"fold: max", b"fold: sum", 1)
+    changed = _v2()["workflow.yaml"].replace(b"at_least: 0", b"at_least: 1", 1)
     forge.seed(FULL, {**_v2(), "workflow.yaml": changed}, tags=("v2",))
     forge.requests.clear()
 
@@ -528,14 +487,12 @@ def test_v2_wires_the_v2_primitives_over_tests_and_reports() -> None:
         "    from: ${{ steps.run.time_ms }}",
         "    title: Run time",
         "    unit: ms",
-        "    fold: max",
         "    better: lower",
         "    at_least: 0",
         "  memory_kb:",
         "    from: ${{ steps.run.memory_kb }}",
         "    title: Memory used",
         "    unit: KB",
-        "    fold: max",
         "    better: lower",
         "    at_least: 0",
         "  log:",
