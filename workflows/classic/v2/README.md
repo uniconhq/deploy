@@ -16,7 +16,8 @@ matches the answer, `wrong_answer` when it does not.
 
 Each test reports `time_ms`, "Run time" in ms, the program's CPU time, at
 least the time limit when it ran out of time, and `memory_kb`, "Memory used"
-in KB, its peak memory. Both fold over tests by their largest, and lower is
-better, so a board can rank on a task's slowest test. The compiler's output
+in KB, its peak memory. Lower is better for both, and a board that ranks on
+one chooses how it combines a task's tests, so it can rank on a task's
+slowest test or its total time. The compiler's output
 is reported once as `log`, "Compile log", so a submission that does not
 compile says why. The titles and units are what pages name the values by.
