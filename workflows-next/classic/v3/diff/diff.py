@@ -6,19 +6,22 @@ reports through the folder exec names in `UNICON_REPORT`: `verdict` 0 and
 `score` 1 when the two match, and `verdict` 1 when they do not, so a wrong
 answer's score counts as 0, the worst its bounds allow.
 
-Two files match when they have the same lines once trailing whitespace
-(spaces, tabs, carriage returns, vertical tabs and form feeds) is removed
-from every line and trailing blank lines are removed from the end. Leading
-whitespace and blank lines between other lines still count. The files are
-compared as bytes, in blocks, so no text encoding is assumed and the time is
-linear in their size. The memory is a few blocks for most files, with two
-exceptions. A run of whitespace is held until what follows it is read, so
-an output of nothing but spaces is held whole, up to the 32 MB exec keeps
-of one, and so is a run in the answer. A block whose lines still end in
-whitespace after `TRIM_PASSES` passes is split into lines, which for short
-lines takes about 40 times the block. Together they were measured at
-74 MB, so the step needs a memory limit of 128 MB or more. This is the rule of unicon/diff-check@v2, which this
-script replaces.
+Two files match when they hold the same words in the same order, a word
+being a run of bytes between spaces, tabs, carriage returns and line feeds,
+as testlib's `wcmp` and most judges compare. So an answer is not wrong for
+its line breaks or its spacing: leading, trailing and repeated whitespace
+and blank lines anywhere do not count, and an answer split across lines
+matches one on a single line. A vertical tab or form feed is part of a
+word, as in testlib. A task that wants exact lines brings a checker of its
+own.
+
+The files are compared as bytes, in blocks, so no text encoding is assumed
+and the time is linear in their size: each is read as its words one space
+apart, and the two are compared block by block, so the memory is a few
+blocks however long a word is: a 32 MB output of one-digit lines against
+a 48 MB answer took 0.3 s and 34 MB on a laptop, the interpreter included,
+and two 32 MB files of one word each 16 MB. The step needs a memory limit
+of 128 MB or more, which leaves room.
 
 A file that is missing or cannot be read ends the script with an error, as a
 program that cannot judge does: exec makes that a fault for staff, never a
@@ -26,17 +29,18 @@ score.
 """
 
 import os
+import re
 import sys
 from collections.abc import Iterator
-from itertools import chain
 from pathlib import Path
 from typing import BinaryIO
 
-BLOCK = 1 << 20
-LINE_SPACE = b" \t\r\x0b\x0c"
-"""The whitespace `bytes.rstrip` takes off the end of a line, but the newline."""
-LINE_ENDS = tuple(bytes((space,)) + b"\n" for space in LINE_SPACE)
-TRIM_PASSES = 4
+BLOCK = 1 << 18
+SPACE = frozenset(b" \t\r\n")
+"""The bytes words are split on."""
+NOT_SPACE = (b"\x0b", b"\x0c")
+"""The bytes `bytes.split` splits on that are part of a word here."""
+WORD = re.compile(rb"[^ \t\r\n]+")
 
 
 def main() -> int:
@@ -51,76 +55,56 @@ def main() -> int:
 
 
 def same(actual: Path, expected: Path) -> bool:
-    """Whether two files match, ignoring trailing whitespace and trailing blank lines.
+    """Whether two files hold the same words in the same order.
 
-    The files are read in blocks of `BLOCK` bytes. Blocks that are the same
-    byte for byte are passed over, so two identical files are compared at the
-    speed of reading them. From the first blocks that differ, each file's
-    lines have their trailing whitespace taken out (see `trimmed`) and the two
-    trimmed streams are compared. Leaving out the same bytes from the start of
-    both does not change the answer, even when they end inside a line: what is
-    left of that line in each is compared, trimmed, as the whole line would
-    be. Once one stream runs out, all that is left of the other must be
-    newlines, which is what ignoring trailing blank lines means.
+    Each file is read as its words one space apart (see `spaced`), and the
+    two streams are compared as far as the shorter block goes, the rest kept
+    for the next. Once one stream runs out, the other must have run out too.
     """
     with actual.open("rb") as left, expected.open("rb") as right:
-        while (a := left.read(BLOCK)) == (b := right.read(BLOCK)):
-            if not a:
-                return True
-        ours, theirs = trimmed(a, left), trimmed(b, right)
+        ours, theirs = spaced(left), spaced(right)
         a = b = b""
         while True:
             a = a or next(ours, b"")
             b = b or next(theirs, b"")
             if not a or not b:
-                break
+                return not a and not b
             length = min(len(a), len(b))
             if a[:length] != b[:length]:
                 return False
             a, b = a[length:], b[length:]
-        rest, more = (a, ours) if a else (b, theirs)
-        return not rest.strip(b"\n") and not any(block.strip(b"\n") for block in more)
 
 
-def trimmed(first: bytes, stream: BinaryIO) -> Iterator[bytes]:
-    """`first` and the rest of the stream with each line's trailing whitespace
-    taken out, in non-empty blocks.
+def spaced(stream: BinaryIO) -> Iterator[bytes]:
+    """The stream's words, each pair one space apart, with nothing before
+    the first or after the last, in non-empty blocks.
 
-    The whitespace at the end of what has been read so far is held back, in
-    the blocks it was read in, until the next byte that is not whitespace
-    shows whether it ends a line: a newline drops it, anything else lets it
-    through. At the end of the stream it is dropped. A long run of
-    whitespace is held whole, however many blocks it takes.
+    Each block read gives its words one space apart, and one more space
+    before them when whitespace parts them from the word before, at the end
+    of the last block with a word or the start of this one. A word that runs
+    over the end of a block goes on in the next block's first, with nothing
+    between.
     """
-    held: list[bytes] = []
-    start = (first,) if first else ()
-    for block in chain(start, iter(lambda: stream.read(BLOCK), b"")):
-        kept = block.rstrip(LINE_SPACE)
-        if not kept:
-            held.append(block)
+    started = parted = False
+    for block in iter(lambda: stream.read(BLOCK), b""):
+        found = split(block)
+        if not found:
+            parted = True
             continue
-        if held and not block.lstrip(LINE_SPACE).startswith(b"\n"):
-            yield from held
-        held = [block[len(kept) :]] if len(kept) < len(block) else []
-        yield trim_lines(kept)
+        joined = b" ".join(found)
+        if started and (parted or block[0] in SPACE):
+            joined = b" " + joined
+        yield joined
+        started = True
+        parted = block[-1] in SPACE
 
 
-def trim_lines(data: bytes) -> bytes:
-    """`data` with the whitespace before each of its newlines taken out.
-
-    Each pass takes one whitespace byte from before every newline, searching
-    and replacing at the speed of the bytes methods, so the usual one or two
-    (a space, a carriage return) go in a pass or two. Whitespace still left
-    after `TRIM_PASSES` passes is on lines longer than that, so there are few
-    of them, and the data is then split into lines and each one trimmed.
-    """
-    for _ in range(TRIM_PASSES):
-        ends = [end for end in LINE_ENDS if end in data]
-        if not ends:
-            return data
-        for end in ends:
-            data = data.replace(end, b"\n")
-    return b"\n".join([line.rstrip(LINE_SPACE) for line in data.split(b"\n")])
+def split(block: bytes) -> list[bytes]:
+    """The words of one block, at the speed of `bytes.split` unless the block
+    holds a byte that splits there but not here."""
+    if any(byte in block for byte in NOT_SPACE):
+        return WORD.findall(block)
+    return block.split()
 
 
 if __name__ == "__main__":

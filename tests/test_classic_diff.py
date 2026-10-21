@@ -1,6 +1,7 @@
 """The diff script unicon/classic@v3 ships, workflows-next/classic/v3/diff/:
-the rule of unicon/diff-check@v2, every case its tests hold, and the report
-it writes for exec.
+words compared as testlib's wcmp compares them, every case of
+unicon/diff-check@v2's tests judged by that rule, and the report it writes
+for exec.
 
 Its run through exec, in manifest mode on the exec image, is in
 primitive-exec's image tests, which read this folder from a deploy checkout
@@ -10,6 +11,7 @@ beside them.
 from __future__ import annotations
 
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -47,21 +49,22 @@ MATCHING = [
     (b"yes\n", b"yes\n\n  \n"),
     (b"", b"\n\n"),
     (b"", b""),
-]
-"""diff-check@v2's matching cases: trailing whitespace on a line and
-trailing blank lines do not count."""
-
-DIFFERING = [
-    (b"1 2 3\n", b"1 2 4\n"),
     (b" 1 2 3\n", b"1 2 3\n"),
     (b"1  2 3\n", b"1 2 3\n"),
     (b"a\n\nb\n", b"a\nb\n"),
-    (b"a\n", b"a\nb\n"),
-    (b"", b"0\n"),
     (b"\n\nyes\n", b"yes\n"),
 ]
-"""diff-check@v2's differing cases: leading whitespace, inner spacing, inner
-blank lines and content all count."""
+"""diff-check@v2's cases that match by words: the first eight matched there
+too; leading whitespace, inner spacing and blank lines between lines, which
+counted there, count no more."""
+
+DIFFERING = [
+    (b"1 2 3\n", b"1 2 4\n"),
+    (b"a\n", b"a\nb\n"),
+    (b"", b"0\n"),
+]
+"""diff-check@v2's cases that still differ: a different word, one more
+word, and a word against nothing."""
 
 
 @pytest.mark.parametrize(("actual", "expected"), MATCHING)
@@ -85,28 +88,88 @@ def test_differing_files_are_not_the_same(
 
 
 @pytest.mark.parametrize(
+    ("actual", "expected"),
+    [
+        (b"1\n2\n3\n", b"1 2 3\n"),
+        (b"1\n2\n3", b"1 2 3"),
+        (b"3\n1 4 1\n5 9\n", b"3 1 4\n1 5 9\n"),
+        (b"1\t2\r\n\r\n3", b"1 2 3"),
+        (b"  42", b"42"),
+    ],
+)
+def test_an_answer_split_across_lines_or_spaced_otherwise_matches(
+    tmp_path: Path, actual: bytes, expected: bytes
+) -> None:
+    left = write(tmp_path / "output", actual)
+    right = write(tmp_path / "answer", expected)
+    assert diff.same(left, right)
+    assert diff.same(right, left)
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected"),
+    [
+        (b"yes\n\n\n\n", b"yes"),
+        (b"yes", b"yes\n\n  \n\t\n"),
+        (b"1 2\n\r\n\n", b"1 2\n"),
+        (b"\n \n", b""),
+    ],
+)
+def test_trailing_blank_lines_do_not_count(
+    tmp_path: Path, actual: bytes, expected: bytes
+) -> None:
+    left = write(tmp_path / "output", actual)
+    right = write(tmp_path / "answer", expected)
+    assert diff.same(left, right)
+    assert diff.same(right, left)
+
+
+@pytest.mark.parametrize(
+    ("actual", "expected"),
+    [
+        (b"12 3\n", b"1 23\n"),
+        (b"1 2\n", b"12\n"),
+        (b"Yes\n", b"yes\n"),
+        (b"1.0\n", b"1\n"),
+        (b"1 2 3\n", b"1 2 3 4\n"),
+        (b"a\x0bb\n", b"a b\n"),
+        (b"a\x0cb\n", b"a\nb\n"),
+    ],
+)
+def test_words_that_differ_or_are_split_differently_do_not_match(
+    tmp_path: Path, actual: bytes, expected: bytes
+) -> None:
+    """A vertical tab or a form feed is part of a word, as in testlib."""
+    left = write(tmp_path / "output", actual)
+    right = write(tmp_path / "answer", expected)
+    assert not diff.same(left, right)
+    assert not diff.same(right, left)
+
+
+@pytest.mark.parametrize(
     ("actual", "expected", "matches"),
     [
         (b"ab  ", b"ab\n", True),
         (b"ab  \t\n\n", b"ab", True),
-        (b"ab  c", b"ab c", False),
-        (b"ab  c", b"ab  c  \n", True),
-        (b"  \n  ab", b"\nab", False),
-        (b"  \n  ab", b"\n  ab", True),
-        (b"1 2 \n3", b"1 2\n3", True),
-        (b"1 2 \n3", b"1 23", False),
-        (b"xy \t\r\x0b\x0c \nz\n", b"xy\nz", True),
+        (b"ab  c", b"ab c", True),
+        (b"abc d", b"ab cd", False),
+        (b"abcdef", b"abc def", False),
+        (b"abcdef", b"abcdef\n", True),
+        (b"abcdefg", b"abcdef", False),
+        (b"a b", b"a\n\n\nb\n\n", True),
+        (b"  \n  ab", b"ab", True),
+        (b"x\x0by z", b"x\x0by\nz", True),
     ],
 )
-def test_whitespace_across_blocks(
+def test_words_across_blocks(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     actual: bytes,
     expected: bytes,
     matches: bool,
 ) -> None:
-    """Whitespace split over the blocks the files are read in is judged as
-    if read whole."""
+    """Words split over the blocks the files are read in are judged as if
+    read whole."""
     monkeypatch.setattr(diff, "BLOCK", 2)
     left = write(tmp_path / "output", actual)
     right = write(tmp_path / "answer", expected)
@@ -114,17 +177,33 @@ def test_whitespace_across_blocks(
     assert diff.same(right, left) is matches
 
 
+@pytest.mark.parametrize("block", [1, 2, 3, 5, 64])
 @pytest.mark.parametrize(
-    ("data", "lines"),
+    "data",
     [
-        (b"a\r\nb \n c\t\n", b"a\nb\n c\n"),
-        (b"a \r\n\x0c\n", b"a\n\n"),
-        (b"a \t\r\x0b\x0c \t\nb  c   \n", b"a\nb  c\n"),
-        (b"a b", b"a b"),
+        b"",
+        b" ",
+        b"word",
+        b"two words",
+        b"  lead and trail  \n\n",
+        b"a\tb\rc\nd  e\r\n\r\nf",
+        b"a\x0bb \x0cc\x0b \x0c",
+        b"longer words split over many blocks here",
     ],
 )
-def test_trim_lines(data: bytes, lines: bytes) -> None:
-    assert diff.trim_lines(data) == lines
+def test_a_file_reads_as_its_words_one_space_apart(
+    monkeypatch: pytest.MonkeyPatch, data: bytes, block: int
+) -> None:
+    """However the file falls into blocks, it reads as the whole file's
+    words, split on spaces, tabs, carriage returns and line feeds, one space
+    apart."""
+    monkeypatch.setattr(diff, "BLOCK", block)
+    found = list(diff.spaced(io.BytesIO(data)))
+    assert all(found)
+    words = data
+    for space in b"\t\r\n":
+        words = words.replace(bytes((space,)), b" ")
+    assert b"".join(found) == b" ".join(word for word in words.split(b" ") if word)
 
 
 def report(
