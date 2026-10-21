@@ -21,9 +21,11 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
         with:
           enable-cache: true
 
@@ -84,46 +86,54 @@ jobs:
             echo "$repo at $ref"
             echo "$repo=$ref" >> "$GITHUB_OUTPUT"
           done
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           path: deploy
-      - uses: actions/checkout@v7
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: uniconhq/forge
           ref: ${{ steps.refs.outputs['forge'] }}
           path: forge
-      - uses: actions/checkout@v7
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: uniconhq/backend
           ref: ${{ steps.refs.outputs['backend'] }}
           path: backend
-      - uses: actions/checkout@v7
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: uniconhq/frontend
           ref: ${{ steps.refs.outputs['frontend'] }}
           path: frontend
-      - uses: actions/checkout@v7
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: uniconhq/runner
           ref: ${{ steps.refs.outputs['runner'] }}
           path: runner
-      - uses: actions/checkout@v7
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: uniconhq/primitive-compile
           ref: ${{ steps.refs.outputs['primitive-compile'] }}
           path: primitive-compile
-      - uses: actions/checkout@v7
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: uniconhq/primitive-sandbox-run
           ref: ${{ steps.refs.outputs['primitive-sandbox-run'] }}
           path: primitive-sandbox-run
-      - uses: actions/checkout@v7
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
         with:
           repository: uniconhq/primitive-diff-check
           ref: ${{ steps.refs.outputs['primitive-diff-check'] }}
           path: primitive-diff-check
+          persist-credentials: false
 
-      - uses: astral-sh/setup-uv@v10.1.0
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
         with:
           enable-cache: true
 
@@ -194,8 +204,8 @@ jobs:
         run: |
           app="http://localhost:8080"
           forge="http://forge.localhost:8080"
-          resolve="--resolve forge.localhost:8080:127.0.0.1"
-          status() { curl -s -o /dev/null -w '%{http_code}' $resolve "$1"; }
+          resolve=(--resolve forge.localhost:8080:127.0.0.1)
+          status() { curl -s -o /dev/null -w '%{http_code}' "${resolve[@]}" "$1"; }
           expect() {
             got="$(status "$2")"
             if [ "$got" != "$1" ]; then echo "$2 answered $got, expected $1"; exit 1; fi
@@ -231,12 +241,12 @@ jobs:
           expect 200 "$forge/user/login"
           expect 200 "$forge/assets/css/unicon.css"
           expect 302 "$forge/"
-          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/")" = "$app/api/v1/auth/login?next=/"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' "${resolve[@]}" "$forge/")" = "$app/api/v1/auth/login?next=/"
           expect 302 "$forge/-/back"
-          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/-/back")" = "$app/account"
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' "${resolve[@]}" "$forge/-/back")" = "$app/account"
           expect 302 "$forge/-/home"
-          test "$(curl -s -o /dev/null -w '%{redirect_url}' $resolve "$forge/-/home")" = "$app/"
-          curl -fsS $resolve "$forge/user/login" | grep -q 'href="/-/home"'
+          test "$(curl -s -o /dev/null -w '%{redirect_url}' "${resolve[@]}" "$forge/-/home")" = "$app/"
+          curl -fsS "${resolve[@]}" "$forge/user/login" | grep -q 'href="/-/home"'
           expect 303 "$forge/user/settings"
           expect 303 "$forge/user/settings/change_password"
           expect 303 "$forge/login/oauth/authorize"
@@ -248,9 +258,9 @@ jobs:
           expect 404 "$forge/unicon"
           expect 404 "$forge/unicon/x.git/info/refs?service=git-receive-pack"
           expect 404 "$forge/unicon/x.git/info/refs?service=git-upload-pack"
-          curl -fsS $resolve "$forge/user/login" | grep -q unicon.css
+          curl -fsS "${resolve[@]}" "$forge/user/login" | grep -q unicon.css
           for url in "$app/" "$forge/user/login" "$app/nothing-here"; do
-            curl -s -D - -o /dev/null $resolve "$url" > headers.txt
+            curl -s -D - -o /dev/null "${resolve[@]}" "$url" > headers.txt
             grep -qi '^x-content-type-options: nosniff' headers.txt
             grep -qi '^x-frame-options: deny' headers.txt
             grep -qi "^content-security-policy: frame-ancestors 'none'" headers.txt
@@ -266,10 +276,10 @@ jobs:
       - name: sign-up is open on both sides
         working-directory: deploy
         run: |
-          resolve="--resolve forge.localhost:8080:127.0.0.1"
+          resolve=(--resolve forge.localhost:8080:127.0.0.1)
           curl -fsS http://localhost:8080/api/v1/auth/register-url | grep -q '"url":"http://forge.localhost:8080/user/sign_up"'
           curl -fsS http://localhost:8080/api/v1/auth/forge-url | grep -q '"url":"http://forge.localhost:8080"'
-          curl -fsS $resolve http://forge.localhost:8080/user/sign_up | grep -q 'name="user_name"'
+          curl -fsS "${resolve[@]}" http://forge.localhost:8080/user/sign_up | grep -q 'name="user_name"'
 
       # The extension refuses every method from outside, and object storage
       # takes only the writes it is routed for. A write with no signature
@@ -490,14 +500,14 @@ jobs:
       - name: sign-in posts are slowed per address
         working-directory: deploy
         run: |
-          resolve="--resolve forge.localhost:8080:127.0.0.1"
+          resolve=(--resolve forge.localhost:8080:127.0.0.1)
           seq 300 | xargs -P 100 -I{} curl -s -o /dev/null -w '%{http_code}\n' --max-time 4 \
-            $resolve -X POST -d 'user_name=nobody&password=x' \
+            "${resolve[@]}" -X POST -d 'user_name=nobody&password=x' \
             http://forge.localhost:8080/user/login > posts.txt || true
           sort posts.txt | uniq -c
           grep -qx 429 posts.txt
           grep -qx 200 posts.txt
-          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 $resolve http://forge.localhost:8080/user/login)" = 200
+          test "$(curl -s -o /dev/null -w '%{http_code}' --max-time 4 "${resolve[@]}" http://forge.localhost:8080/user/login)" = 200
 
       # The one switch closed: Forgejo refuses sign-up and the landing page
       # no longer offers it, from one line of .env and a bootstrap.
@@ -511,8 +521,8 @@ jobs:
             sleep 2
           done
           curl -fsS http://localhost:8080/api/v1/auth/register-url | grep -q '"url":null'
-          resolve="--resolve forge.localhost:8080:127.0.0.1"
-          curl -fsS $resolve http://forge.localhost:8080/user/sign_up > sign-up.html
+          resolve=(--resolve forge.localhost:8080:127.0.0.1)
+          curl -fsS "${resolve[@]}" http://forge.localhost:8080/user/sign_up > sign-up.html
           grep -q 'Registration is disabled' sign-up.html
           if grep -q 'name="user_name"' sign-up.html; then echo "Forgejo still offers sign-up"; exit 1; fi
 
@@ -520,3 +530,19 @@ jobs:
         if: failure()
         working-directory: deploy
         run: docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color | tail -300
+
+  workflows:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
+      - name: zizmor
+        run: uvx zizmor@1.31.1 --offline --format github .github/workflows
+      - name: actionlint
+        run: |
+          docker run --rm -v "$PWD:/repo" -w /repo \
+            rhysd/actionlint:1.7.12@sha256:b1934ee5f1c509618f2508e6eb47ee0d3520686341fec936f3b79331f9315667 -color
