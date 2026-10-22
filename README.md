@@ -563,6 +563,35 @@ The build attaches no provenance attestation, which would carry the build's
 time and make every build a new digest: an image that did not change keeps
 its digest, and bootstrap then leaves its primitive as it is.
 
+## A grading machine
+
+`machine/grading-machine.py` makes an Ubuntu 24.04 host a grading machine
+and checks it, run as root with the machine's settings in a JSON file; its
+docstring and `Settings` say what each setting is:
+
+```sh
+python3 grading-machine.py setup /etc/unicon/machine.json
+python3 grading-machine.py self-test /etc/unicon/machine.json
+```
+
+It builds the one shape stage 4 picked: rootless Docker under a throwaway
+user, `unicon-grader`, with its data root on a filesystem of its own, and
+an nftables table on that user's uid that lets its traffic reach only the
+addresses the settings allow, IPv4 and IPv6 alike. The daemon tells
+containers to ask `192.0.2.1` for names, which answers nothing; every step
+gets `/etc/unicon/hosts` as its `/etc/hosts`, and the names the daemon and
+the agent use are pinned in the machine's own. The agent runs as a user of
+its own, `unicon-agent`, against the daemon's socket, with the labels
+`pool=platform,shape=rootless` and `WOODPECKER_BACKEND_DOCKER_LIMIT_MEM`.
+The self-test runs at the end of `setup`, which starts the agent only when
+every check passes, and prints `network wall: on` or `off`. Run again, it
+takes new settings and new pinned addresses.
+
+It has run on a stand-in, an Ubuntu 24.04 container booting systemd over
+Docker Desktop's kernel, and not yet on a real machine. There, the kernel
+settings and the block devices failed the self-test, as they should on that
+kernel, and the agent was started by hand.
+
 ## The grading machine in development
 
 `--profile agent` starts what a grading machine is, all from
