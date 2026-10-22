@@ -141,10 +141,10 @@ AGENT_UNIT = "unicon-agent@.service"
 SLOT_TABLE = Path(__file__).resolve().with_name("slots.json")
 """The slot sizes, deploy's one table of them, which the forge plans with
 too (`UNICON_SLOT_SIZES`, written by bootstrap): kept beside this script."""
-SYSTEM_MB = 2048
+SYSTEM_MB = 1024
 """What a machine keeps of its memory, in MB, outside the throwaway user's
 slice, which every container is in: the system and the agents."""
-DAEMON_MB = 1024
+DAEMON_MB = 512
 """What the slice keeps beside its slots, in MB: the rootless daemon,
 containerd and the network helper."""
 SYSTEM_CORES = 1
@@ -271,13 +271,15 @@ class Size:
 class Slot:
     """One slot of the machine and its agent: its name, `<size>-<n>`, its
     size, the cores it is pinned to as cpuset names them, whether it is
-    kept for the early lane, and its agent's health check port."""
+    kept for the early lane, its agent's health check port, and whether it
+    takes a pipeline of any size, as a slot of the largest size does."""
 
     name: str
     size: Size
     cpus: str
     early: bool
     port: int
+    any_size: bool = False
 
     @property
     def memory(self) -> int:
@@ -288,9 +290,14 @@ class Slot:
         """Its agent's labels. The forge labels a pipeline with the size it
         fits and its lane; a slot kept for the early lane takes early
         pipelines alone, and every other slot takes either, `*`, so a late
-        slot of each size is never kept from the early lane's work."""
+        slot is never kept from the early lane's work. A slot of the
+        largest size takes a pipeline of any size, `*`, so smaller work
+        overflows into it; Woodpecker gives a pipeline to the agent whose
+        labels match it most exactly, so smaller work goes to a slot of its
+        own size first, and early work to an early slot first."""
         lane = "early" if self.early else "*"
-        return f"{settings.labels},size={self.size.name},lane={lane}"
+        size = "*" if self.any_size else self.size.name
+        return f"{settings.labels},size={size},lane={lane}"
 
 
 def read_sizes(text: str) -> tuple[Size, ...]:
@@ -344,12 +351,15 @@ def plan_slots(
 ) -> tuple[Slot, ...]:
     """The machine's slots, fixed until setup runs again, from its `cpus`
     and `memory_mb`, less `SYSTEM_CORES`, `SYSTEM_MB` and `DAEMON_MB`.
-    `settings.slots` gives how many of each size; otherwise one of each,
-    the largest first, while it fits, and then as many of the smallest as
-    fit. Of the smallest size there is, `early_share` of every slot,
-    rounded, is kept for the early lane, but one of that size is not, so
-    late work of each size has a slot. Each slot gets cores of its own.
-    Refused when the slots asked for do not fit, or none does.
+    `settings.slots` gives how many of each size; otherwise, of each size
+    above the smallest, the largest first, one while at least two of the
+    smallest still fit beside it, and then as many of the smallest as fit,
+    so a small machine runs small slots alone. With two slots or more,
+    `early_share` of them, rounded, but at least one and never all, is
+    kept for the early lane, the smallest first, so early work always has
+    a slot of its own and late work one it may take. Each slot gets cores
+    of its own. Refused when the slots asked for do not fit, or none does,
+    naming the smallest machine one slot fits on.
     """
     free_cpus = sorted(cpus)[SYSTEM_CORES:]
     free_mb = memory_mb - SYSTEM_MB - DAEMON_MB
@@ -360,28 +370,45 @@ def plan_slots(
             f"slots names {', '.join(unknown)}, which {SLOT_TABLE.name} does not: "
             f"{', '.join(by_name)}"
         )
+    smallest = sizes[0]
+
+    def fitting(size: Size, cores: int, held: int) -> int:
+        return max(
+            0,
+            min(
+                (len(free_cpus) - cores) // size.cores,
+                (free_mb - held) // size.memory_mb,
+            ),
+        )
+
     counts = {size.name: settings.slots.get(size.name, 0) for size in sizes}
     if not settings.slots:
         cores, held = 0, 0
-        for size in (*reversed(sizes), *[sizes[0]] * len(free_cpus)):
-            if (
-                cores + size.cores <= len(free_cpus)
-                and held + size.memory_mb <= free_mb
-            ):
-                counts[size.name] += 1
+        for size in reversed(sizes[1:]):
+            if fitting(smallest, cores + size.cores, held + size.memory_mb) >= 2:
+                counts[size.name] = 1
                 cores += size.cores
                 held += size.memory_mb
+        counts[smallest.name] = fitting(smallest, cores, held)
     cores = sum(by_name[name].cores * count for name, count in counts.items())
     held = sum(by_name[name].memory_mb * count for name, count in counts.items())
     if not any(counts.values()) or cores > len(free_cpus) or held > free_mb:
+        asked = ", ".join(f"{n} {name}" for name, n in counts.items())
         raise MachineError(
-            f"the slots ({', '.join(f'{n} {name}' for name, n in counts.items())}) "
-            f"need {cores} cores and {held} MB; this machine gives slots "
-            f"{len(free_cpus)} cores and {free_mb} MB"
+            (
+                f"the slots ({asked}) need {cores} cores and {held} MB"
+                if any(counts.values())
+                else "no slot fits"
+            )
+            + f"; this machine gives slots {len(free_cpus)} cores and {free_mb} MB. "
+            f"The smallest machine a {smallest.name} slot fits on has "
+            f"{SYSTEM_CORES + smallest.cores} cores and "
+            f"{SYSTEM_MB + DAEMON_MB + smallest.memory_mb} MB of memory (MemTotal)"
         )
     total = sum(counts.values())
-    smallest = next(size.name for size in sizes if counts[size.name])
-    early = min(round(total * settings.early_share), counts[smallest] - 1)
+    early = 0
+    if total >= 2 and settings.early_share:
+        early = min(max(1, round(total * settings.early_share)), total - 1)
     slots: list[Slot] = []
     for size in sizes:
         for number in range(1, counts[size.name] + 1):
@@ -391,8 +418,9 @@ def plan_slots(
                     f"{size.name}-{number}",
                     size,
                     cpu_list(taken),
-                    size.name == smallest and number <= early,
+                    len(slots) < early,
                     FIRST_HEALTH_PORT + len(slots),
+                    size == sizes[-1],
                 )
             )
     return tuple(slots)
@@ -425,8 +453,9 @@ class Settings:
     `cache_cap` is the most the step cache may hold, in bytes; a quarter
     of the data root's size when not given. `slots` gives how many slots
     of each size of `SLOT_TABLE` the machine runs, and `early_share` the
-    share of them kept for the early lane (`plan_slots`); the sizes
-    themselves are the table's alone, which the forge plans with.
+    share of them kept for the early lane, none when 0 (`plan_slots`);
+    the sizes themselves are the table's alone, which the forge plans
+    with.
     `agent_environment` is passed to every agent as it is, after the
     variables this script sets, but for those a slot is made of.
     """

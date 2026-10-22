@@ -440,9 +440,11 @@ def _derive_values(
 
 def slot_sizes(table: Path) -> str:
     """UNICON_SLOT_SIZES, the forge's copy of the slot sizes in `table`,
-    `<name>:<memory MB>` comma separated in the table's order."""
+    `<name>:<cores>:<memory MB>` comma separated in the table's order."""
     sizes = json.loads(table.read_text())
-    return ",".join(f"{name}:{size['memory_mb']}" for name, size in sizes.items())
+    return ",".join(
+        f"{name}:{size['cores']}:{size['memory_mb']}" for name, size in sizes.items()
+    )
 
 
 def sign_up_open(values: dict[str, str], *, development: bool) -> bool:

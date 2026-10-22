@@ -590,18 +590,31 @@ memory kills alone, so a box killed for its memory does not fail its step.
 The machine is cut into slots, each of one size of `machine/slots.json`,
 the one table of slot sizes, which bootstrap also writes into `.env` as
 `UNICON_SLOT_SIZES` for the forge to plan each run task pipeline into
-(keep the table beside the script on the machine). Setup keeps a core and
-3 GB for the system, the agents and the daemon, then gives the machine one
-slot of each size, the largest first, while it fits, and as many of the
-smallest as fit after; `slots` in the settings gives the counts instead,
-and `early_share` (a quarter unless given) the share of slots, all of the
-smallest size but one, kept for early pipelines. Each slot has an agent of
+(keep the table beside the script on the machine). A `small` slot is one
+core and 2 GB, which holds a compile, an `exec` step of a 1 GB run or an
+`interact` step of two 512 MB programs; a `big` slot is two cores and
+8 GB. Setup keeps a core and 1.5 GB for the system, the agents and the
+daemon, so the smallest machine it takes has 2 cores and 3584 MB of
+memory as the kernel reports it (`MemTotal`), as a 4 GB machine does,
+and runs one small slot; setup refuses a smaller one and says so. It
+gives a big slot only while at least two small ones still fit beside it,
+then as many small ones as fit: a 4-core 8 GB machine runs three small
+slots, an 8-core 16 GB one a big and three small, a 16-core 64 GB one a
+big and thirteen small. `slots` in the settings gives the counts instead.
+With two slots or more, `early_share` (a quarter unless given) of them,
+rounded, but at least one and never all, the smallest first, is kept for
+early pipelines; `early_share: 0` keeps none. Each slot has an agent of
 its own, `unicon-agent@<slot>.service`, which takes one workflow at a
 time, pins every container of it to the slot's cores and caps it at the
 slot's memory with no swap, and has the labels
 `pool=platform,shape=rootless,size=<size>,lane=early` for a slot kept for
-the early lane and `lane=*` for every other. The throwaway user's slice,
-which holds every container, is capped at the machine's memory less 2 GB.
+the early lane and `lane=*` for every other; a big slot has `size=*`, so
+small work overflows into it, though Woodpecker gives a pipeline to the
+agent its labels match most exactly first. A run on the harness carries
+`lane=late` and no size, so it never takes an early slot; slot machines
+run no socket filter, so it fails there as before. The throwaway user's
+slice, which holds every container, is capped at the machine's memory
+less 1 GB.
 The slots are fixed until setup runs again. Every agent runs as a user of
 its own, `unicon-agent`, from a binary checked against
 `agent_binary_sha256`, and starts only while the wall is loaded. `setup`

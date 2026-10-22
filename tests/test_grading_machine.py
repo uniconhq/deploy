@@ -169,8 +169,8 @@ def laid_out(slots: Any) -> list[tuple[str, str, bool, int]]:
 
 def test_the_slot_table_is_deploys_one_table_of_sizes(machine: ModuleType) -> None:
     assert [(size.name, size.cores, size.memory_mb) for size in sizes(machine)] == [
-        ("small", 2, 8192),
-        ("big", 4, 28672),
+        ("small", 1, 2048),
+        ("big", 2, 8192),
     ]
     with pytest.raises(machine.MachineError, match="no whole cores and memory_mb"):
         machine.read_sizes('{"small": {"cores": 0, "memory_mb": 8192}}')
@@ -185,27 +185,43 @@ def test_the_forge_is_given_the_sizes_the_machine_reads(machine: ModuleType) -> 
 
     assert main.SLOT_TABLE.name == machine.SLOT_TABLE.name
     assert written == ",".join(
-        f"{size.name}:{size.memory_mb}" for size in sizes(machine)
+        f"{size.name}:{size.cores}:{size.memory_mb}" for size in sizes(machine)
     )
-    assert written == "small:8192,big:28672"
+    assert written == "small:1:2048,big:2:8192"
 
 
-def test_a_machine_gets_one_slot_of_each_size_then_as_many_small_ones_as_fit(
+def test_a_machine_gets_small_slots_and_a_big_one_only_beside_two_small(
     machine: ModuleType,
 ) -> None:
-    """16 cores and 64 GB: one core and 3 GB kept, a big slot, then four
-    small ones, the first kept for the early lane, a quarter of five."""
-    assert laid_out(slots_of(machine, 16, 64)) == [
-        ("small-1", "1-2", True, 3000),
-        ("small-2", "3-4", False, 3001),
-        ("small-3", "5-6", False, 3002),
-        ("small-4", "7-8", False, 3003),
-        ("big-1", "9-12", False, 3004),
+    """8 cores and 16 GB: one core and 1.5 GB kept, a big slot, since three
+    small ones still fit beside it, then those three, the first kept for
+    the early lane, a quarter of four."""
+    assert laid_out(slots_of(machine, 8, 16)) == [
+        ("small-1", "1", True, 3000),
+        ("small-2", "2", False, 3001),
+        ("small-3", "3", False, 3002),
+        ("big-1", "4-5", False, 3003),
     ]
-    # Too little memory for a big slot: small ones alone.
-    assert [slot.name for slot in slots_of(machine, 16, 24)] == ["small-1", "small-2"]
-    # The cores run out first.
-    assert [slot.name for slot in slots_of(machine, 4, 64)] == ["small-1"]
+    # A big slot would leave one small one: small ones alone.
+    assert [slot.name for slot in slots_of(machine, 4, 16)] == [
+        "small-1",
+        "small-2",
+        "small-3",
+    ]
+    # The memory runs out first.
+    assert [slot.name for slot in slots_of(machine, 16, 8)] == [
+        "small-1",
+        "small-2",
+        "small-3",
+    ]
+    # The smallest machine: one small slot, which is in no lane of its own.
+    assert laid_out(slots_of(machine, 2, 4)) == [("small-1", "1", False, 3000)]
+    # The memory a 4 GB machine reports is less than 4 GB.
+    assert (
+        len(machine.plan_slots(sizes(machine), settings(machine), range(2), 3584)) == 1
+    )
+    with pytest.raises(machine.MachineError, match="has 2 cores and 3584 MB"):
+        machine.plan_slots(sizes(machine), settings(machine), range(2), 3583)
 
 
 def test_the_early_lane_keeps_a_share_of_the_smallest_slots_but_one(
@@ -216,27 +232,36 @@ def test_the_early_lane_keeps_a_share_of_the_smallest_slots_but_one(
             slot.name for slot in slots_of(machine, 64, 256, **changed) if slot.early
         ]
 
-    # A big slot and 28 small ones: a quarter of 29, rounded.
-    assert early() == [f"small-{number}" for number in range(1, 8)]
+    # 61 small slots and a big one: a quarter of 62, rounded.
+    assert early() == [f"small-{number}" for number in range(1, 17)]
     assert early(early_share=0) == []
-    # Every small slot but one, so late work of that size has a slot.
-    assert early(slots={"small": 2, "big": 2}, early_share=0.75) == ["small-1"]
+    # Every slot but one, the smallest first, so late work has a slot.
+    assert early(slots={"small": 2, "big": 2}, early_share=0.75) == [
+        "small-1",
+        "small-2",
+        "big-1",
+    ]
     assert early(slots={"big": 3}, early_share=0.4) == ["big-1"]
+    # At least one of two slots or more, however small the share.
+    assert early(slots={"small": 2}, early_share=0.1) == ["small-1"]
+    assert early(slots={"small": 1}) == []
 
 
 def test_the_slot_counts_are_the_settings_when_given_and_must_fit(
     machine: ModuleType,
 ) -> None:
     assert laid_out(slots_of(machine, 16, 64, slots={"big": 2})) == [
-        ("big-1", "1-4", False, 3000),
-        ("big-2", "5-8", False, 3001),
+        ("big-1", "1-2", True, 3000),
+        ("big-2", "3-4", False, 3001),
     ]
-    with pytest.raises(machine.MachineError, match="need 12 cores and 86016 MB"):
-        slots_of(machine, 16, 64, slots={"big": 3})
+    with pytest.raises(machine.MachineError, match="need 16 cores and 65536 MB"):
+        slots_of(machine, 16, 64, slots={"big": 8})
     with pytest.raises(machine.MachineError, match="slots names huge"):
         slots_of(machine, 16, 64, slots={"huge": 1})
-    with pytest.raises(machine.MachineError, match="gives slots 1 cores and 5120 MB"):
-        slots_of(machine, 2, 8)
+    with pytest.raises(
+        machine.MachineError, match="no slot fits; this machine gives slots 0 cores"
+    ):
+        slots_of(machine, 1, 8)
 
 
 def test_cpus_read_and_written_as_the_kernel_lists_them(machine: ModuleType) -> None:
@@ -254,17 +279,17 @@ def test_each_slots_agent_takes_one_workflow_under_its_labels_and_limits(
     values = dict(line.split("=", 1) for line in text.splitlines())
 
     assert values["WOODPECKER_AGENT_LABELS"] == (
-        "pool=platform,shape=rootless,size=big,lane=*"
+        "pool=platform,shape=rootless,size=*,lane=*"
     )
     assert values["WOODPECKER_MAX_WORKFLOWS"] == "1"
-    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_CPU_SET"] == "9-12"
-    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM"] == str(28672 * 2**20)
-    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM_SWAP"] == str(28672 * 2**20)
+    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_CPU_SET"] == "14-15"
+    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM"] == str(8192 * 2**20)
+    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM_SWAP"] == str(8192 * 2**20)
     assert values["WOODPECKER_HOSTNAME"].endswith("-big-1")
     assert values["WOODPECKER_AGENT_CONFIG_FILE"] == (
         "/var/lib/unicon-agent/big-1/agent.conf"
     )
-    assert values["WOODPECKER_HEALTHCHECK_ADDR"] == "127.0.0.1:3004"
+    assert values["WOODPECKER_HEALTHCHECK_ADDR"] == "127.0.0.1:3013"
     assert values["WOODPECKER_BACKEND_DOCKER_VOLUMES"] == (
         "/etc/unicon/hosts:/etc/hosts:ro,/etc/unicon/cache-cap:/etc/unicon/cache-cap:ro"
     )
@@ -300,7 +325,7 @@ def test_the_self_test_reads_each_slots_limits_from_inside_a_container(
     not capped."""
     slots = slots_of(machine, 16, 64)[-2:]
     made: list[tuple[str, ...]] = []
-    seen = {"7-8": "7-8 8589934592 0", "9-12": "0-15 max max"}
+    seen = {"13": "13 2147483648 0", "14-15": "0-15 max max"}
 
     def docker(*arguments: str, **_: object) -> str:
         made.append(arguments)
@@ -317,17 +342,17 @@ def test_the_self_test_reads_each_slots_limits_from_inside_a_container(
     machine.check_slots(settings(machine), SimpleNamespace(pw_uid=1001), slots, report)
 
     assert report.failed == [
-        "slot big-1's containers have cores 9-12, 28672 MB and no swap"
+        "slot big-1's containers have cores 14-15, 8192 MB and no swap"
     ]
     assert made[1][:9] == (
         "run",
         "--rm",
         "--cpuset-cpus",
-        "9-12",
+        "14-15",
         "--memory",
-        str(28672 * 2**20),
+        str(8192 * 2**20),
         "--memory-swap",
-        str(28672 * 2**20),
+        str(8192 * 2**20),
         "--entrypoint",
     )
     held.write_text("max\n")
@@ -339,7 +364,7 @@ def test_the_slice_of_every_container_leaves_the_system_its_memory(
     machine: ModuleType,
 ) -> None:
     assert machine.slice_drop_in(65536) == (
-        f"[Slice]\nMemoryMax={(65536 - 2048) * 2**20}\nMemorySwapMax=0\n"
+        f"[Slice]\nMemoryMax={(65536 - 1024) * 2**20}\nMemorySwapMax=0\n"
     )
 
 
@@ -704,8 +729,8 @@ ENABLE_AGENT = (
     "systemctl",
     "enable",
     "--now",
-    *(f"unicon-agent@{slot}.service" for slot in ("small-1", "small-2")),
-    *(f"unicon-agent@{slot}.service" for slot in ("small-3", "small-4", "big-1")),
+    *(f"unicon-agent@small-{number}.service" for number in range(1, 14)),
+    "unicon-agent@big-1.service",
 )
 
 
@@ -757,7 +782,7 @@ def test_setup_runs_one_agent_per_slot_and_clears_away_those_gone(
         ("systemctl", "stop", "unicon-agent@*.service"),
     ]
     assert stubbed[-1] == ENABLE_AGENT
-    names = ["small-1", "small-2", "small-3", "small-4", "big-1"]
+    names = [*(f"small-{number}" for number in range(1, 14)), "big-1"]
     assert sorted(path.name for path in unicon.glob("agent-*.env")) == sorted(
         f"agent-{name}.env" for name in names
     )
@@ -778,9 +803,9 @@ def test_setup_changes_nothing_on_a_machine_no_slot_fits(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(machine, "memory_total", lambda: 2**33)
+    monkeypatch.setattr(machine, "memory_total", lambda: 2**31)
 
-    with pytest.raises(machine.MachineError, match="this machine gives slots"):
+    with pytest.raises(machine.MachineError, match="no slot fits"):
         machine.setup(setup_settings(machine, tmp_path))
 
     assert stubbed == []
