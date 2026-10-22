@@ -194,6 +194,10 @@ ARCHITECTURES = ("x86_64", "aarch64")
 """The architectures `agent_binary_sha256` may name, as `uname -m` does."""
 USER_NAME = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
 NO_LOGIN = ("/usr/sbin/nologin", "/sbin/nologin", "/bin/false", "/usr/bin/false")
+FIRST_PERSON_UID = 1000
+"""The first uid `useradd` gives a user it is not told is a system user,
+as Ubuntu and Debian set it: setup makes the throwaway user one of these,
+and the agent's user a system user, below."""
 # An agent label's value: the agent reads its labels as `key=value` pairs
 # split on commas.
 LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
@@ -570,12 +574,16 @@ class Settings:
             raise MachineError("wall_allow is empty: a step could reach nothing")
         if self.grader_user == self.agent_user:
             raise MachineError("grader_user and agent_user must differ")
-        for name, home in (
-            ("grader_user", Path("/home") / self.grader_user),
-            ("agent_user", AGENT_STATE),
+        for name, home, system in (
+            ("grader_user", Path("/home") / self.grader_user, False),
+            ("agent_user", AGENT_STATE, True),
         ):
             user = getattr(self, name)
-            if not USER_NAME.fullmatch(user) or user == "root" or taken(user, home):
+            if (
+                not USER_NAME.fullmatch(user)
+                or user == "root"
+                or taken(user, home, system=system)
+            ):
                 raise MachineError(
                     f"{name} {user!r} is root, a user setup did not make, or not "
                     "a user name; name a user of its own, made by setup"
@@ -644,10 +652,12 @@ def whole(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def taken(user: str, home: Path) -> bool:
+def taken(user: str, home: Path, *, system: bool) -> bool:
     """Whether `user` is a user of the machine already that setup did not
-    make: root, one whose shell lets them log in, or one whose home is not
-    `home`, the one setup gives it (`make_users`). Setup puts the agent's
+    make: root, one whose shell lets them log in, one whose home is not
+    `home`, the one setup gives it (`make_users`), or one whose uid is not
+    of the kind setup gives it, a system user's, below `FIRST_PERSON_UID`,
+    when `system`, and otherwise one from it on. Setup puts the agent's
     user in the throwaway user's group and walls the throwaway user's
     traffic, which is for users of their own: a system user such as
     `nobody` or `systemd-resolve` taken for the throwaway user would have
@@ -660,6 +670,7 @@ def taken(user: str, home: Path) -> bool:
         found.pw_uid == 0
         or found.pw_shell not in NO_LOGIN
         or Path(found.pw_dir) != home
+        or (found.pw_uid < FIRST_PERSON_UID) != system
     )
 
 

@@ -601,18 +601,48 @@ def test_a_system_user_is_refused_as_either_user(
         settings(machine, **{name: "systemd-resolve"})
 
 
+@pytest.mark.parametrize(
+    ("name", "user", "uid", "home"),
+    [
+        ("grader_user", "unicon-grader", 991, "/home/unicon-grader"),
+        ("agent_user", "unicon-agent", 1001, None),
+    ],
+)
+def test_a_user_of_the_other_kind_is_refused_whatever_its_home(
+    machine: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    name: str,
+    user: str,
+    uid: int,
+    home: str | None,
+) -> None:
+    """A system user whose home happens to be the throwaway user's, or a
+    person's whose home happens to be the agent's, is not one setup made:
+    setup makes the throwaway user a person's uid and the agent's a system
+    one."""
+    found = SimpleNamespace(
+        pw_uid=uid,
+        pw_shell="/usr/sbin/nologin",
+        pw_dir=home or str(machine.AGENT_STATE),
+    )
+    monkeypatch.setattr(machine.pwd, "getpwnam", lambda _: found)
+
+    with pytest.raises(machine.MachineError, match="a user setup did not make"):
+        settings(machine, **{name: user})
+
+
 def test_the_users_setup_made_are_taken_again(
     machine: ModuleType, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    homes = {
-        "unicon-grader": "/home/unicon-grader",
-        "unicon-agent": str(machine.AGENT_STATE),
+    made = {
+        "unicon-grader": (1001, "/home/unicon-grader"),
+        "unicon-agent": (998, str(machine.AGENT_STATE)),
     }
     monkeypatch.setattr(
         machine.pwd,
         "getpwnam",
         lambda user: SimpleNamespace(
-            pw_uid=1001, pw_shell="/usr/sbin/nologin", pw_dir=homes[user]
+            pw_uid=made[user][0], pw_shell="/usr/sbin/nologin", pw_dir=made[user][1]
         ),
     )
 
@@ -691,11 +721,13 @@ def stubbed(
     monkeypatch.setattr(machine.shutil, "which", lambda tool: f"/usr/bin/{tool}")
 
     def getpwnam(name: str) -> SimpleNamespace:
-        """Each user as setup makes it, by the home it gives."""
+        """Each user as setup makes it, by the home and the kind of uid it
+        gives: the throwaway user a person's, the agent's a system one."""
         grader = name == "unicon-grader"
         home = f"/home/{name}" if grader else str(machine.AGENT_STATE)
+        uid = 1001 if grader else 999
         return SimpleNamespace(
-            pw_uid=999, pw_gid=999, pw_shell="/usr/sbin/nologin", pw_dir=home
+            pw_uid=uid, pw_gid=uid, pw_shell="/usr/sbin/nologin", pw_dir=home
         )
 
     monkeypatch.setattr(machine.pwd, "getpwnam", getpwnam)
