@@ -98,7 +98,7 @@ repeat:
       - [tests/4.in, tests/4.ans]
 scoring:
   values:
-    passed: {block: sum_runs, over: {runs: all}, of: {run: [all, passed]}}
+    passed: {block: sum, over: {runs: all}, of: {run: [all, passed]}}
   show:
     now: [passed, all, tests/]
 submissions: {max: 50, rate: {count: 1, per: 5}}
