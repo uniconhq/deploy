@@ -24,6 +24,8 @@ from typing import Any
 
 import pytest
 
+from bootstrap import main
+
 SCRIPT = Path(__file__).resolve().parents[1] / "machine" / "grading-machine.py"
 AGENT = (
     "woodpeckerci/woodpecker-agent:v3.18.1@sha256:"
@@ -150,27 +152,131 @@ def test_the_daemon_tells_containers_to_ask_nowhere(machine: ModuleType) -> None
     ] == ["localhost:5000"]
 
 
-def test_the_agent_gets_its_labels_hosts_and_memory(machine: ModuleType) -> None:
-    text = machine.agent_environment(
-        settings(machine, agent_environment={"WOODPECKER_LOG_LEVEL": "debug"}),
-        "the-token",
-        17179869184,
+def sizes(machine: ModuleType) -> Any:
+    return machine.read_sizes(machine.SLOT_TABLE.read_text())
+
+
+def slots_of(machine: ModuleType, cores: int, memory_gb: int, **changed: Any) -> Any:
+    """The slots of a machine with `cores` CPUs, 0 on, and `memory_gb`."""
+    return machine.plan_slots(
+        sizes(machine), settings(machine, **changed), range(cores), memory_gb * 1024
     )
+
+
+def laid_out(slots: Any) -> list[tuple[str, str, bool, int]]:
+    return [(slot.name, slot.cpus, slot.early, slot.port) for slot in slots]
+
+
+def test_the_slot_table_is_deploys_one_table_of_sizes(machine: ModuleType) -> None:
+    assert [(size.name, size.cores, size.memory_mb) for size in sizes(machine)] == [
+        ("small", 2, 8192),
+        ("big", 4, 28672),
+    ]
+    with pytest.raises(machine.MachineError, match="no whole cores and memory_mb"):
+        machine.read_sizes('{"small": {"cores": 0, "memory_mb": 8192}}')
+    with pytest.raises(machine.MachineError, match="names no slot size"):
+        machine.read_sizes("{}")
+
+
+def test_the_forge_is_given_the_sizes_the_machine_reads(machine: ModuleType) -> None:
+    """Bootstrap writes the forge's copy from the same table, so the two
+    cannot drift; the forge's own test holds its default to it too."""
+    written = main.slot_sizes(SCRIPT.parent.parent / main.SLOT_TABLE)
+
+    assert main.SLOT_TABLE.name == machine.SLOT_TABLE.name
+    assert written == ",".join(
+        f"{size.name}:{size.memory_mb}" for size in sizes(machine)
+    )
+    assert written == "small:8192,big:28672"
+
+
+def test_a_machine_gets_one_slot_of_each_size_then_as_many_small_ones_as_fit(
+    machine: ModuleType,
+) -> None:
+    """16 cores and 64 GB: one core and 3 GB kept, a big slot, then four
+    small ones, the first kept for the early lane, a quarter of five."""
+    assert laid_out(slots_of(machine, 16, 64)) == [
+        ("small-1", "1-2", True, 3000),
+        ("small-2", "3-4", False, 3001),
+        ("small-3", "5-6", False, 3002),
+        ("small-4", "7-8", False, 3003),
+        ("big-1", "9-12", False, 3004),
+    ]
+    # Too little memory for a big slot: small ones alone.
+    assert [slot.name for slot in slots_of(machine, 16, 24)] == ["small-1", "small-2"]
+    # The cores run out first.
+    assert [slot.name for slot in slots_of(machine, 4, 64)] == ["small-1"]
+
+
+def test_the_early_lane_keeps_a_share_of_the_smallest_slots_but_one(
+    machine: ModuleType,
+) -> None:
+    def early(**changed: Any) -> list[str]:
+        return [
+            slot.name for slot in slots_of(machine, 64, 256, **changed) if slot.early
+        ]
+
+    # A big slot and 28 small ones: a quarter of 29, rounded.
+    assert early() == [f"small-{number}" for number in range(1, 8)]
+    assert early(early_share=0) == []
+    # Every small slot but one, so late work of that size has a slot.
+    assert early(slots={"small": 2, "big": 2}, early_share=0.75) == ["small-1"]
+    assert early(slots={"big": 3}, early_share=0.4) == ["big-1"]
+
+
+def test_the_slot_counts_are_the_settings_when_given_and_must_fit(
+    machine: ModuleType,
+) -> None:
+    assert laid_out(slots_of(machine, 16, 64, slots={"big": 2})) == [
+        ("big-1", "1-4", False, 3000),
+        ("big-2", "5-8", False, 3001),
+    ]
+    with pytest.raises(machine.MachineError, match="need 12 cores and 86016 MB"):
+        slots_of(machine, 16, 64, slots={"big": 3})
+    with pytest.raises(machine.MachineError, match="slots names huge"):
+        slots_of(machine, 16, 64, slots={"huge": 1})
+    with pytest.raises(machine.MachineError, match="gives slots 1 cores and 5120 MB"):
+        slots_of(machine, 2, 8)
+
+
+def test_cpus_read_and_written_as_the_kernel_lists_them(machine: ModuleType) -> None:
+    assert machine.read_cpu_list("0-3,6,8-9\n") == [0, 1, 2, 3, 6, 8, 9]
+    assert machine.cpu_list([9, 1, 2, 3, 6, 8]) == "1-3,6,8-9"
+    assert machine.cpu_list([5]) == "5"
+
+
+def test_each_slots_agent_takes_one_workflow_under_its_labels_and_limits(
+    machine: ModuleType,
+) -> None:
+    small, *_, big = slots_of(machine, 16, 64)
+    changed = {"agent_environment": {"WOODPECKER_LOG_LEVEL": "debug"}}
+    text = machine.agent_environment(settings(machine, **changed), "the-token", big)
     values = dict(line.split("=", 1) for line in text.splitlines())
 
-    assert values["WOODPECKER_AGENT_LABELS"] == "pool=platform,shape=rootless"
+    assert values["WOODPECKER_AGENT_LABELS"] == (
+        "pool=platform,shape=rootless,size=big,lane=*"
+    )
+    assert values["WOODPECKER_MAX_WORKFLOWS"] == "1"
+    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_CPU_SET"] == "9-12"
+    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM"] == str(28672 * 2**20)
+    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM_SWAP"] == str(28672 * 2**20)
+    assert values["WOODPECKER_HOSTNAME"].endswith("-big-1")
+    assert values["WOODPECKER_AGENT_CONFIG_FILE"] == (
+        "/var/lib/unicon-agent/big-1/agent.conf"
+    )
+    assert values["WOODPECKER_HEALTHCHECK_ADDR"] == "127.0.0.1:3004"
     assert values["WOODPECKER_BACKEND_DOCKER_VOLUMES"] == (
         "/etc/unicon/hosts:/etc/hosts:ro,/etc/unicon/cache-cap:/etc/unicon/cache-cap:ro"
     )
-    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM"] == "17179869184"
     assert values["DOCKER_HOST"] == "unix:///run/unicon-docker/docker.sock"
     assert values["WOODPECKER_AGENT_SECRET"] == "the-token"
     assert values["WOODPECKER_LOG_LEVEL"] == "debug"
+    assert small.labels(settings(machine)).endswith(",size=small,lane=early")
     with pytest.raises(machine.MachineError, match="line break"):
-        machine.agent_environment(settings(machine), "a\nb", 1)
+        machine.agent_environment(settings(machine), "a\nb", small)
 
 
-def test_the_agent_runs_as_its_own_user_beside_the_daemons(
+def test_every_slots_agent_runs_as_its_own_user_beside_the_daemons(
     machine: ModuleType,
 ) -> None:
     unit = machine.agent_unit(settings(machine), 1001)
@@ -180,6 +286,61 @@ def test_the_agent_runs_as_its_own_user_beside_the_daemons(
     assert "Requires=unicon-wall.service unicon-cgroup.service\n" in unit
     # It starts only while the wall's table is loaded, checked as root.
     assert "ExecStartPre=+/usr/sbin/nft list table inet unicon-wall\n" in unit
+    # Each instance, by its slot's name, has its own environment and state.
+    assert "EnvironmentFile=/etc/unicon/agent-%i.env\n" in unit
+    assert "ReadWritePaths=/var/lib/unicon-agent/%i\n" in unit
+    assert "NoNewPrivileges=yes\n" in unit and "ProtectSystem=strict\n" in unit
+
+
+def test_the_self_test_reads_each_slots_limits_from_inside_a_container(
+    machine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A container made with a slot's limits shows its cores, its memory and
+    no swap; one the daemon did not hold to them fails, and so does a slice
+    not capped."""
+    slots = slots_of(machine, 16, 64)[-2:]
+    made: list[tuple[str, ...]] = []
+    seen = {"7-8": "7-8 8589934592 0", "9-12": "0-15 max max"}
+
+    def docker(*arguments: str, **_: object) -> str:
+        made.append(arguments)
+        return seen[arguments[arguments.index("--cpuset-cpus") + 1]] + "\n"
+
+    monkeypatch.setattr(machine, "docker", docker)
+    monkeypatch.setattr(machine, "memory_total", lambda: 2**36)
+    monkeypatch.setattr(machine, "CGROUP", tmp_path)
+    held = tmp_path / "user.slice" / "user-1001.slice" / "memory.max"
+    held.parent.mkdir(parents=True)
+    held.write_text(f"{machine.slice_memory(65536)}\n")
+    report = machine.Report()
+
+    machine.check_slots(settings(machine), SimpleNamespace(pw_uid=1001), slots, report)
+
+    assert report.failed == [
+        "slot big-1's containers have cores 9-12, 28672 MB and no swap"
+    ]
+    assert made[1][:9] == (
+        "run",
+        "--rm",
+        "--cpuset-cpus",
+        "9-12",
+        "--memory",
+        str(28672 * 2**20),
+        "--memory-swap",
+        str(28672 * 2**20),
+        "--entrypoint",
+    )
+    held.write_text("max\n")
+    machine.check_slots(settings(machine), SimpleNamespace(pw_uid=1001), [], report)
+    assert report.failed[-1].startswith("the throwaway user's slice is capped at")
+
+
+def test_the_slice_of_every_container_leaves_the_system_its_memory(
+    machine: ModuleType,
+) -> None:
+    assert machine.slice_drop_in(65536) == (
+        f"[Slice]\nMemoryMax={(65536 - 2048) * 2**20}\nMemorySwapMax=0\n"
+    )
 
 
 def test_the_wall_loads_after_what_flushes_the_rules_and_stops_with_its_unit(
@@ -217,7 +378,7 @@ def test_a_remount_for_local_memory_events_keeps_the_hierarchys_options(
     ) == (options)
     unit = machine.cgroup_unit(1001, options)
     assert f"ExecStart=/usr/bin/mount -o remount,{options} /sys/fs/cgroup\n" in unit
-    assert "Before=user@1001.service unicon-agent.service\n" in unit
+    assert "Before=user@1001.service\n" in unit
     assert machine.remounted_with(unit) == options.split(",")
     with pytest.raises(machine.MachineError, match="not a cgroup2 hierarchy"):
         machine.cgroup_options(mountinfo.splitlines()[0])
@@ -361,9 +522,15 @@ def test_a_target_is_held_got_through_or_not_tested(
         ({"data_root": 1}, "data_root is a path"),
         ({"pull": [1]}, "pull is a list of texts"),
         ({"wall_allow": "203.0.113.10:443"}, "wall_allow is a list of texts"),
-        ({"max_workflows": True}, "max_workflows is a whole number"),
-        ({"max_workflows": 0}, "max_workflows is a whole number"),
-        ({"limit_mem": "1g"}, "limit_mem is a number of bytes"),
+        ({"slots": {"small": -1}}, "slots gives each size a whole number"),
+        ({"slots": {"small": 1.5}}, "slots gives each size a whole number"),
+        ({"early_share": 1}, "early_share is a number from 0 to below 1"),
+        ({"early_share": True}, "early_share is a number from 0 to below 1"),
+        (
+            {"agent_environment": {"WOODPECKER_BACKEND_DOCKER_LIMIT_MEM": "1"}},
+            "which the agent's slot sets",
+        ),
+        ({"limit_mem": 1}, "unknown settings: limit_mem"),
         ({"agent_image": "woodpeckerci/woodpecker-agent:v3.18.1"}, "its digest"),
         ({"step_hosts": {"forge": "forge.example.org"}}, "not an address"),
         (
@@ -491,7 +658,8 @@ def stubbed(
     ):
         monkeypatch.setattr(machine, name, step(name))
     monkeypatch.setattr(machine, "check_data_root", step("check_data_root", 2**35))
-    monkeypatch.setattr(machine, "memory_total", lambda: 2**33)
+    monkeypatch.setattr(machine, "memory_total", lambda: 2**36)
+    monkeypatch.setattr(machine, "machine_cpus", lambda: list(range(16)))
     monkeypatch.setattr(machine, "architecture", lambda: "aarch64")
     monkeypatch.setattr(machine.os, "geteuid", lambda: 0)
     monkeypatch.setattr(machine.os, "chown", lambda *_: None)
@@ -511,7 +679,8 @@ def stubbed(
         "STEP_HOSTS",
         "CACHE_CAP",
         "WALL_FILE",
-        "AGENT_ENV",
+        "UNICON",
+        "OLD_AGENT_ENV",
         "AGENT_STATE",
         "SOCKET_TMPFILES",
     ):
@@ -531,7 +700,13 @@ KILL = ("docker", "kill", "c1", "c2")
 STOP_DAEMON = ("as unicon-grader", "systemctl", "--user", "stop", "docker.service")
 WALL_DOWN = ("systemctl", "stop", "unicon-wall.service")
 WALL_UP = ("systemctl", "restart", "unicon-wall.service")
-ENABLE_AGENT = ("systemctl", "enable", "--now", "unicon-agent.service")
+ENABLE_AGENT = (
+    "systemctl",
+    "enable",
+    "--now",
+    *(f"unicon-agent@{slot}.service" for slot in ("small-1", "small-2")),
+    *(f"unicon-agent@{slot}.service" for slot in ("small-3", "small-4", "big-1")),
+)
 
 
 def test_setup_enables_the_agent_last_once_the_self_test_passes(
@@ -553,6 +728,62 @@ def test_setup_enables_the_agent_last_once_the_self_test_passes(
     assert order == sorted(order)
     assert stubbed.index(WALL_DOWN) < stubbed.index(WALL_UP)
     assert stubbed[-2:] == [("self_test",), ENABLE_AGENT]
+
+
+def test_setup_runs_one_agent_per_slot_and_clears_away_those_gone(
+    machine: ModuleType,
+    stubbed: list[tuple[str, ...]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Every agent, the one before slots and each slot's of the last setup,
+    is disabled first; the environments of those gone, which hold the
+    token, are removed; each slot gets its own, readable by root alone,
+    and its state folder; and the slice is capped."""
+    unicon, units = tmp_path / "unicon", tmp_path / "units"
+    (units / "multi-user.target.wants").mkdir(parents=True)
+    (units / "multi-user.target.wants" / "unicon-agent@old-1.service").touch()
+    (units / "unicon-agent.service").touch()
+    unicon.mkdir()
+    (unicon / "agent-old-1.env").write_text("WOODPECKER_AGENT_SECRET=x\n")
+    (tmp_path / "old_agent_env").write_text("WOODPECKER_AGENT_SECRET=x\n")
+    monkeypatch.setattr(machine, "self_test", lambda _: 0)
+
+    assert machine.setup(setup_settings(machine, tmp_path)) == 0
+
+    assert stubbed[:3] == [
+        DISABLE_AGENT,
+        ("systemctl", "disable", "--now", "unicon-agent@old-1.service"),
+        ("systemctl", "stop", "unicon-agent@*.service"),
+    ]
+    assert stubbed[-1] == ENABLE_AGENT
+    names = ["small-1", "small-2", "small-3", "small-4", "big-1"]
+    assert sorted(path.name for path in unicon.glob("agent-*.env")) == sorted(
+        f"agent-{name}.env" for name in names
+    )
+    for name in names:
+        assert (unicon / f"agent-{name}.env").stat().st_mode & 0o777 == 0o600
+        assert (tmp_path / "agent_state" / name).is_dir()
+    assert not (tmp_path / "old_agent_env").exists()
+    assert not (units / "unicon-agent.service").exists()
+    assert (units / "unicon-agent@.service").is_file()
+    assert (units / "user-1001.slice.d" / "unicon-memory.conf").read_text() == (
+        machine.slice_drop_in(65536)
+    )
+
+
+def test_setup_changes_nothing_on_a_machine_no_slot_fits(
+    machine: ModuleType,
+    stubbed: list[tuple[str, ...]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(machine, "memory_total", lambda: 2**33)
+
+    with pytest.raises(machine.MachineError, match="this machine gives slots"):
+        machine.setup(setup_settings(machine, tmp_path))
+
+    assert stubbed == []
 
 
 def test_setup_leaves_the_agent_disabled_when_the_self_test_fails(

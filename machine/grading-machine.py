@@ -10,12 +10,16 @@ JSON file (see `Settings`):
 It builds one shape, provisionally: rootless Docker under a throwaway
 user, and nothing else takes a step. Ubuntu 24.04 is the one system it was
 run on; another is allowed, with a warning, when the self-test passes
-there. Every setting is checked, and this machine's architecture found in
-`agent_binary_sha256`, before anything on the machine is changed. Then, in
-order, `setup`:
+there. Every setting is checked, this machine's architecture found in
+`agent_binary_sha256`, and its slots worked out (`plan_slots`), before
+anything on the machine is changed. A slot is a share of the machine of
+one size of `slots.json`, kept beside this script, the one table of sizes
+the forge plans each pipeline into too: cores of its own and a memory cap,
+run by an agent of its own that takes one workflow at a time. The slots
+are fixed until setup runs again. Then, in order, `setup`:
 
-1. disables the agent, so nothing new is graded while the machine is set
-   up;
+1. disables every agent, so nothing new is graded while the machine is
+   set up;
 2. makes the throwaway user, which owns the rootless daemon, lingering on
    so its daemon runs without a login, with cpu, cpuset, io, memory and
    pids delegated to every user's systemd, and the agent's own user, a
@@ -52,11 +56,15 @@ order, `setup`:
     only the addresses the settings allow, loaded at every boot before
     the user's systemd starts, and again whenever `nftables.service`,
     whose rules file flushes every table, is restarted or reloaded;
-11. runs the self-test, and only when it passes enables the agent: as
-    its own user, against the rootless socket, starting only while the
-    wall is loaded, with `/etc/unicon/hosts` as every step's
-    `/etc/hosts`, the cache's cap, the memory a step's container may use,
-    its pool label and its shape's label.
+11. writes each slot's agent's environment, removing those of slots gone,
+    and caps the throwaway user's slice, which holds every container, at
+    the machine's memory less what the system and the agents keep
+    (`slice_drop_in`);
+12. runs the self-test, and only when it passes enables every slot's
+    agent: as its own user, against the rootless socket, starting only
+    while the wall is loaded, with `/etc/unicon/hosts` as every step's
+    `/etc/hosts`, the cache's cap, its slot's cores and memory on every
+    container, and its pool, shape, size and lane labels.
 
 Run again, it does the same, so it is how a machine takes new settings,
 and how the pinned addresses follow the registry's when they change.
@@ -77,9 +85,11 @@ remounted with; that a container over its own memory is marked
 killed and one whose child cgroup was killed is not; that a privileged
 container, as an exec step is, can open no block device; that the daemon
 is rootless on cgroup v2 with the controllers delegated; that the root
-Docker is stopped; and the kernel settings a box's syscall filter leaves
-to the machine. It prints "network wall: on" or "network
-wall: off", and exits 1 when any check fails.
+Docker is stopped; the kernel settings a box's syscall filter leaves
+to the machine; that a container made with each slot's limits has its
+cores alone, its memory and no swap; and that the slice is capped. It
+prints "network wall: on" or "network wall: off", and exits 1 when any
+check fails.
 
 Run on a real Ubuntu 24.04 (arm64, in a VM) and on a stand-in, an Ubuntu
 24.04 container booting systemd over Docker Desktop's kernel. The
@@ -118,14 +128,45 @@ UNICON = Path("/etc/unicon")
 STEP_HOSTS = UNICON / "hosts"
 CACHE_CAP = UNICON / "cache-cap"
 WALL_FILE = UNICON / "wall.nft"
-AGENT_ENV = UNICON / "agent.env"
+OLD_AGENT_ENV = UNICON / "agent.env"
+"""The one agent's environment before the machine ran one agent per slot,
+removed at setup, as its token is in it."""
 AGENT_BINARY = Path("/usr/local/bin/woodpecker-agent")
 AGENT_STATE = Path("/var/lib/unicon-agent")
 UNITS = Path("/etc/systemd/system")
+OLD_AGENT = "unicon-agent.service"
+"""The one agent's unit before the machine ran one agent per slot."""
+AGENT_UNIT = "unicon-agent@.service"
+"""Every slot's agent, an instance of this unit by the slot's name."""
+SLOT_TABLE = Path(__file__).resolve().with_name("slots.json")
+"""The slot sizes, deploy's one table of them, which the forge plans with
+too (`UNICON_SLOT_SIZES`, written by bootstrap): kept beside this script."""
+SYSTEM_MB = 2048
+"""What a machine keeps of its memory, in MB, outside the throwaway user's
+slice, which every container is in: the system and the agents."""
+DAEMON_MB = 1024
+"""What the slice keeps beside its slots, in MB: the rootless daemon,
+containerd and the network helper."""
+SYSTEM_CORES = 1
+"""The machine's first cores, kept out of every slot for the system, the
+agents and the daemon."""
+FIRST_HEALTH_PORT = 3000
+"""The loopback port of the first slot's agent's health check, the next
+slot's the next port."""
+SLOT_VARIABLES = (
+    "WOODPECKER_MAX_WORKFLOWS",
+    "WOODPECKER_AGENT_LABELS",
+    "WOODPECKER_BACKEND_DOCKER_LIMIT_CPU_SET",
+    "WOODPECKER_BACKEND_DOCKER_LIMIT_MEM",
+    "WOODPECKER_BACKEND_DOCKER_LIMIT_MEM_SWAP",
+)
+"""The agent's variables a slot is made of, which `agent_environment`
+may not change."""
 CGROUP_UNIT = UNITS / "unicon-cgroup.service"
 HOSTS = Path("/etc/hosts")
 CGROUP = Path("/sys/fs/cgroup")
 MOUNTINFO = Path("/proc/self/mountinfo")
+ONLINE_CPUS = Path("/sys/devices/system/cpu/online")
 LOCAL_EVENTS = "memory_localevents"
 ROOT_DOCKER = ("docker.socket", "docker.service")
 HOSTS_BEGIN = "# unicon machine names: begin"
@@ -216,6 +257,148 @@ class Target:
 
 
 @dataclass(frozen=True)
+class Size:
+    """A slot size of `SLOT_TABLE`: its name, the cores a slot of it is
+    pinned to and the memory every container of its workflow is capped
+    at, in MB."""
+
+    name: str
+    cores: int
+    memory_mb: int
+
+
+@dataclass(frozen=True)
+class Slot:
+    """One slot of the machine and its agent: its name, `<size>-<n>`, its
+    size, the cores it is pinned to as cpuset names them, whether it is
+    kept for the early lane, and its agent's health check port."""
+
+    name: str
+    size: Size
+    cpus: str
+    early: bool
+    port: int
+
+    @property
+    def memory(self) -> int:
+        """Its memory in bytes."""
+        return self.size.memory_mb * 2**20
+
+    def labels(self, settings: Settings) -> str:
+        """Its agent's labels. The forge labels a pipeline with the size it
+        fits and its lane; a slot kept for the early lane takes early
+        pipelines alone, and every other slot takes either, `*`, so a late
+        slot of each size is never kept from the early lane's work."""
+        lane = "early" if self.early else "*"
+        return f"{settings.labels},size={self.size.name},lane={lane}"
+
+
+def read_sizes(text: str) -> tuple[Size, ...]:
+    """The sizes of `SLOT_TABLE`, `{name: {cores, memory_mb}}`, smallest
+    first."""
+    try:
+        table = json.loads(text)
+    except json.JSONDecodeError as error:
+        raise MachineError(f"{SLOT_TABLE} is not JSON: {error}") from error
+    if not isinstance(table, dict) or not table:
+        raise MachineError(f"{SLOT_TABLE} names no slot size")
+    sizes = []
+    for name, size in table.items():
+        if (
+            not LABEL.fullmatch(name)
+            or not isinstance(size, dict)
+            or set(size) != {"cores", "memory_mb"}
+            or not all(whole(value) and value >= 1 for value in size.values())
+        ):
+            raise MachineError(
+                f"{SLOT_TABLE} gives {name!r} no whole cores and memory_mb, at least 1"
+            )
+        sizes.append(Size(name, size["cores"], size["memory_mb"]))
+    return tuple(sorted(sizes, key=lambda size: size.memory_mb))
+
+
+def read_cpu_list(text: str) -> list[int]:
+    """CPUs as the kernel lists them, `0-3,6`, one by one."""
+    cpus: list[int] = []
+    for part in text.strip().split(","):
+        first, _, last = part.partition("-")
+        cpus += range(int(first), int(last or first) + 1)
+    return sorted(cpus)
+
+
+def cpu_list(cpus: Sequence[int]) -> str:
+    """CPUs as cpuset names them, runs as ranges: `1-4,6`."""
+    runs: list[list[int]] = []
+    for cpu in sorted(cpus):
+        if runs and cpu == runs[-1][-1] + 1:
+            runs[-1].append(cpu)
+        else:
+            runs.append([cpu])
+    return ",".join(
+        f"{run[0]}-{run[-1]}" if len(run) > 1 else str(run[0]) for run in runs
+    )
+
+
+def plan_slots(
+    sizes: Sequence[Size], settings: Settings, cpus: Sequence[int], memory_mb: int
+) -> tuple[Slot, ...]:
+    """The machine's slots, fixed until setup runs again, from its `cpus`
+    and `memory_mb`, less `SYSTEM_CORES`, `SYSTEM_MB` and `DAEMON_MB`.
+    `settings.slots` gives how many of each size; otherwise one of each,
+    the largest first, while it fits, and then as many of the smallest as
+    fit. Of the smallest size there is, `early_share` of every slot,
+    rounded, is kept for the early lane, but one of that size is not, so
+    late work of each size has a slot. Each slot gets cores of its own.
+    Refused when the slots asked for do not fit, or none does.
+    """
+    free_cpus = sorted(cpus)[SYSTEM_CORES:]
+    free_mb = memory_mb - SYSTEM_MB - DAEMON_MB
+    by_name = {size.name: size for size in sizes}
+    unknown = sorted(set(settings.slots) - set(by_name))
+    if unknown:
+        raise MachineError(
+            f"slots names {', '.join(unknown)}, which {SLOT_TABLE.name} does not: "
+            f"{', '.join(by_name)}"
+        )
+    counts = {size.name: settings.slots.get(size.name, 0) for size in sizes}
+    if not settings.slots:
+        cores, held = 0, 0
+        for size in (*reversed(sizes), *[sizes[0]] * len(free_cpus)):
+            if (
+                cores + size.cores <= len(free_cpus)
+                and held + size.memory_mb <= free_mb
+            ):
+                counts[size.name] += 1
+                cores += size.cores
+                held += size.memory_mb
+    cores = sum(by_name[name].cores * count for name, count in counts.items())
+    held = sum(by_name[name].memory_mb * count for name, count in counts.items())
+    if not any(counts.values()) or cores > len(free_cpus) or held > free_mb:
+        raise MachineError(
+            f"the slots ({', '.join(f'{n} {name}' for name, n in counts.items())}) "
+            f"need {cores} cores and {held} MB; this machine gives slots "
+            f"{len(free_cpus)} cores and {free_mb} MB"
+        )
+    total = sum(counts.values())
+    smallest = next(size.name for size in sizes if counts[size.name])
+    early = min(round(total * settings.early_share), counts[smallest] - 1)
+    slots: list[Slot] = []
+    for size in sizes:
+        for number in range(1, counts[size.name] + 1):
+            taken, free_cpus = free_cpus[: size.cores], free_cpus[size.cores :]
+            slots.append(
+                Slot(
+                    f"{size.name}-{number}",
+                    size,
+                    cpu_list(taken),
+                    size.name == smallest and number <= early,
+                    FIRST_HEALTH_PORT + len(slots),
+                )
+            )
+    return tuple(slots)
+
+
+@dataclass(frozen=True)
 class Settings:
     """What the machine is told at enrolment. `server`, `agent_secret_file`,
     `agent_image`, `agent_binary_sha256`, `data_root`, `step_hosts`,
@@ -240,8 +423,12 @@ class Settings:
     pulled at setup, before the wall goes up: the test image, and whatever
     a pipeline runs that the wall keeps the daemon from pulling later.
     `cache_cap` is the most the step cache may hold, in bytes; a quarter
-    of the data root's size when not given. `agent_environment` is passed
-    to the agent as it is, after the variables this script sets.
+    of the data root's size when not given. `slots` gives how many slots
+    of each size of `SLOT_TABLE` the machine runs, and `early_share` the
+    share of them kept for the early lane (`plan_slots`); the sizes
+    themselves are the table's alone, which the forge plans with.
+    `agent_environment` is passed to every agent as it is, after the
+    variables this script sets, but for those a slot is made of.
     """
 
     server: str
@@ -264,8 +451,8 @@ class Settings:
     pull: tuple[str, ...] = ()
     insecure_registries: tuple[str, ...] = ()
     cache_cap: int | None = None
-    limit_mem: int | None = None
-    max_workflows: int = 4
+    slots: dict[str, int] = field(default_factory=dict)
+    early_share: float = 0.25
     agent_environment: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -379,12 +566,17 @@ class Settings:
                 "agent_binary_sha256 gives the agent binary's SHA-256 in hex for "
                 f"{' or '.join(ARCHITECTURES)}, or both"
             )
-        if not whole(self.max_workflows) or self.max_workflows < 1:
-            raise MachineError("max_workflows is a whole number, at least 1")
-        if self.limit_mem is not None and (
-            not whole(self.limit_mem) or self.limit_mem < 1
+        if not isinstance(self.slots, dict) or not all(
+            isinstance(name, str) and whole(count) and count >= 0
+            for name, count in self.slots.items()
         ):
-            raise MachineError("limit_mem is a number of bytes")
+            raise MachineError("slots gives each size a whole number of slots")
+        if (
+            not isinstance(self.early_share, int | float)
+            or isinstance(self.early_share, bool)
+            or not 0 <= self.early_share < 1
+        ):
+            raise MachineError("early_share is a number from 0 to below 1")
         if self.cache_cap is not None and (
             not whole(self.cache_cap) or self.cache_cap < 2**30
         ):
@@ -392,6 +584,10 @@ class Settings:
         for name in self.agent_environment:
             if not ENVIRONMENT_NAME.fullmatch(name):
                 raise MachineError(f"agent_environment names {name!r}")
+            if name in SLOT_VARIABLES:
+                raise MachineError(
+                    f"agent_environment sets {name}, which the agent's slot sets"
+                )
         for hosts in (self.step_hosts, self.machine_hosts):
             for name, address in hosts.items():
                 if not HOST_NAME.fullmatch(name):
@@ -527,24 +723,31 @@ def daemon_json(settings: Settings, uid: int) -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
-def agent_environment(settings: Settings, secret: str, limit_mem: int) -> str:
-    """The agent's environment file. Woodpecker reads the token from it, so
-    it is written readable by root alone. Every step gets the machine's
-    hosts file and the cache's cap, read-only.
+def agent_environment(settings: Settings, secret: str, slot: Slot) -> str:
+    """A slot's agent's environment file. Woodpecker reads the token from
+    it, so it is written readable by root alone. The agent takes one
+    workflow at a time, under its slot's labels, a name and a state folder
+    of its own; every container of it is pinned to the slot's cores and
+    capped at its memory, with no swap (Woodpecker 3.18's docker backend,
+    `LIMIT_CPU_SET`, `LIMIT_MEM` and `LIMIT_MEM_SWAP`, on each container).
+    Every step gets the machine's hosts file and the cache's cap,
+    read-only.
     """
     volumes = [f"{STEP_HOSTS}:/etc/hosts:ro", f"{CACHE_CAP}:{CACHE_CAP}:ro"]
     values = {
         "WOODPECKER_SERVER": settings.server,
         "WOODPECKER_AGENT_SECRET": secret,
-        "WOODPECKER_HOSTNAME": socket.gethostname(),
-        "WOODPECKER_AGENT_LABELS": settings.labels,
-        "WOODPECKER_AGENT_CONFIG_FILE": str(AGENT_STATE / "agent.conf"),
-        "WOODPECKER_MAX_WORKFLOWS": str(settings.max_workflows),
-        "WOODPECKER_HEALTHCHECK_ADDR": "127.0.0.1:3000",
+        "WOODPECKER_HOSTNAME": f"{socket.gethostname()}-{slot.name}",
+        "WOODPECKER_AGENT_LABELS": slot.labels(settings),
+        "WOODPECKER_AGENT_CONFIG_FILE": str(AGENT_STATE / slot.name / "agent.conf"),
+        "WOODPECKER_MAX_WORKFLOWS": "1",
+        "WOODPECKER_HEALTHCHECK_ADDR": f"127.0.0.1:{slot.port}",
         "WOODPECKER_BACKEND": "docker",
         "DOCKER_HOST": f"unix://{SOCKET_DIRECTORY}/docker.sock",
         "WOODPECKER_BACKEND_DOCKER_VOLUMES": ",".join(volumes),
-        "WOODPECKER_BACKEND_DOCKER_LIMIT_MEM": str(limit_mem),
+        "WOODPECKER_BACKEND_DOCKER_LIMIT_CPU_SET": slot.cpus,
+        "WOODPECKER_BACKEND_DOCKER_LIMIT_MEM": str(slot.memory),
+        "WOODPECKER_BACKEND_DOCKER_LIMIT_MEM_SWAP": str(slot.memory),
         **settings.agent_environment,
     }
     for name, value in values.items():
@@ -645,7 +848,7 @@ def cgroup_unit(uid: int, options: str) -> str:
         "[Unit]\n"
         "Description=Unicon: count memory kills in each cgroup alone\n"
         "DefaultDependencies=no\n"
-        f"Before=user@{uid}.service unicon-agent.service\n\n"
+        f"Before=user@{uid}.service\n\n"
         "[Service]\n"
         "Type=oneshot\n"
         "RemainAfterExit=yes\n"
@@ -656,13 +859,19 @@ def cgroup_unit(uid: int, options: str) -> str:
     )
 
 
+def agent_environment_file(slot: str) -> Path:
+    """Where the agent of the slot named `slot` reads its environment."""
+    return UNICON / f"agent-{slot}.env"
+
+
 def agent_unit(settings: Settings, uid: int) -> str:
-    """The agent, as its own user, starting only while the wall's table is
-    loaded and once the cgroup option is set.
+    """Every slot's agent, an instance by the slot's name, as its own user,
+    starting only while the wall's table is loaded and once the cgroup
+    option is set, each with its own environment and state folder.
     """
     return (
         "[Unit]\n"
-        "Description=Unicon grading agent\n"
+        "Description=Unicon grading agent of slot %i\n"
         f"After=network-online.target unicon-wall.service unicon-cgroup.service "
         f"user@{uid}.service\n"
         "Requires=unicon-wall.service unicon-cgroup.service\n"
@@ -671,7 +880,7 @@ def agent_unit(settings: Settings, uid: int) -> str:
         f"User={settings.agent_user}\n"
         f"Group={settings.agent_user}\n"
         f"SupplementaryGroups={settings.grader_user}\n"
-        f"EnvironmentFile={AGENT_ENV}\n"
+        f"EnvironmentFile={UNICON}/agent-%i.env\n"
         f"ExecStartPre=+/usr/sbin/nft list table inet {WALL_TABLE}\n"
         f"ExecStart={AGENT_BINARY}\n"
         "Restart=always\n"
@@ -680,10 +889,23 @@ def agent_unit(settings: Settings, uid: int) -> str:
         "ProtectSystem=strict\n"
         "ProtectHome=yes\n"
         "PrivateTmp=yes\n"
-        f"ReadWritePaths={AGENT_STATE}\n\n"
+        f"ReadWritePaths={AGENT_STATE}/%i\n\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"
     )
+
+
+def slice_memory(memory_mb: int) -> int:
+    """The throwaway user's slice's cap, in bytes: the machine's memory less
+    `SYSTEM_MB`. Every container of every slot is in it, with the daemon,
+    so all of them together leave the system and the agents their room
+    whatever a step does."""
+    return (memory_mb - SYSTEM_MB) * 2**20
+
+
+def slice_drop_in(memory_mb: int) -> str:
+    """The throwaway user's slice capped at `slice_memory`, with no swap."""
+    return f"[Slice]\nMemoryMax={slice_memory(memory_mb)}\nMemorySwapMax=0\n"
 
 
 def system_warning(os_release: str) -> str | None:
@@ -803,23 +1025,18 @@ def setup(settings: Settings) -> int:
         raise MachineError(
             f"agent_binary_sha256 gives no digest for this machine's {architecture()}"
         )
+    memory_mb = memory_total() // 2**20
+    slots = machine_slots(settings)
     with contextlib.suppress(OSError):
         warning = system_warning(Path("/etc/os-release").read_text())
         if warning:
             say(f"warning: {warning}")
 
     # Nothing is graded until the self-test passes again, and a reboot on
-    # the way does not start the agent. No step runs once the wall is down,
+    # the way does not start an agent. No step runs once the wall is down,
     # and the wall comes down through its own unit, written first so that
     # it knows how.
-    run(
-        "systemctl",
-        "disable",
-        "--now",
-        "unicon-agent.service",
-        check=False,
-        capture=True,
-    )
+    disable_agents()
     grader = make_users(settings)
     uid = grader.pw_uid
     write(UNITS / "unicon-wall.service", wall_unit(uid))
@@ -864,20 +1081,76 @@ def setup(settings: Settings) -> int:
     run("systemctl", "enable", "unicon-wall.service", capture=True)
     run("systemctl", "restart", "unicon-wall.service", capture=True)
 
-    limit = settings.limit_mem or memory_total()
-    write(AGENT_ENV, agent_environment(settings, secret, limit), mode=0o600)
-    AGENT_STATE.mkdir(mode=0o700, exist_ok=True)
+    # One agent per slot. The environments of slots gone, and of the one
+    # agent before slots, hold the token, so they go too.
+    OLD_AGENT_ENV.unlink(missing_ok=True)
+    (UNITS / OLD_AGENT).unlink(missing_ok=True)
+    kept = {agent_environment_file(slot.name) for slot in slots}
+    for stale in UNICON.glob("agent-*.env"):
+        if stale not in kept:
+            stale.unlink()
     agent = pwd.getpwnam(settings.agent_user)
+    AGENT_STATE.mkdir(mode=0o700, exist_ok=True)
     os.chown(AGENT_STATE, agent.pw_uid, agent.pw_gid)
-    write(UNITS / "unicon-agent.service", agent_unit(settings, uid))
+    for slot in slots:
+        write(
+            agent_environment_file(slot.name),
+            agent_environment(settings, secret, slot),
+            mode=0o600,
+        )
+        (AGENT_STATE / slot.name).mkdir(mode=0o700, exist_ok=True)
+        os.chown(AGENT_STATE / slot.name, agent.pw_uid, agent.pw_gid)
+    write(UNITS / AGENT_UNIT, agent_unit(settings, uid))
+    write(
+        UNITS / f"user-{uid}.slice.d" / "unicon-memory.conf", slice_drop_in(memory_mb)
+    )
     run("systemctl", "daemon-reload")
 
     if self_test(settings) != 0:
-        say("the self-test failed, so the agent is not enabled")
+        say("the self-test failed, so no agent is enabled")
         return 1
-    run("systemctl", "enable", "--now", "unicon-agent.service", capture=True)
-    say(f"agent started, labels {settings.labels}, memory limit {limit} bytes")
+    run("systemctl", "enable", "--now", *map(agent_name, slots), capture=True)
+    for slot in slots:
+        say(
+            f"agent {slot.name} started: cores {slot.cpus}, "
+            f"{slot.size.memory_mb} MB, labels {slot.labels(settings)}"
+        )
     return 0
+
+
+def agent_name(slot: Slot) -> str:
+    """The unit of the slot's agent."""
+    return f"unicon-agent@{slot.name}.service"
+
+
+def disable_agents() -> None:
+    """Every agent disabled and stopped: the one before slots, each slot's
+    enabled, one by one, as a unit missing fails the whole call, and any
+    slot's still running."""
+    wants = UNITS / "multi-user.target.wants"
+    enabled = sorted(path.name for path in wants.glob("unicon-agent@*.service"))
+    for unit in (OLD_AGENT, *enabled):
+        run("systemctl", "disable", "--now", unit, check=False, capture=True)
+    run("systemctl", "stop", "unicon-agent@*.service", check=False, capture=True)
+
+
+def machine_cpus() -> list[int]:
+    """The machine's online CPUs, as cpuset numbers them."""
+    return read_cpu_list(ONLINE_CPUS.read_text())
+
+
+def machine_slots(settings: Settings) -> tuple[Slot, ...]:
+    """This machine's slots, from `SLOT_TABLE`, its CPUs and its memory."""
+    try:
+        text = SLOT_TABLE.read_text()
+    except OSError as error:
+        raise MachineError(
+            f"cannot read {SLOT_TABLE}, the slot sizes, kept beside this script: "
+            f"{error}"
+        ) from error
+    return plan_slots(
+        read_sizes(text), settings, machine_cpus(), memory_total() // 2**20
+    )
 
 
 def make_users(settings: Settings) -> pwd.struct_passwd:
@@ -1184,6 +1457,7 @@ class Report:
 def self_test(settings: Settings) -> int:
     report = Report()
     grader = pwd.getpwnam(settings.grader_user)
+    slots = machine_slots(settings)
     say("self-test")
     wall_up = (
         run(
@@ -1194,8 +1468,9 @@ def self_test(settings: Settings) -> int:
     report.check(wall_up, f"the nftables table {WALL_TABLE} is loaded")
     check_daemon(settings, grader, report)
     check_root_docker(report)
-    held = check_reach(settings, grader, report)
+    held = check_reach(settings, grader, slots, report)
     check_limits(settings, report)
+    check_slots(settings, grader, slots, report)
     check_kills(settings, report)
     check_block_devices(settings, report)
     check_kernel(report)
@@ -1311,7 +1586,12 @@ def held_at(report: Report, what: str, control: str, seen: str, side: str) -> bo
     return report.check(seen not in ("connected", "answered"), what, seen)
 
 
-def check_reach(settings: Settings, grader: pwd.struct_passwd, report: Report) -> bool:
+def check_reach(
+    settings: Settings,
+    grader: pwd.struct_passwd,
+    slots: Sequence[Slot],
+    report: Report,
+) -> bool:
     """From a container on a network made as Woodpecker makes one per
     pipeline, then as the throwaway user in the machine's own network
     namespace, where the daemon's pulls leave, each target tried from root
@@ -1331,7 +1611,7 @@ def check_reach(settings: Settings, grader: pwd.struct_passwd, report: Report) -
             own.append(Target("10.0.2.2", port))
             loopback = [
                 Target("127.0.0.53", 53),
-                Target("127.0.0.1", 3000),
+                *(Target("127.0.0.1", slot.port) for slot in slots),
                 Target("127.0.0.1", port),
             ]
             control = probe([*settings.outside, *loopback])
@@ -1410,6 +1690,61 @@ def check_reach(settings: Settings, grader: pwd.struct_passwd, report: Report) -
         "the throwaway user",
     )
     return held
+
+
+SLOT_LIMITS = """
+from pathlib import Path
+cgroup = Path("/sys/fs/cgroup")
+print(*(
+    (cgroup / name).read_text().strip()
+    for name in ("cpuset.cpus.effective", "memory.max", "memory.swap.max")
+))
+"""
+
+
+def check_slots(
+    settings: Settings,
+    grader: pwd.struct_passwd,
+    slots: Sequence[Slot],
+    report: Report,
+) -> None:
+    """Each slot's limits, as its agent sets them on every container, read
+    from inside a container made with them: its cores alone, its memory
+    and no swap. And the throwaway user's slice capped as `slice_drop_in`
+    says, over every container of every slot."""
+    for slot in slots:
+        seen = docker(
+            "run",
+            "--rm",
+            "--cpuset-cpus",
+            slot.cpus,
+            "--memory",
+            str(slot.memory),
+            "--memory-swap",
+            str(slot.memory),
+            "--entrypoint",
+            "python3",
+            settings.test_image,
+            "-c",
+            SLOT_LIMITS,
+            check=False,
+            timeout=120,
+        ).strip()
+        report.check(
+            seen == f"{slot.cpus} {slot.memory} 0",
+            f"slot {slot.name}'s containers have cores {slot.cpus}, "
+            f"{slot.size.memory_mb} MB and no swap",
+            seen or "nothing",
+        )
+    uid = grader.pw_uid
+    held = CGROUP / "user.slice" / f"user-{uid}.slice" / "memory.max"
+    wanted = str(slice_memory(memory_total() // 2**20))
+    found = held.read_text().strip() if held.exists() else "nothing"
+    report.check(
+        found == wanted,
+        f"the throwaway user's slice is capped at {wanted} bytes",
+        found,
+    )
 
 
 def check_limits(settings: Settings, report: Report) -> None:

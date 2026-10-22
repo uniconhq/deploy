@@ -29,7 +29,9 @@ manifest also gives the harness, clone and socket filter images, which go into
 plugin and the step wrapper's base image, which a run task's pipelines run.
 The images of every version of `exec` and `interact` at the forge go into
 .env too, as the plugins Woodpecker lets run privileged, since those steps
-make boxes of their own.
+make boxes of their own. So do the grading machines' slot sizes, from
+machine/slots.json, the one table of them, which a machine's setup reads
+too: the forge plans each run task pipeline into one of them.
 
 On a development stack, the one whose compose files include compose.dev.yaml,
 bootstrap also enrols the one CI agent that overlay can run and writes its
@@ -68,6 +70,7 @@ from compose.yaml, then the volume name.
 from __future__ import annotations
 
 import argparse
+import json
 from collections.abc import Callable
 from pathlib import Path
 from urllib.parse import urlparse
@@ -105,6 +108,7 @@ DEVELOPMENT_OVERLAY = "compose.dev.yaml"
 DEV_AGENT = "laptop"
 GRADING_LABEL = ("pool", "platform")
 SOCKET_PROBE_IMAGE = "busybox:1.37.0"
+SLOT_TABLE = Path("machine") / "slots.json"
 LIVE_STREAMS_CEILING = 65535
 """The most connections nginx's `limit_conn` takes for a cap."""
 
@@ -199,6 +203,7 @@ def main(argv: list[str] | None = None) -> int:
 
         _generate_missing_secrets(values, summary)
         _derive_values(values, manifest, development=development)
+        values["UNICON_SLOT_SIZES"] = slot_sizes(options.directory / SLOT_TABLE)
         if development:
             values["DOCKER_SOCKET_GID"] = compose.socket_group(SOCKET_PROBE_IMAGE)
         envfile.write(env_path, template, values)
@@ -431,6 +436,13 @@ def _derive_values(
     refuse_sign_up_without_mail(values, development=development)
     refuse_mail_without_sender(values)
     refuse_bad_stream_caps(values)
+
+
+def slot_sizes(table: Path) -> str:
+    """UNICON_SLOT_SIZES, the forge's copy of the slot sizes in `table`,
+    `<name>:<memory MB>` comma separated in the table's order."""
+    sizes = json.loads(table.read_text())
+    return ",".join(f"{name}:{size['memory_mb']}" for name, size in sizes.items())
 
 
 def sign_up_open(values: dict[str, str], *, development: bool) -> bool:

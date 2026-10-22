@@ -587,14 +587,29 @@ gets `/etc/unicon/hosts` as its `/etc/hosts` and `/etc/unicon/cache-cap`,
 and the names the daemon and the agent use are pinned in the machine's own.
 The root Docker is disabled, and the cgroup hierarchy counts each cgroup's
 memory kills alone, so a box killed for its memory does not fail its step.
-The agent runs as a user of its own, `unicon-agent`, from a binary checked
-against `agent_binary_sha256`, starts only while the wall is loaded, and
-has the labels `pool=platform,shape=rootless` and
-`WOODPECKER_BACKEND_DOCKER_LIMIT_MEM`. `setup` checks every setting before
-it changes anything, disables the agent first, kills the throwaway user's
-containers and stops its daemon before it takes the wall down, and
-enables the agent only when every check of the self-test passes; a check
-that could not be tried says "not tested". It prints `network wall: on`
+The machine is cut into slots, each of one size of `machine/slots.json`,
+the one table of slot sizes, which bootstrap also writes into `.env` as
+`UNICON_SLOT_SIZES` for the forge to plan each run task pipeline into
+(keep the table beside the script on the machine). Setup keeps a core and
+3 GB for the system, the agents and the daemon, then gives the machine one
+slot of each size, the largest first, while it fits, and as many of the
+smallest as fit after; `slots` in the settings gives the counts instead,
+and `early_share` (a quarter unless given) the share of slots, all of the
+smallest size but one, kept for early pipelines. Each slot has an agent of
+its own, `unicon-agent@<slot>.service`, which takes one workflow at a
+time, pins every container of it to the slot's cores and caps it at the
+slot's memory with no swap, and has the labels
+`pool=platform,shape=rootless,size=<size>,lane=early` for a slot kept for
+the early lane and `lane=*` for every other. The throwaway user's slice,
+which holds every container, is capped at the machine's memory less 2 GB.
+The slots are fixed until setup runs again. Every agent runs as a user of
+its own, `unicon-agent`, from a binary checked against
+`agent_binary_sha256`, and starts only while the wall is loaded. `setup`
+checks every setting and works the slots out before it changes anything,
+disables every agent first, kills the throwaway user's containers and
+stops its daemon before it takes the wall down, and enables the agents
+only when every check of the self-test passes, each slot's limits among
+them; a check that could not be tried says "not tested". It prints `network wall: on`
 or `off`. Run again, it takes new settings and new pinned addresses. A
 restart or reload of `nftables.service`, whose rules file flushes every
 table, loads the wall again after it.
@@ -624,7 +639,8 @@ the cgroup option fail, as they should on that kernel.
 `compose.dev.yaml`:
 
 - `woodpecker-agent`, with the token bootstrap minted and the label
-  `pool=platform`, which every grading run asks for. Its step containers join
+  `pool=platform`, which every grading run asks for, and any slot size and
+  lane, `size=*,lane=*`, which a run task's pipeline asks for. Its step containers join
   the network `unicon-grading` (`WOODPECKER_BACKEND_DOCKER_NETWORK`), on
   which the proxy is the only service of the stack, so the clone steps reach
   Forgejo through the proxy's git listener and the harness reaches the

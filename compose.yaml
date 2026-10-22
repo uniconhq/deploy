@@ -83,6 +83,10 @@ x-backend-env: &backend-env
   # them grades no run task.
   UNICON_PLUGIN_GIT_IMAGE: ${UNICON_PLUGIN_GIT_IMAGE:-}
   UNICON_PRIMITIVE_BASE_IMAGE: ${UNICON_PRIMITIVE_BASE_IMAGE:-}
+  # The grading machines' slot sizes, name:MB comma separated, which bootstrap
+  # writes from machine/slots.json: the forge fits each run task pipeline in
+  # the smallest that holds it.
+  UNICON_SLOT_SIZES: ${UNICON_SLOT_SIZES}
   # Step images withdrawn by hand, by digest, comma separated, which no
   # grading runs (see .env.example).
   UNICON_WITHDRAWN_IMAGES: ${UNICON_WITHDRAWN_IMAGES:-}

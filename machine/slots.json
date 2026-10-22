@@ -1,0 +1,4 @@
+{
+  "small": {"cores": 2, "memory_mb": 8192},
+  "big": {"cores": 4, "memory_mb": 28672}
+}
