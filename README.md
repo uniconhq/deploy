@@ -410,19 +410,25 @@ nothing.
 Each built-in workflow is a folder under `workflows/`, and each is the
 public repository `unicon/<name>.workflow` with the topic
 `unicon-workflow`. Each of a workflow's versions is a folder in its own,
-`workflows/classic/v2/` and `workflows/classic-folder/v1/`, holding the `workflow.yaml` and `README.md`
-the version's tag holds, and bootstrap publishes each to its own tag by the
-same rule: a tag that is not there is made, and one that is there and holds
-the same files is left as it is. One whose definition differs only in what
-does not grade, an input's `title`, `help` or `unit`, a reported value's
-`title` or `unit`, a comment or the layout, or whose README differs, is moved to the new files, and the run
-says `(moved)`; so a version is fixed in how it grades, while the words a
-person reads at its tag can change. One whose definition differs in
-anything that grades stops the run the same way. The definitions are
-compared as the forge reads them: an input or test field written as a bare
-type, `time_limit: number`, is `{type: number}`, a reported value written
-as a bare reference is one given `from` alone, and a flag set `false` is
-one left out.
+`workflows/classic/v2/`, `workflows/classic/v3/`,
+`workflows/classic-folder/v1/` and `workflows/interactive/v1/`, holding
+every file the version's tag holds: its `workflow.yaml` and `README.md`,
+and the files its steps read from the workflow itself, such as
+`classic@v3`'s diff script under `diff/` and `interactive@v1`'s verdict
+script under `verdict/`. Python's caches are left out, and a link is
+refused. Bootstrap publishes each to its own tag by the same rule: a tag
+that is not there is made, and one that is there and holds the same files
+is left as it is. One whose definition differs only in what does not
+grade, an input's `title`, `help` or `unit`, a report's `title` or
+`unit`, a comment or the layout, or whose README differs, with every other
+file the same, is moved to the new files, and the run says `(moved)`; so a
+version is fixed in how it grades, while the words a person reads at its
+tag can change. One whose definition differs in anything that grades, or
+any of whose other files differs, stops the run the same way. The
+definitions are compared as the forge reads them: an input or test field
+written as a bare type, `time_limit: number`, is `{type: number}`, a
+report written as a bare reference is one given `from` alone, and a flag
+set `false` is one left out.
 `unicon/classic` is the built-in workflow: compile the submission, run it on
 every test, compare each output with the answer. `unicon/classic@v2`
 wires the primitives' `v2` in the format of `TASK-FORMAT.md`, with each
@@ -431,7 +437,13 @@ which pages name "Run time", in ms, and "Memory used", in KB, and the
 compiler's "Compile log"; `unicon/classic-folder@v1` reports the same.
 `unicon/classic-folder@v1` is classic over a folder of sources: the
 contestant gives a folder, its language and the entry point `compile@v2`
-starts from (`TASK-FORMAT.md` section 4.7). A definition changed in how it grades is a new folder. Every primitive version a
+starts from (`TASK-FORMAT.md` section 4.7). `unicon/classic@v3` is one run
+of the entrant's program, in the format of `SIMPLER-CORE.md` 7: compiled
+with `compile@v3`, run with `exec@v1` and compared word by word by its diff
+script; a task repeats it over its tests. `unicon/interactive@v1` runs the
+entrant's program against the task's judge with `interact@v2`, and its
+verdict script decides the run. A definition changed in how it grades is a
+new folder. Every primitive version a
 definition `use:`s has to be one the manifest pins: bootstrap refuses one
 that is not before it writes anything, since the forge would refuse every
 task saved against that workflow version.

@@ -1,4 +1,4 @@
-"""The diff script unicon/classic@v3 ships, workflows-next/classic/v3/diff/:
+"""The diff script unicon/classic@v3 ships, workflows/classic/v3/diff/:
 words compared as testlib's wcmp compares them, every case of
 unicon/diff-check@v2's tests judged by that rule, the report it writes
 for exec, and the workflow beside it that runs it on the solution's output.
@@ -21,7 +21,7 @@ import pytest
 
 from bootstrap import core_yaml
 
-DIFF = Path(__file__).resolve().parent.parent / "workflows-next/classic/v3/diff"
+DIFF = Path(__file__).resolve().parent.parent / "workflows/classic/v3/diff"
 
 
 def load_diff() -> ModuleType:

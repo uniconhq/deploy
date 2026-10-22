@@ -1,5 +1,5 @@
 """The verdict script unicon/interactive@v1 ships,
-workflows-next/interactive/v1/verdict/: every rule on hand-written facts, as
+workflows/interactive/v1/verdict/: every rule on hand-written facts, as
 interact gives them, and the report it writes for exec.
 
 Its run through interact and exec, chained on their images, is in
@@ -19,7 +19,7 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-WORKFLOW = Path(__file__).resolve().parent.parent / "workflows-next/interactive/v1"
+WORKFLOW = Path(__file__).resolve().parent.parent / "workflows/interactive/v1"
 VERDICT = WORKFLOW / "verdict"
 SIBLINGS = Path(__file__).resolve().parents[2]
 """Where the primitives' checkouts sit beside deploy's."""

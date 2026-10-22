@@ -1,7 +1,8 @@
-"""Seeding the built-in workflows, unicon/classic and
-unicon/classic-folder, at each of their versions: what is made on a fresh
-forge, what is left alone on a rerun, the shape the forge package looks for,
-and the one way a version is ever rewritten.
+"""Seeding the built-in workflows, unicon/classic, unicon/classic-folder
+and unicon/interactive, at each of their versions, each version's whole
+folder: what is made on a fresh forge, what is left alone on a rerun, the
+shape the forge package looks for, and the one way a version is ever
+rewritten.
 
 The forge package finds a workflow as a public repository
 `<owner>/<name>.workflow` carrying the topic `unicon-workflow`, with a git tag
@@ -38,6 +39,8 @@ FULL = f"{ORG}/{CLASSIC}.workflow"
 REPO = f"/repos/{FULL}"
 FOLDER = "classic-folder"
 FOLDER_REPO = f"/repos/{ORG}/{FOLDER}.workflow"
+INTERACTIVE = "interactive"
+INTERACTIVE_REPO = f"/repos/{ORG}/{INTERACTIVE}.workflow"
 TOKEN = "provisioning-token"
 DIGEST = "@sha256:" + "0" * 64
 NO_PRIMITIVES = Manifest(
@@ -90,10 +93,12 @@ def test_a_fresh_forge_gets_each_workflow_at_each_version() -> None:
 
     summary = _seed(forge)
 
-    assert summary.lines()[0] == "created: 7, already present: 0"
+    assert summary.lines()[0] == "created: 11, already present: 0"
     assert forge.writes() == [
         ("POST", "/orgs"),
         ("POST", f"/orgs/{ORG}/repos"),
+        ("POST", f"{REPO}/contents"),
+        ("POST", f"{REPO}/tags"),
         ("POST", f"{REPO}/contents"),
         ("POST", f"{REPO}/tags"),
         ("PUT", f"{REPO}/topics/unicon-workflow"),
@@ -101,17 +106,35 @@ def test_a_fresh_forge_gets_each_workflow_at_each_version() -> None:
         ("POST", f"{FOLDER_REPO}/contents"),
         ("POST", f"{FOLDER_REPO}/tags"),
         ("PUT", f"{FOLDER_REPO}/topics/unicon-workflow"),
+        ("POST", f"/orgs/{ORG}/repos"),
+        ("POST", f"{INTERACTIVE_REPO}/contents"),
+        ("POST", f"{INTERACTIVE_REPO}/tags"),
+        ("PUT", f"{INTERACTIVE_REPO}/topics/unicon-workflow"),
     ]
     folder = forge.repos[f"{ORG}/{FOLDER}.workflow"]
     assert list(folder.tags) == ["v1"]
     assert folder.files_at("v1") == seed_files(DEPLOY, FOLDER, "v1")
     assert f"  created  workflow {ORG}/{FOLDER} version v1" in summary.lines()
     repo = forge.repos[FULL]
-    assert list(repo.tags) == ["v2"]
+    assert list(repo.tags) == ["v2", "v3"]
     assert repo.files_at("v2") == _v2()
+    assert set(repo.files_at("v3")) == {
+        "workflow.yaml",
+        "README.md",
+        "diff/diff.py",
+        "diff/program.yaml",
+    }
     assert repo.topics == ["unicon-workflow"]
     assert f"  created  workflow {ORG}/{CLASSIC} version v2" in summary.lines()
+    assert f"  created  workflow {ORG}/{CLASSIC} version v3" in summary.lines()
     assert not any(f"{ORG}/{CLASSIC} version v1" in line for line in summary.lines())
+    interactive = forge.repos[f"{ORG}/{INTERACTIVE}.workflow"]
+    assert set(interactive.files_at("v1")) == {
+        "workflow.yaml",
+        "README.md",
+        "verdict/verdict.py",
+        "verdict/program.yaml",
+    }
 
 
 def test_a_seeded_forge_is_read_and_not_written() -> None:
@@ -121,7 +144,7 @@ def test_a_seeded_forge_is_read_and_not_written() -> None:
 
     summary = _seed(forge)
 
-    assert summary.lines()[0] == "created: 0, already present: 7"
+    assert summary.lines()[0] == "created: 0, already present: 11"
     assert forge.writes() == []
 
 
@@ -155,7 +178,7 @@ def test_the_repository_is_public_on_main_with_no_commit_of_forgejos_own() -> No
             "default_branch": "main",
             "auto_init": False,
         }
-        for name in (CLASSIC, FOLDER)
+        for name in (CLASSIC, FOLDER, INTERACTIVE)
     ]
 
 
@@ -463,7 +486,7 @@ def test_the_versions_are_the_version_folders_oldest_first(tmp_path: Path) -> No
 
     assert list(versions) == ["v1", "v2", "v10"]
     assert versions["v10"]["workflow.yaml"] == b"ten\n"
-    assert list(seed_versions(DEPLOY, CLASSIC)) == ["v2"]
+    assert list(seed_versions(DEPLOY, CLASSIC)) == ["v2", "v3"]
 
 
 @pytest.mark.parametrize("stray", ["workflow.yaml", "latest"])
@@ -555,22 +578,32 @@ def test_v2_wires_the_v2_primitives_over_tests_and_reports() -> None:
     assert files["README.md"].startswith(b"# classic\n")
 
 
-def _pinning(*versions: str) -> Manifest:
-    """A manifest pinning each of the three primitives at these versions."""
+def _pinning(**versions: tuple[str, ...]) -> Manifest:
+    """A manifest pinning each primitive named at these versions."""
     return Manifest(
         path=DEPLOY / "images.json",
         images=NO_PRIMITIVES.images,
         primitives=tuple(
             PrimitiveRelease(
-                name,
+                name.replace("_", "-"),
                 version,
-                f"ghcr.io/uniconhq/primitive-{name}{DIGEST}",
-                LocalSource(DEPLOY.parent / f"primitive-{name}"),
+                f"ghcr.io/uniconhq/primitive-{name.replace('_', '-')}{DIGEST}",
+                LocalSource(DEPLOY.parent / f"primitive-{name.replace('_', '-')}"),
             )
-            for name in ("compile", "diff-check", "sandbox-run")
-            for version in versions
+            for name, pinned in versions.items()
+            for version in pinned
         ),
     )
+
+
+EVERY_USE = {
+    "compile": ("v2", "v3"),
+    "sandbox_run": ("v2",),
+    "diff_check": ("v2",),
+    "exec": ("v1",),
+    "interact": ("v2",),
+}
+"""Every primitive version the built-in workflows use."""
 
 
 def test_the_primitives_a_definition_uses_are_read_from_its_steps() -> None:
@@ -598,26 +631,28 @@ steps:
 
 
 def test_every_primitive_version_the_workflows_use_has_to_be_pinned() -> None:
-    main.refuse_unpinned_primitives(DEPLOY, _pinning("v2"))
+    main.refuse_unpinned_primitives(DEPLOY, _pinning(**EVERY_USE))
 
     with pytest.raises(main.UnpinnedPrimitive) as refused:
-        main.refuse_unpinned_primitives(DEPLOY, _pinning("v1"))
+        main.refuse_unpinned_primitives(
+            DEPLOY, _pinning(**{**EVERY_USE, "compile": ("v2",), "interact": ()})
+        )
 
     message = str(refused.value)
     assert message.startswith("images.json does not pin every primitive version")
     assert (
-        f"workflows/{CLASSIC}/v2/ uses unicon/compile@v2; "
-        f"workflows/{CLASSIC}/v2/ uses unicon/sandbox-run@v2; "
-        f"workflows/{CLASSIC}/v2/ uses unicon/diff-check@v2; "
-        f"workflows/{FOLDER}/v1/ uses unicon/compile@v2; "
-        f"workflows/{FOLDER}/v1/ uses unicon/sandbox-run@v2; "
-        f"workflows/{FOLDER}/v1/ uses unicon/diff-check@v2."
+        f"workflows/{CLASSIC}/v3/ uses unicon/compile@v3; "
+        f"workflows/{CLASSIC}/v3/ uses unicon/compile@v3; "
+        f"workflows/{INTERACTIVE}/v1/ uses unicon/compile@v3; "
+        f"workflows/{INTERACTIVE}/v1/ uses unicon/compile@v3; "
+        f"workflows/{INTERACTIVE}/v1/ uses unicon/interact@v2; "
+        f"workflows/{INTERACTIVE}/v1/ uses unicon/compile@v3."
     ) in message
-    assert f"{CLASSIC}/v1/" not in message
+    assert f"{CLASSIC}/v2/" not in message
 
 
 def test_the_workflows_are_the_folders_under_workflows(tmp_path: Path) -> None:
-    assert seeded(DEPLOY) == [CLASSIC, FOLDER]
+    assert seeded(DEPLOY) == [CLASSIC, FOLDER, INTERACTIVE]
     (tmp_path / "workflows").mkdir()
     (tmp_path / "workflows" / "README.md").write_bytes(b"")
 
@@ -677,3 +712,84 @@ def test_bootstrap_stops_at_an_unpinned_primitive_before_writing_anything(
     assert status == 1
     assert "uses unicon/compile@v7" in capsys.readouterr().out
     assert not (tmp_path / ".env").exists()
+
+
+def test_a_version_is_seeded_with_its_whole_folder_but_pythons_caches(
+    tmp_path: Path,
+) -> None:
+    directory = _deploy_with(tmp_path, {"v1": b"steps: [1]\n"})
+    root = directory / "workflows" / CLASSIC / "v1"
+    (root / "diff" / "__pycache__").mkdir(parents=True)
+    (root / "diff" / "diff.py").write_bytes(b"print(1)\n")
+    (root / "diff" / "__pycache__" / "diff.cpython-314.pyc").write_bytes(b"\0")
+    (root / "stray.pyc").write_bytes(b"\0")
+
+    assert seed_files(directory, CLASSIC, "v1") == {
+        "README.md": b"# classic\n",
+        "diff/diff.py": b"print(1)\n",
+        "workflow.yaml": b"steps: [1]\n",
+    }
+    assert set(seed_files(DEPLOY, CLASSIC, "v3")) == {
+        "workflow.yaml",
+        "README.md",
+        "diff/diff.py",
+        "diff/program.yaml",
+    }
+
+
+def test_a_link_in_a_version_folder_is_refused(tmp_path: Path) -> None:
+    directory = _deploy_with(tmp_path, {"v1": b"steps: [1]\n"})
+    root = directory / "workflows" / CLASSIC / "v1"
+    (root / "answers").symlink_to("/etc")
+
+    with pytest.raises(WorkflowError, match="is a link"):
+        seed_files(directory, CLASSIC, "v1")
+
+
+def test_a_version_without_its_readme_is_refused(tmp_path: Path) -> None:
+    directory = _deploy_with(tmp_path, {"v1": b"steps: [1]\n"})
+    (directory / "workflows" / CLASSIC / "v1" / "README.md").unlink()
+
+    with pytest.raises(WorkflowError, match=r"holds no README\.md"):
+        seed_files(directory, CLASSIC, "v1")
+
+
+def test_a_changed_script_stops_the_run_though_the_definition_is_the_same() -> None:
+    forge = FakeForgejo()
+    v3 = seed_files(DEPLOY, CLASSIC, "v3")
+    older = {**v3, "diff/diff.py": v3["diff/diff.py"] + b"# an older script\n"}
+    forge.seed(FULL, older, tags=("v3",), topics=("unicon-workflow",))
+    forge.requests.clear()
+
+    with pytest.raises(main.DifferingVersions) as refused:
+        _seed(forge)
+
+    assert forge.writes() == []
+    assert f"{ORG}/{CLASSIC}@v3, against workflows/{CLASSIC}/v3/" in str(refused.value)
+
+
+def test_a_run_workflow_changed_only_in_a_reports_words_moves_in_place() -> None:
+    forge = FakeForgejo()
+    v3 = seed_files(DEPLOY, CLASSIC, "v3")
+    definition = v3["workflow.yaml"].replace(b"title: Run time, ", b"")
+    assert definition != v3["workflow.yaml"]
+    repo = forge.seed(
+        FULL,
+        {**v3, "workflow.yaml": definition},
+        tags=("v3",),
+        topics=("unicon-workflow",),
+    )
+    before = repo.tags["v3"]
+
+    summary = _seed(forge)
+
+    assert repo.tags["v3"] != before
+    assert repo.files_at("v3") == v3
+    assert any(
+        f"workflow {ORG}/{CLASSIC} version v3" in line and "moved" in line
+        for line in summary.lines()
+    )
+    assert graded(definition) == graded(v3["workflow.yaml"])
+    assert graded(definition.replace(b"steps.solution.time_ms", b"steps.x.y")) != (
+        graded(v3["workflow.yaml"])
+    )
