@@ -87,7 +87,7 @@ def until_shown(
             page.reload()
 
 
-def board(page: Page, name: str) -> Locator:
+def leaderboard(page: Page, name: str) -> Locator:
     return page.get_by_role("region", name=name, exact=True)
 
 
@@ -173,7 +173,7 @@ def leaderboards(page: Page, org: str) -> None:
     )
 
 
-def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
+def test_three_leaderboards_count_what_is_shown_before_and_after_the_reveal(
     browser: Browser,
 ) -> None:
     stamp = secrets.token_hex(3)
@@ -262,7 +262,7 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     toggle_mark(entrant, 2, checked=True)
 
     organiser.reload()
-    expect(board(organiser, "Final, now")).to_contain_text("Shown from")
+    expect(leaderboard(organiser, "Final, now")).to_contain_text("Shown from")
     until_shown(
         organiser, cell(organiser, f"Final, {EVERY_RESULT}", entrant_name, 0), "50"
     )
@@ -274,8 +274,8 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     minutes = int((submitted_at(entrant, org, 2) - start).total_seconds() // 60)
     penalty = str(minutes + 20)
 
-    boards = f"{APP}/contests/{org}/spring/boards"
-    entrant.goto(boards)
+    public_leaderboards = f"{APP}/contests/{org}/spring/boards"
+    entrant.goto(public_leaderboards)
     until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "50")
     expect(rank(entrant, "IOI", entrant_name)()).to_have_text("1")
     expect(rank(entrant, "IOI", rival_name)()).to_have_text("2")
@@ -283,17 +283,17 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     expect(cell(entrant, "ICPC", entrant_name, 0)()).to_have_text("50")
     expect(cell(entrant, "ICPC", entrant_name, 1)()).to_have_text(penalty)
     expect(cell(entrant, "ICPC", entrant_name, 2)()).to_contain_text("1 attempt before")
-    expect(board(entrant, "Final")).to_contain_text("Shown from")
+    expect(leaderboard(entrant, "Final")).to_contain_text("Shown from")
 
-    for public in (f"{APP}/contests/{org}/spring", boards):
+    for public in (f"{APP}/contests/{org}/spring", public_leaderboards):
         visitor.goto(public)
         until_shown(visitor, cell(visitor, "IOI", entrant_name, 0), "50")
-        expect(board(visitor, "ICPC")).to_have_count(0)
-        expect(board(visitor, "Final")).to_have_count(0)
+        expect(leaderboard(visitor, "ICPC")).to_have_count(0)
+        expect(leaderboard(visitor, "Final")).to_have_count(0)
 
     submit(rival, 1, SAMPLE)
     assert verdict_of(rival, 1) == "ACCEPTED"
-    rival.goto(boards)
+    rival.goto(public_leaderboards)
     until_shown(rival, cell(rival, "IOI", rival_name, 0), "50")
     expect(rank(rival, "IOI", rival_name)()).to_have_text("1")
     expect(rank(rival, "IOI", entrant_name)()).to_have_text("1")
@@ -308,12 +308,12 @@ def test_three_boards_count_what_is_shown_before_and_after_the_reveal(
     time.sleep(max(0.0, (reveal - datetime.now(UTC)).total_seconds()) + 1)
     task_timeline(organiser, org, "spring", "A · sum", closes=reveal)
 
-    entrant.goto(boards)
+    entrant.goto(public_leaderboards)
     until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "100")
     expect(cell(entrant, "ICPC", entrant_name, 0)()).to_have_text("100")
     expect(cell(entrant, "ICPC", entrant_name, 1)()).to_have_text(penalty)
     until_shown(entrant, cell(entrant, "Final", entrant_name, 0), "50")
 
-    visitor.goto(boards)
+    visitor.goto(public_leaderboards)
     until_shown(visitor, cell(visitor, "IOI", entrant_name, 0), "100")
     expect(rank(visitor, "IOI", rival_name)()).to_have_text("1")

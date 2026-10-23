@@ -806,7 +806,7 @@ The organiser then replaces the task's test from its Tests card, publishes
 the change the running contest asks about, and the gradings feed shows the
 sample solution graded again. Last, the entrant signs out, and signing in
 again asks Forgejo for their password: signing out of the app signed the
-browser out of Forgejo too. Beside it, `test_boards.py` ranks a contest on
+browser out of Forgejo too. Beside it, `test_leaderboards.py` ranks a contest on
 three leaderboards built on its Leaderboards page, before and after a test
 group's reveal, `test_workflows.py` builds a workflow in the editor,
 publishes and shares a version of it and grades with it, and
