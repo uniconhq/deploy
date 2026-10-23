@@ -601,18 +601,19 @@ gives a big slot only while at least two small ones still fit beside it,
 then as many small ones as fit: a 4-core 8 GB machine runs three small
 slots, an 8-core 16 GB one a big and three small, a 16-core 64 GB one a
 big and thirteen small. `slots` in the settings gives the counts instead.
-With two slots or more, `early_share` (a quarter unless given) of them,
-rounded, but at least one and never all, the smallest first, is kept for
-early pipelines; `early_share: 0` keeps none. Each slot has an agent of
-its own, `unicon-agent@<slot>.service`, which takes one workflow at a
+No slot is kept for early pipelines unless `early_share` asks, so by
+default every slot takes early and late work alike. With a share and two
+slots or more, that share of them, rounded, but at least one and never
+all, the smallest first, is kept for early pipelines. Each slot has an
+agent of its own, `unicon-agent@<slot>.service`, which takes one workflow at a
 time, pins every container of it to the slot's cores and caps it at the
 slot's memory with no swap, and has the labels
 `pool=platform,shape=rootless,size=<size>,lane=early` for a slot kept for
 the early lane and `lane=*` for every other; a big slot has `size=*`, so
 small work overflows into it, though Woodpecker gives a pipeline to the
 agent its labels match most exactly first. A run on the harness carries
-`lane=late` and no size, so it never takes an early slot; slot machines
-run no socket filter, so it fails there as before. The throwaway user's
+`lane=late` and no size, so it takes any slot but one kept for early
+pipelines; slot machines run no socket filter, so it fails there as before. The throwaway user's
 slice, which holds every container, is capped at the machine's memory
 less 1 GB.
 The slots are fixed until setup runs again. Every agent runs as a user of

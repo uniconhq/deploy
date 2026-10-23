@@ -358,12 +358,14 @@ def plan_slots(
     `settings.slots` gives how many of each size; otherwise, of each size
     above the smallest, the largest first, one while at least two of the
     smallest still fit beside it, and then as many of the smallest as fit,
-    so a small machine runs small slots alone. With two slots or more,
-    `early_share` of them, rounded, but at least one and never all, is
-    kept for the early lane, the smallest first, so early work always has
-    a slot of its own and late work one it may take. Each slot gets cores
-    of its own. Refused when the slots asked for do not fit, or none does,
-    naming the smallest machine one slot fits on.
+    so a small machine runs small slots alone. No slot is kept for the
+    early lane unless `early_share` asks, so by default every slot takes
+    early and late work alike; with a share and two slots or more, that
+    share of them, rounded, but at least one and never all, is kept for
+    the early lane, the smallest first, so early work has a slot of its
+    own and late work one it may take. Each slot gets cores of its own.
+    Refused when the slots asked for do not fit, or none does, naming the
+    smallest machine one slot fits on.
     """
     free_cpus = sorted(cpus)[SYSTEM_CORES:]
     free_mb = memory_mb - SYSTEM_MB - DAEMON_MB
@@ -457,7 +459,8 @@ class Settings:
     `cache_cap` is the most the step cache may hold, in bytes; a quarter
     of the data root's size when not given. `slots` gives how many slots
     of each size of `SLOT_TABLE` the machine runs, and `early_share` the
-    share of them kept for the early lane, none when 0 (`plan_slots`);
+    share of them kept for the early lane, none when 0, as by default
+    (`plan_slots`);
     the sizes themselves are the table's alone, which the forge plans
     with.
     `agent_environment` is passed to every agent as it is, after the
@@ -485,7 +488,7 @@ class Settings:
     insecure_registries: tuple[str, ...] = ()
     cache_cap: int | None = None
     slots: dict[str, int] = field(default_factory=dict)
-    early_share: float = 0.25
+    early_share: float = 0
     agent_environment: dict[str, str] = field(default_factory=dict)
 
     @classmethod
