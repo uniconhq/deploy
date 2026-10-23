@@ -169,9 +169,8 @@ services:
       # Desktop runs Docker as root, and exec refuses the identity map that
       # gives it, so this agent is not that shape. Which shape a machine
       # declares is left to its setup, machine/grading-machine.py. A run
-      # task's pipeline asks for a slot size and a lane too; this one agent
-      # takes any of either.
-      WOODPECKER_AGENT_LABELS: pool=platform,size=*,lane=*
+      # task's pipeline asks for a slot size too; this one agent takes any.
+      WOODPECKER_AGENT_LABELS: pool=platform,size=*
       # Onto the volume below. The default path is /etc/woodpecker, which this
       # image does not create, so the agent cannot save the identity the server
       # gave it: every restart registers a new agent and leaves the old row

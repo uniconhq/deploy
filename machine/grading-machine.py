@@ -64,7 +64,7 @@ are fixed until setup runs again. Then, in order, `setup`:
     agent: as its own user, against the rootless socket, starting only
     while the wall is loaded, with `/etc/unicon/hosts` as every step's
     `/etc/hosts`, the cache's cap, its slot's cores and memory on every
-    container, and its pool, shape, size and lane labels.
+    container, and its pool, shape and size labels.
 
 Run again, it does the same, so it is how a machine takes new settings,
 and how the pinned addresses follow the registry's when they change.
@@ -274,14 +274,14 @@ class Size:
 @dataclass(frozen=True)
 class Slot:
     """One slot of the machine and its agent: its name, `<size>-<n>`, its
-    size, the cores it is pinned to as cpuset names them, whether it is
-    kept for the early lane, its agent's health check port, and whether it
-    takes a pipeline of any size, as a slot of the largest size does."""
+    size, the cores it is pinned to as cpuset names them, its agent's
+    health check port, and whether it takes a pipeline of any size, as a
+    slot of the largest size does. Every slot takes any grading, first
+    come, first served."""
 
     name: str
     size: Size
     cpus: str
-    early: bool
     port: int
     any_size: bool = False
 
@@ -292,16 +292,12 @@ class Slot:
 
     def labels(self, settings: Settings) -> str:
         """Its agent's labels. The forge labels a pipeline with the size it
-        fits and its lane; a slot kept for the early lane takes early
-        pipelines alone, and every other slot takes either, `*`, so a late
-        slot is never kept from the early lane's work. A slot of the
-        largest size takes a pipeline of any size, `*`, so smaller work
-        overflows into it; Woodpecker gives a pipeline to the agent whose
-        labels match it most exactly, so smaller work goes to a slot of its
-        own size first, and early work to an early slot first."""
-        lane = "early" if self.early else "*"
+        fits. A slot of the largest size takes a pipeline of any size, `*`,
+        so smaller work overflows into it; Woodpecker gives a pipeline to
+        the agent whose labels match it most exactly, so smaller work goes
+        to a slot of its own size first."""
         size = "*" if self.any_size else self.size.name
-        return f"{settings.labels},size={size},lane={lane}"
+        return f"{settings.labels},size={size}"
 
 
 def read_sizes(text: str) -> tuple[Size, ...]:
@@ -358,12 +354,8 @@ def plan_slots(
     `settings.slots` gives how many of each size; otherwise, of each size
     above the smallest, the largest first, one while at least two of the
     smallest still fit beside it, and then as many of the smallest as fit,
-    so a small machine runs small slots alone. No slot is kept for the
-    early lane unless `early_share` asks, so by default every slot takes
-    early and late work alike; with a share and two slots or more, that
-    share of them, rounded, but at least one and never all, is kept for
-    the early lane, the smallest first, so early work has a slot of its
-    own and late work one it may take. Each slot gets cores of its own.
+    so a small machine runs small slots alone. Each slot gets cores of its
+    own.
     Refused when the slots asked for do not fit, or none does, naming the
     smallest machine one slot fits on.
     """
@@ -411,10 +403,6 @@ def plan_slots(
             f"{SYSTEM_CORES + smallest.cores} cores and "
             f"{SYSTEM_MB + DAEMON_MB + smallest.memory_mb} MB of memory (MemTotal)"
         )
-    total = sum(counts.values())
-    early = 0
-    if total >= 2 and settings.early_share:
-        early = min(max(1, round(total * settings.early_share)), total - 1)
     slots: list[Slot] = []
     for size in sizes:
         for number in range(1, counts[size.name] + 1):
@@ -424,7 +412,6 @@ def plan_slots(
                     f"{size.name}-{number}",
                     size,
                     cpu_list(taken),
-                    len(slots) < early,
                     FIRST_HEALTH_PORT + len(slots),
                     size == sizes[-1],
                 )
@@ -458,9 +445,7 @@ class Settings:
     a pipeline runs that the wall keeps the daemon from pulling later.
     `cache_cap` is the most the step cache may hold, in bytes; a quarter
     of the data root's size when not given. `slots` gives how many slots
-    of each size of `SLOT_TABLE` the machine runs, and `early_share` the
-    share of them kept for the early lane, none when 0, as by default
-    (`plan_slots`);
+    of each size of `SLOT_TABLE` the machine runs (`plan_slots`);
     the sizes themselves are the table's alone, which the forge plans
     with.
     `agent_environment` is passed to every agent as it is, after the
@@ -488,7 +473,6 @@ class Settings:
     insecure_registries: tuple[str, ...] = ()
     cache_cap: int | None = None
     slots: dict[str, int] = field(default_factory=dict)
-    early_share: float = 0
     agent_environment: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -611,12 +595,6 @@ class Settings:
             for name, count in self.slots.items()
         ):
             raise MachineError("slots gives each size a whole number of slots")
-        if (
-            not isinstance(self.early_share, int | float)
-            or isinstance(self.early_share, bool)
-            or not 0 <= self.early_share < 1
-        ):
-            raise MachineError("early_share is a number from 0 to below 1")
         if self.cache_cap is not None and (
             not whole(self.cache_cap) or self.cache_cap < 2**30
         ):

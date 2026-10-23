@@ -163,8 +163,8 @@ def slots_of(machine: ModuleType, cores: int, memory_gb: int, **changed: Any) ->
     )
 
 
-def laid_out(slots: Any) -> list[tuple[str, str, bool, int]]:
-    return [(slot.name, slot.cpus, slot.early, slot.port) for slot in slots]
+def laid_out(slots: Any) -> list[tuple[str, str, int]]:
+    return [(slot.name, slot.cpus, slot.port) for slot in slots]
 
 
 def test_the_slot_table_is_deploys_one_table_of_sizes(machine: ModuleType) -> None:
@@ -194,13 +194,12 @@ def test_a_machine_gets_small_slots_and_a_big_one_only_beside_two_small(
     machine: ModuleType,
 ) -> None:
     """8 cores and 16 GB: one core and 1.5 GB kept, a big slot, since three
-    small ones still fit beside it, then those three; none is kept for the
-    early lane unless the settings ask."""
+    small ones still fit beside it, then those three."""
     assert laid_out(slots_of(machine, 8, 16)) == [
-        ("small-1", "1", False, 3000),
-        ("small-2", "2", False, 3001),
-        ("small-3", "3", False, 3002),
-        ("big-1", "4-5", False, 3003),
+        ("small-1", "1", 3000),
+        ("small-2", "2", 3001),
+        ("small-3", "3", 3002),
+        ("big-1", "4-5", 3003),
     ]
     # A big slot would leave one small one: small ones alone.
     assert [slot.name for slot in slots_of(machine, 4, 16)] == [
@@ -214,8 +213,8 @@ def test_a_machine_gets_small_slots_and_a_big_one_only_beside_two_small(
         "small-2",
         "small-3",
     ]
-    # The smallest machine: one small slot, which is in no lane of its own.
-    assert laid_out(slots_of(machine, 2, 4)) == [("small-1", "1", False, 3000)]
+    # The smallest machine: one small slot.
+    assert laid_out(slots_of(machine, 2, 4)) == [("small-1", "1", 3000)]
     # The memory a 4 GB machine reports is less than 4 GB.
     assert (
         len(machine.plan_slots(sizes(machine), settings(machine), range(2), 3584)) == 1
@@ -224,37 +223,12 @@ def test_a_machine_gets_small_slots_and_a_big_one_only_beside_two_small(
         machine.plan_slots(sizes(machine), settings(machine), range(2), 3583)
 
 
-def test_the_early_lane_keeps_a_share_of_the_smallest_slots_but_one_when_asked(
-    machine: ModuleType,
-) -> None:
-    def early(**changed: Any) -> list[str]:
-        return [
-            slot.name for slot in slots_of(machine, 64, 256, **changed) if slot.early
-        ]
-
-    # No slot is kept for the early lane unless the settings ask.
-    assert early() == []
-    assert early(early_share=0) == []
-    # 61 small slots and a big one: a quarter of 62, rounded.
-    assert early(early_share=0.25) == [f"small-{number}" for number in range(1, 17)]
-    # Every slot but one, the smallest first, so late work has a slot.
-    assert early(slots={"small": 2, "big": 2}, early_share=0.75) == [
-        "small-1",
-        "small-2",
-        "big-1",
-    ]
-    assert early(slots={"big": 3}, early_share=0.4) == ["big-1"]
-    # At least one of two slots or more, however small the share.
-    assert early(slots={"small": 2}, early_share=0.1) == ["small-1"]
-    assert early(slots={"small": 1}, early_share=0.5) == []
-
-
 def test_the_slot_counts_are_the_settings_when_given_and_must_fit(
     machine: ModuleType,
 ) -> None:
     assert laid_out(slots_of(machine, 16, 64, slots={"big": 2})) == [
-        ("big-1", "1-2", False, 3000),
-        ("big-2", "3-4", False, 3001),
+        ("big-1", "1-2", 3000),
+        ("big-2", "3-4", 3001),
     ]
     with pytest.raises(machine.MachineError, match="need 16 cores and 65536 MB"):
         slots_of(machine, 16, 64, slots={"big": 8})
@@ -280,9 +254,7 @@ def test_each_slots_agent_takes_one_workflow_under_its_labels_and_limits(
     text = machine.agent_environment(settings(machine, **changed), "the-token", big)
     values = dict(line.split("=", 1) for line in text.splitlines())
 
-    assert values["WOODPECKER_AGENT_LABELS"] == (
-        "pool=platform,shape=rootless,size=*,lane=*"
-    )
+    assert values["WOODPECKER_AGENT_LABELS"] == "pool=platform,shape=rootless,size=*"
     assert values["WOODPECKER_MAX_WORKFLOWS"] == "1"
     assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_CPU_SET"] == "14-15"
     assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM"] == str(8192 * 2**20)
@@ -298,15 +270,9 @@ def test_each_slots_agent_takes_one_workflow_under_its_labels_and_limits(
     assert values["DOCKER_HOST"] == "unix:///run/unicon-docker/docker.sock"
     assert values["WOODPECKER_AGENT_SECRET"] == "the-token"
     assert values["WOODPECKER_LOG_LEVEL"] == "debug"
-    # Every slot takes early and late work alike unless the settings keep
-    # a share for the early lane.
-    assert small.labels(settings(machine)).endswith(",size=small,lane=*")
-    assert all(
-        slot.labels(settings(machine)).endswith(",lane=*")
-        for slot in slots_of(machine, 16, 64)
-    )
-    kept, *_ = slots_of(machine, 16, 64, early_share=0.25)
-    assert kept.labels(settings(machine)).endswith(",size=small,lane=early")
+    # Every slot takes any grading, first come, first served: its labels
+    # name its size and nothing else.
+    assert small.labels(settings(machine)) == "pool=platform,shape=rootless,size=small"
     with pytest.raises(machine.MachineError, match="line break"):
         machine.agent_environment(settings(machine), "a\nb", small)
 
@@ -559,13 +525,12 @@ def test_a_target_is_held_got_through_or_not_tested(
         ({"wall_allow": "203.0.113.10:443"}, "wall_allow is a list of texts"),
         ({"slots": {"small": -1}}, "slots gives each size a whole number"),
         ({"slots": {"small": 1.5}}, "slots gives each size a whole number"),
-        ({"early_share": 1}, "early_share is a number from 0 to below 1"),
-        ({"early_share": True}, "early_share is a number from 0 to below 1"),
         (
             {"agent_environment": {"WOODPECKER_BACKEND_DOCKER_LIMIT_MEM": "1"}},
             "which the agent's slot sets",
         ),
         ({"limit_mem": 1}, "unknown settings: limit_mem"),
+        ({"early_share": 0.25}, "unknown settings: early_share"),
         ({"agent_image": "woodpeckerci/woodpecker-agent:v3.18.1"}, "its digest"),
         ({"step_hosts": {"forge": "forge.example.org"}}, "not an address"),
         (
