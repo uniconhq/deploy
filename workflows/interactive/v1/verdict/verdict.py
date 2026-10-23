@@ -1,6 +1,6 @@
 """The verdict script of unicon/interactive@v1: whose run was it?
 
-interact runs the entrant and the judge side by side and judges nothing; it
+exec's programs form runs the entrant and the judge side by side and judges nothing; it
 writes how each ended as its `facts` file. exec runs this script with that
 file placed in its working directory as `facts`, and `program.yaml` beside
 this file as its manifest. It reports through the folder exec names in
@@ -47,12 +47,12 @@ from typing import Any
 
 TEXTS = ("label", "message", "staff_message")
 WORDS = ("time_limit", "memory_limit", "output_limit", "runtime_error")
-"""How a program ended, other than `finished`, in interact's facts: each is
+"""How a program ended, other than `finished`, in the programs form's facts: each is
 also a verdict this script may write, the step's outcome."""
 
 
 class NotJudged(Exception):
-    """The judge did not judge, or the facts are not interact's: a fault of
+    """The judge did not judge, or the facts are not the programs form's: a fault of
     the step, never a verdict."""
 
 
@@ -69,7 +69,7 @@ def main() -> int:
 
 
 def read_facts(path: Path) -> dict[str, dict[str, Any]]:
-    """interact's facts for one item, which must name an entrant and a judge."""
+    """The programs form's facts for one item: an entrant and a judge."""
     try:
         facts = json.loads(path.read_bytes())
     except (OSError, ValueError) as error:

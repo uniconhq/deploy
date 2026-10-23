@@ -48,7 +48,7 @@ steps:
       source: ${{ inputs.judge }}
       language: ${{ inputs.judge_language }}
   - id: game
-    use: unicon/interact@v2
+    use: unicon/exec@v1
     with:
       programs:
         entrant:

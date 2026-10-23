@@ -441,7 +441,7 @@ starts from (`TASK-FORMAT.md` section 4.7). `unicon/classic@v3` is one run
 of the entrant's program, in the format of `SIMPLER-CORE.md` 7: compiled
 with `compile@v3`, run with `exec@v1` and compared word by word by its diff
 script; a task repeats it over its tests. `unicon/interactive@v1` runs the
-entrant's program against the task's judge with `interact@v2`, and its
+entrant's program against the task's judge with `exec@v1`'s programs form, and its
 verdict script decides the run. A definition changed in how it grades is a
 new folder. Every primitive version a
 definition `use:`s has to be one the manifest pins: bootstrap refuses one
@@ -546,8 +546,8 @@ three at `v2.2.0`.
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
 five from `../runner`, `primitive-base` first, each primitive from
-`../primitive-<name>`, as they are on disk, committed or not, with `exec`,
-`interact` and `compile` built on that `primitive-base` by Docker's own
+`../primitive-<name>`, as they are on disk, committed or not, with `exec`
+and `compile` built on that `primitive-base` by Docker's own
 builder. It runs `registry:2.8.3` on `127.0.0.1:5000` in a
 container of its own, `unicon-registry`, outside the compose stack and with
 its images in the volume `unicon-registry`, pushes each image there to learn
@@ -591,8 +591,8 @@ The machine is cut into slots, each of one size of `machine/slots.json`,
 the one table of slot sizes, which bootstrap also writes into `.env` as
 `UNICON_SLOT_SIZES` for the forge to plan each run task pipeline into
 (keep the table beside the script on the machine). A `small` slot is one
-core and 2 GB, which holds a compile, an `exec` step of a 1 GB run or an
-`interact` step of two 512 MB programs; a `big` slot is two cores and
+core and 2 GB, which holds a compile, an `exec` step of a 1 GB run or
+of two 512 MB programs; a `big` slot is two cores and
 8 GB. Setup keeps a core and 1.5 GB for the system, the agents and the
 daemon, so the smallest machine it takes has 2 cores and 3584 MB of
 memory as the kernel reports it (`MemTotal`), as a 4 GB machine does,

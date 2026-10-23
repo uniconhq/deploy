@@ -603,7 +603,6 @@ EVERY_USE = {
     "sandbox_run": ("v2",),
     "diff_check": ("v2",),
     "exec": ("v1",),
-    "interact": ("v2",),
 }
 """Every primitive version the built-in workflows use."""
 
@@ -637,7 +636,7 @@ def test_every_primitive_version_the_workflows_use_has_to_be_pinned() -> None:
 
     with pytest.raises(main.UnpinnedPrimitive) as refused:
         main.refuse_unpinned_primitives(
-            DEPLOY, _pinning(**{**EVERY_USE, "compile": ("v2",), "interact": ()})
+            DEPLOY, _pinning(**{**EVERY_USE, "compile": ("v2",)})
         )
 
     message = str(refused.value)
@@ -647,7 +646,6 @@ def test_every_primitive_version_the_workflows_use_has_to_be_pinned() -> None:
         f"workflows/{CLASSIC}/v3/ uses unicon/compile@v3; "
         f"workflows/{INTERACTIVE}/v1/ uses unicon/compile@v3; "
         f"workflows/{INTERACTIVE}/v1/ uses unicon/compile@v3; "
-        f"workflows/{INTERACTIVE}/v1/ uses unicon/interact@v2; "
         f"workflows/{INTERACTIVE}/v1/ uses unicon/compile@v3."
     ) in message
     assert f"{CLASSIC}/v2/" not in message

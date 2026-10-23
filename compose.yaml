@@ -272,8 +272,8 @@ services:
       # task's pipeline checks its submission out with the plugin, each
       # named in the extension's answer.
       WOODPECKER_PLUGINS_TRUSTED_CLONE: ${UNICON_TRUSTED_CLONE_IMAGES:-${UNICON_CLONE_IMAGE}}
-      # The plugins a step may run privileged as: every image of `exec` and
-      # `interact` at the forge, by digest, older ones a published plan
+      # The plugins a step may run privileged as: every image of `exec`
+      # at the forge, by digest, older ones a published plan
       # still pins among them, since those steps make boxes of their own, but
       # any in UNICON_WITHDRAWN_IMAGES. A plugin step has no commands,
       # environment or entrypoint, so what runs is the image alone.

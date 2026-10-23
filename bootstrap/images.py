@@ -65,7 +65,7 @@ SOCKET_FILTER = "socket-filter"
 PLUGIN_GIT = "plugin-git"
 PRIMITIVE_BASE = "primitive-base"
 REQUIRED_IMAGES = (HARNESS, CLONE, SOCKET_FILTER)
-BOXED = ("exec", "interact")
+BOXED = ("exec",)
 """The primitives whose steps make boxes of their own and run privileged."""
 
 _BY_DIGEST = re.compile(

@@ -1,9 +1,10 @@
 """The verdict script unicon/interactive@v1 ships,
 workflows/interactive/v1/verdict/: every rule on hand-written facts, as
-interact gives them, and the report it writes for exec.
+exec's programs form gives them, and the report it writes for exec's one
+form.
 
-Its run through interact and exec, chained on their images, is in
-primitive-interact's image tests, which read this folder from a deploy
+Its run through both forms, chained on exec's image, is in
+primitive-exec's image tests, which read this folder from a deploy
 checkout beside them.
 """
 
@@ -37,7 +38,7 @@ verdict = load_verdict()
 
 
 def ran(ended: str = "finished", at: int = 100, **more: Any) -> dict[str, Any]:
-    """One program's facts, as interact writes them."""
+    """One program's facts, as exec's programs form writes them."""
     return {"time_ms": 10, "memory_kb": 4096, "ended": ended, "ended_at": at} | more
 
 
@@ -322,14 +323,14 @@ def test_a_fault_exits_non_zero_and_writes_nothing(
     assert capsys.readouterr().err.startswith("verdict: ")
 
 
-def test_the_outcome_words_are_interacts_and_execs() -> None:
-    """`WORDS` are the endings interact's `ended` names besides `finished`,
-    and the verdict words exec takes from a manifest program, read from the
-    sibling checkouts of both."""
+def test_the_outcome_words_are_the_programs_forms_and_execs() -> None:
+    """`WORDS` are the endings the programs form's `ended` names besides
+    `finished`, and the verdict words exec takes from a manifest program,
+    read from the sibling exec checkout."""
     exec_source = SIBLINGS / "primitive-exec" / "src" / "exec.py"
-    interact_yaml = SIBLINGS / "primitive-interact" / "primitive.yaml"
-    if not (exec_source.is_file() and interact_yaml.is_file()):
-        pytest.skip("no primitive-exec and primitive-interact checkouts beside deploy")
+    exec_yaml = SIBLINGS / "primitive-exec" / "primitive.yaml"
+    if not (exec_source.is_file() and exec_yaml.is_file()):
+        pytest.skip("no primitive-exec checkout beside deploy")
     words = next(
         ast.literal_eval(node.value)
         for node in ast.parse(exec_source.read_text()).body
@@ -337,8 +338,9 @@ def test_the_outcome_words_are_interacts_and_execs() -> None:
         and [getattr(target, "id", None) for target in node.targets]
         == ["VERDICT_WORDS"]
     )
-    declared = YAML(typ="safe").load(interact_yaml)
-    ended = declared["inputs"]["programs"]["outputs"]["ended"]["options"]
+    declared = YAML(typ="safe").load(exec_yaml)
+    programs = declared["forms"]["programs"]
+    ended = programs["inputs"]["programs"]["outputs"]["ended"]["options"]
     assert tuple(words) == verdict.WORDS
     assert ["finished", *verdict.WORDS] == ended
 
@@ -353,7 +355,7 @@ def test_the_workflow_links_an_entrant_and_a_judge_and_hands_on_the_facts() -> N
     steps = {step["id"]: step for step in workflow["steps"]}
     assert list(steps) == ["compile", "judge", "game", "verdict", "decide"]
     game = steps["game"]
-    assert game["use"] == "unicon/interact@v2"
+    assert game["use"] == "unicon/exec@v1"
     assert set(game["with"]["programs"]) == {"entrant", "judge"}
     assert game["with"]["links"] == ["entrant -> judge", "judge -> entrant"]
     assert "manifest" not in game["with"]["programs"]["entrant"]

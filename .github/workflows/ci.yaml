@@ -76,7 +76,7 @@ jobs:
           NAMED: ${{ inputs.siblings }}
           BRANCH: ${{ github.head_ref }}
         run: |
-          for repo in forge backend frontend runner primitive-compile primitive-sandbox-run primitive-diff-check primitive-exec primitive-interact; do
+          for repo in forge backend frontend runner primitive-compile primitive-sandbox-run primitive-diff-check primitive-exec; do
             ref=main
             if [ -n "$NAMED" ]; then
               ref=$NAMED
@@ -137,12 +137,6 @@ jobs:
           repository: uniconhq/primitive-exec
           ref: ${{ steps.refs.outputs['primitive-exec'] }}
           path: primitive-exec
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          repository: uniconhq/primitive-interact
-          ref: ${{ steps.refs.outputs['primitive-interact'] }}
-          path: primitive-interact
           persist-credentials: false
 
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0

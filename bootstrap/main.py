@@ -27,7 +27,7 @@ there, naming each. The
 manifest also gives the harness, clone and socket filter images, which go into
 .env for the services that run them, and, when it pins them, Woodpecker's git
 plugin and the step wrapper's base image, which a run task's pipelines run.
-The images of every version of `exec` and `interact` at the forge go into
+The images of every version of `exec` at the forge go into
 .env too, as the plugins Woodpecker lets run privileged, since those steps
 make boxes of their own. So do the grading machines' slot sizes, from
 machine/slots.json, the one table of them, which a machine's setup reads

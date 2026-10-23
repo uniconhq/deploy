@@ -13,7 +13,7 @@ socket filter do. Nothing is pushed anywhere else.
 It builds the runner's five images from ../runner (images/<name>/Dockerfile,
 with the checkout as the context, the way the runner's own CI builds them),
 primitive-base first, and each primitive from ../primitive-<name> (its
-Dockerfile at the root), exec, interact and compile on that primitive-base,
+Dockerfile at the root), exec and compile on that primitive-base,
 passed as the build argument BASE_IMAGE by its digest here, pushes each to
 the registry, reads back the digest the push gave it, and
 writes images.local.json: the same shape as images.json, with every runner
@@ -73,8 +73,8 @@ import httpx
 from bootstrap import images
 
 RUNNER_IMAGES = ("harness", "clone", "socket-filter", "worker")
-PRIMITIVES = ("compile", "sandbox-run", "diff-check", "exec", "interact")
-ON_BASE = frozenset({"compile", "exec", "interact"})
+PRIMITIVES = ("compile", "sandbox-run", "diff-check", "exec")
+ON_BASE = frozenset({"compile", "exec"})
 """The primitives built on the runner's `images.PRIMITIVE_BASE`, which is
 built first.
 """

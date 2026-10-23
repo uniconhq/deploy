@@ -13,7 +13,7 @@ A machine's own settings decide some attacks: Docker Desktop's VM lets an
 unprivileged process make a BPF map, which the grading machine's self-test
 refuses. `UNICON_E2E_ESCAPE_ALLOW` adds such checks to `allowed`, comma
 separated, so a run on a machine the self-test would refuse says what else
-escaped. The test needs a grading machine with exec and interact's shape,
+escaped. The test needs a grading machine with exec's shape,
 which the CI stack has none of, so it is skipped unless `UNICON_E2E_ESCAPE`
 is set, besides `UNICON_E2E_URL`. The fixtures come from the runner
 checkout beside this repository, or `UNICON_E2E_RUNNER`.
