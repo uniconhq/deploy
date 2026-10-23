@@ -268,21 +268,44 @@ gives back, and on the outcome port what each outcome means."""
 def _without_editor_text(document: dict[str, object]) -> object:
     """The declaration without its own `title` and `description` and without
     each port's `description` and `outcomes`: a port named `description` is
-    a port and stays.
+    a port and stays. A form drops its `description` the same way, and its
+    ports drop theirs.
     """
     found: dict[str, object] = {}
     for key, value in document.items():
         if key in EDITOR_TEXT:
             continue
         if key in PORTS and isinstance(value, dict):
+            value = _ports_without_editor_text(value)
+        elif key == "forms" and isinstance(value, dict):
             value = {
-                name: (
-                    {part: held for part, held in port.items() if part not in PORT_TEXT}
-                    if isinstance(port, dict)
-                    else port
-                )
-                for name, port in value.items()
+                name: _form_without_editor_text(form)
+                if isinstance(form, dict)
+                else form
+                for name, form in value.items()
             }
+        found[key] = value
+    return found
+
+
+def _ports_without_editor_text(ports: dict[str, object]) -> dict[str, object]:
+    return {
+        name: (
+            {part: held for part, held in port.items() if part not in PORT_TEXT}
+            if isinstance(port, dict)
+            else port
+        )
+        for name, port in ports.items()
+    }
+
+
+def _form_without_editor_text(form: dict[str, object]) -> dict[str, object]:
+    found: dict[str, object] = {}
+    for key, value in form.items():
+        if key == "description":
+            continue
+        if key in PORTS and isinstance(value, dict):
+            value = _ports_without_editor_text(value)
         found[key] = value
     return found
 

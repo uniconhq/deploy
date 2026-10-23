@@ -677,3 +677,28 @@ def test_a_withdrawn_image_is_matched_by_its_digest_and_one_matching_nothing_is_
     said = capsys.readouterr().out
     assert nothing in said
     assert renamed not in said
+
+
+def test_editor_text_in_a_form_changes_nothing_a_limit_does() -> None:
+    base = b"""\
+schema_version: 6
+forms:
+  one:
+    description: Runs one program.
+    limits: {time_ms: 1, cpu_ms: 1, memory_mb: 1, pids: 1, output_mb: 1, gpus: 0}
+    inputs:
+      program: {type: text, description: the program}
+    outputs:
+      outcome: {type: outcome, outcomes: {accepted: it ran}}
+  several:
+    limits: {time_ms: 2, cpu_ms: 1, memory_mb: 1, pids: 1, output_mb: 1, gpus: 0}
+    inputs:
+      bundle: {type: text}
+    outputs:
+      outcome: outcome
+"""
+    described = base.replace(b"the program", b"another sentence")
+    slower = base.replace(b"time_ms: 1", b"time_ms: 2", 1)
+
+    assert primitives.compiled(base) == primitives.compiled(described)
+    assert primitives.compiled(base) != primitives.compiled(slower)
