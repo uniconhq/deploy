@@ -133,7 +133,7 @@ def submitted_at(page: Page, org: str, number: int) -> datetime:
 
 def leaderboards(page: Page, org: str) -> None:
     """IOI, ICPC and Final, built on the contest's Leaderboards page."""
-    page.goto(f"{APP}/orgs/{org}/contests/spring/boards")
+    page.goto(f"{APP}/orgs/{org}/contests/spring/leaderboards")
     form = page.get_by_role("form", name="Leaderboards")
     first = form.get_by_role("group", name="Standings", exact=True)
     first.get_by_role("textbox", name="Name", exact=True).fill("IOI")
@@ -250,7 +250,7 @@ def test_three_leaderboards_count_what_is_shown_before_and_after_the_reveal(
     assert verdict_of(entrant, 2) == "ACCEPTED"
     toggle_mark(entrant, 1, checked=True)
 
-    organiser.goto(f"{APP}/orgs/{org}/contests/spring/boards")
+    organiser.goto(f"{APP}/orgs/{org}/contests/spring/leaderboards")
     until_shown(
         organiser, cell(organiser, f"IOI, {EVERY_RESULT}", entrant_name, 0), "100"
     )
@@ -274,7 +274,7 @@ def test_three_leaderboards_count_what_is_shown_before_and_after_the_reveal(
     minutes = int((submitted_at(entrant, org, 2) - start).total_seconds() // 60)
     penalty = str(minutes + 20)
 
-    public_leaderboards = f"{APP}/contests/{org}/spring/boards"
+    public_leaderboards = f"{APP}/contests/{org}/spring/leaderboards"
     entrant.goto(public_leaderboards)
     until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "50")
     expect(rank(entrant, "IOI", entrant_name)()).to_have_text("1")
