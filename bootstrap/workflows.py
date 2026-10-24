@@ -180,7 +180,7 @@ def moves_in_place(
 ) -> bool:
     """Whether the version at the forge holds other files than these that
     grade alike: the same definition but for its inputs' form text, its
-    reports' titles and units, its comments or its layout, whatever the
+    outputs' titles and units, its comments or its layout, whatever the
     README says, and every other file the same. Read without writing
     anything.
     """
@@ -202,13 +202,14 @@ def moves_in_place(
 
 def graded(definition: bytes) -> object | None:
     """What grades of a definition: the document as the forge parses it,
-    without any input's form text or any report's title and unit, so a
+    without any input's form text or any output's title and unit, so a
     comment, the layout and that text change nothing. The forge reads a
     declaration given as a bare type, `time_limit: number`, as `{type:
-    number}`, a flag left out as false, and a report given as a bare
+    number}`, a flag left out as false, and an output given as a bare
     reference as one given `from` alone, so each is read that way here,
-    under `reports` in a run workflow and `report` in one with a `test`
-    block. None when it does not parse as a mapping.
+    under `outputs` in a run workflow and `report` in one with a `test`
+    block. A `reports` key is read the same way, so a file from before the
+    rename still compares. None when it does not parse as a mapping.
     """
     try:
         document = core_yaml.load(definition)
@@ -225,7 +226,7 @@ def graded(definition: bytes) -> object | None:
     steps = document.get("steps")
     if isinstance(steps, list):
         document["steps"] = [_without(step, ()) for step in steps]
-    for section in ("reports", "report"):
+    for section in ("outputs", "reports", "report"):
         reports = document.get(section)
         if isinstance(reports, dict):
             document[section] = {

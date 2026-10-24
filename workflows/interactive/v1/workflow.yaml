@@ -80,7 +80,7 @@ steps:
       files:
         facts: ${{ steps.game.facts }}
 
-reports:
+outputs:
   time_ms:
     from: "${{ steps.game.entrant.time_ms }}"
     title: Run time

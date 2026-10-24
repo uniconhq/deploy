@@ -366,9 +366,9 @@ def test_the_workflow_links_an_entrant_and_a_judge_and_hands_on_the_facts() -> N
     assert decide["with"]["files"] == {"facts": "${{ steps.game.facts }}"}
     assert "self_reported" not in decide["with"]
     assert steps["verdict"]["with"]["source"] == "${{ workflow.verdict/ }}"
-    reports = workflow["reports"]
-    assert reports["time_ms"]["from"] == "${{ steps.game.entrant.time_ms }}"
-    assert reports["memory_kb"]["from"] == "${{ steps.game.entrant.memory_kb }}"
+    outputs = workflow["outputs"]
+    assert outputs["time_ms"]["from"] == "${{ steps.game.entrant.time_ms }}"
+    assert outputs["memory_kb"]["from"] == "${{ steps.game.entrant.memory_kb }}"
 
 
 def test_the_script_has_no_dependency() -> None:

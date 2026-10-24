@@ -795,7 +795,7 @@ def test_a_changed_script_stops_the_run_though_the_definition_is_the_same() -> N
     assert f"{ORG}/{CLASSIC}@v3, against workflows/{CLASSIC}/v3/" in str(refused.value)
 
 
-def test_a_run_workflow_changed_only_in_a_reports_words_moves_in_place() -> None:
+def test_a_run_workflow_changed_only_in_an_outputs_words_moves_in_place() -> None:
     forge = FakeForgejo()
     v3 = seed_files(DEPLOY, CLASSIC, "v3")
     definition = v3["workflow.yaml"].replace(b"title: Run time, ", b"")

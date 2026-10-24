@@ -38,7 +38,7 @@ steps:
         output: ${{ steps.solution.output }}
         answer: ${{ inputs.answer }}
 
-reports:
+outputs:
   score: ${{ steps.compare.score }}
   time_ms: {from: "${{ steps.solution.time_ms }}", title: Run time, unit: ms}
   memory_kb: {from: "${{ steps.solution.memory_kb }}", title: Memory used, unit: KB}
