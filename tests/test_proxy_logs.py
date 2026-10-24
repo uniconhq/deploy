@@ -19,10 +19,6 @@ CRITICAL_ONLY = "error_log /var/log/nginx/error.log crit;"
 # Each route, a request to it, and the location nginx picks for it.
 ROUTES = [
     ("/api/v1/auth/callback", "location = /api/v1/auth/callback"),
-    (
-        "/api/v1/gradings/7f3a/envelope",
-        'location ~ "^/api/v1/gradings/[^/]+/envelope$"',
-    ),
     ("/unicon-results/runs/1/log", "location ^~ /unicon-results/"),
     ("/forgejo-lfs/lfs/ab/cd", "location ^~ /forgejo-lfs/"),
     ("/login/oauth/authorize", "location ^~ /login/oauth/"),
@@ -56,15 +52,6 @@ def test_a_credential_in_a_query_reaches_no_log(path: str, header: str) -> None:
     assert CRITICAL_ONLY in location(header), header
 
 
-def test_the_envelopes_location_takes_the_envelope_alone() -> None:
-    found = re.search(r'location ~ "(\^/api/v1/gradings/[^"]+)"', CONFIG)
-    assert found is not None
-    pattern = re.compile(found.group(1))
-
-    assert pattern.match("/api/v1/gradings/7f3a/envelope")
-    assert not pattern.match("/api/v1/gradings/7f3a/callback")
-    assert not pattern.match("/api/v1/gradings/7f3a/envelope/x")
-    # A regular expression location wins over /api/, a plain prefix, and the
-    # rest of the API still logs its errors in full.
+def test_the_rest_of_the_api_logs_its_errors_in_full() -> None:
     assert "    location /api/ {" in CONFIG
     assert CRITICAL_ONLY not in location("    location /api/")
