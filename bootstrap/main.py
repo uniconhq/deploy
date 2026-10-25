@@ -708,24 +708,40 @@ def _seed_platform(
     for name, versions in definitions.items():
         _seed_workflow(repos, name, versions, summary, rewrite)
 
-    # An image the operator withdrew runs nowhere: the forge refuses it, and
-    # neither the socket filter nor the CI's privileged list takes it.
-    withdrawn = {
+    # An image the operator withdrew runs nowhere, under whatever name it is
+    # given, as it is matched by its digest: the forge refuses it, and
+    # neither the socket filter nor the CI's privileged list takes it. An
+    # entry no primitive at the forge names withdraws nothing, which is said.
+    entries = [
         image.strip()
         for image in values.get("UNICON_WITHDRAWN_IMAGES", "").split(",")
         if image.strip()
-    }
+    ]
+    withdrawn = {_digest(image) for image in entries} - {""}
+    named = primitives.images_at_forge(repos, manifest.primitive_names)
+    for entry in entries:
+        if not _digest(entry) or all(
+            _digest(image) != _digest(entry) for image in named
+        ):
+            print(
+                f"note: UNICON_WITHDRAWN_IMAGES names {entry}, which no primitive "
+                "at the forge runs by that digest, so it withdraws nothing"
+            )
     values["UNICON_FILTER_IMAGES"] = ",".join(
-        image
-        for image in primitives.images_at_forge(repos, manifest.primitive_names)
-        if image not in withdrawn
+        image for image in named if _digest(image) not in withdrawn
     )
     boxed = [name for name in manifest.primitive_names if name in images.BOXED]
     values["UNICON_PRIVILEGED_IMAGES"] = ",".join(
         image
         for image in primitives.privileged_at_forge(repos, boxed)
-        if image not in withdrawn
+        if _digest(image) not in withdrawn
     )
+
+
+def _digest(image: str) -> str:
+    """The digest an image is named by, `sha256:...`, empty for one named
+    by its tag alone."""
+    return image.partition("@")[2]
 
 
 def _seed_workflow(

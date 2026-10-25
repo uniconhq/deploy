@@ -471,9 +471,10 @@ grading runs, from the image manifest: `UNICON_HARNESS_IMAGE` and
 `UNICON_FILTER_IMAGE` and `UNICON_FILTER_IMAGES`, the socket filter the dev
 overlay runs and the images it lets containers be made from, which is every
 image any version of a primitive at the forge names. `UNICON_WITHDRAWN_IMAGES`
-is set by hand: images by digest no grading may run any more, which
-bootstrap keeps out of that list and out of the images the CI lets run
-privileged, and which the forge refuses. `.env.example` lists every key
+is set by hand: images by digest no grading may run any more, matched by
+the digest whatever name they are given under, which bootstrap keeps out of
+that list and out of the images the CI lets run privileged, saying which
+entry no primitive at the forge runs, and which the forge refuses. `.env.example` lists every key
 with a comment and is the template bootstrap fills, so a key added there appears
 in the next generated `.env`. The rest of what the backend reads,
 `compose.yaml` writes itself: the database URL, from `UNICON_DB_PASSWORD`; the

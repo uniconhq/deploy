@@ -344,8 +344,8 @@ def test_a_target_is_held_got_through_or_not_tested(
         ({"shape": "root"}, "is not built"),
         ({"wall_allow": []}, "wall_allow is empty"),
         ({"agent_user": "unicon-grader"}, "grader_user and agent_user must differ"),
-        ({"grader_user": "root"}, "is root, a user who can log in"),
-        ({"agent_user": "root"}, "is root, a user who can log in"),
+        ({"grader_user": "root"}, "is root, a user setup did not make"),
+        ({"agent_user": "root"}, "is root, a user setup did not make"),
         ({"grader_user": "Not A User"}, "not a user name"),
         ({"test_image": "ubuntu:24.04"}, "test_image is pinned by its digest"),
         ({"agent_binary_sha256": {}}, "for x86_64 or aarch64"),
@@ -390,8 +390,41 @@ def test_a_user_who_can_log_in_is_refused_as_either_user(
     person = pwd.getpwuid(os.getuid()).pw_name
 
     for name in ("grader_user", "agent_user"):
-        with pytest.raises(machine.MachineError, match="a user who can log in"):
+        with pytest.raises(machine.MachineError, match="a user setup did not make"):
             settings(machine, **{name: person})
+
+
+@pytest.mark.parametrize("name", ["grader_user", "agent_user"])
+def test_a_system_user_is_refused_as_either_user(
+    machine: ModuleType, monkeypatch: pytest.MonkeyPatch, name: str
+) -> None:
+    """A user that cannot log in but that setup did not make, such as the
+    resolver's, is not taken: its home is not the one setup gives."""
+    resolver = SimpleNamespace(
+        pw_uid=991, pw_shell="/usr/sbin/nologin", pw_dir="/run/systemd"
+    )
+    monkeypatch.setattr(machine.pwd, "getpwnam", lambda _: resolver)
+
+    with pytest.raises(machine.MachineError, match="a user setup did not make"):
+        settings(machine, **{name: "systemd-resolve"})
+
+
+def test_the_users_setup_made_are_taken_again(
+    machine: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    homes = {
+        "unicon-grader": "/home/unicon-grader",
+        "unicon-agent": str(machine.AGENT_STATE),
+    }
+    monkeypatch.setattr(
+        machine.pwd,
+        "getpwnam",
+        lambda user: SimpleNamespace(
+            pw_uid=1001, pw_shell="/usr/sbin/nologin", pw_dir=homes[user]
+        ),
+    )
+
+    settings(machine)
 
 
 def test_a_missing_setting_is_named(machine: ModuleType) -> None:
@@ -427,8 +460,10 @@ def stubbed(
         return subprocess.CompletedProcess(command, 0, "", "")
 
     def docker(*arguments: str, **_: object) -> str:
+        """The CLI's answers: two containers running, and, asked about a
+        daemon that has stopped, the empty line it prints."""
         done.append(("docker", *arguments))
-        return "c1 c2\n" if arguments[0] == "ps" else ""
+        return "c1 c2\n" if arguments[0] == "ps" else "\n"
 
     def as_user(user: str, uid: int, *command: str, **_: object) -> str:
         done.append((f"as {user}", *command))
@@ -461,8 +496,16 @@ def stubbed(
     monkeypatch.setattr(machine.os, "geteuid", lambda: 0)
     monkeypatch.setattr(machine.os, "chown", lambda *_: None)
     monkeypatch.setattr(machine.shutil, "which", lambda tool: f"/usr/bin/{tool}")
-    agent = SimpleNamespace(pw_uid=999, pw_gid=999, pw_shell="/usr/sbin/nologin")
-    monkeypatch.setattr(machine.pwd, "getpwnam", lambda name: agent)
+
+    def getpwnam(name: str) -> SimpleNamespace:
+        """Each user as setup makes it, by the home it gives."""
+        grader = name == "unicon-grader"
+        home = f"/home/{name}" if grader else str(machine.AGENT_STATE)
+        return SimpleNamespace(
+            pw_uid=999, pw_gid=999, pw_shell="/usr/sbin/nologin", pw_dir=home
+        )
+
+    monkeypatch.setattr(machine.pwd, "getpwnam", getpwnam)
     for name in (
         "UNITS",
         "STEP_HOSTS",

@@ -226,8 +226,9 @@ class Settings:
     `x86_64` or `aarch64`: the binary is copied out of an image the
     throwaway user's daemon holds, so it runs only as pinned. `test_image`,
     which the self-test runs privileged, is pinned by its digest, as
-    `agent_image` is. `grader_user` and `agent_user` differ, and neither is
-    root or a user who can log in. `pool` is a label's value: letters,
+    `agent_image` is. `grader_user` and `agent_user` differ, and each is a
+    user setup makes, or made before (`taken`): not root, a user who can
+    log in, or a system user of another's. `pool` is a label's value: letters,
     digits, `.`, `_` and `-`.
     `step_hosts` is every step's `/etc/hosts`: the forge's and Garage's
     names and addresses. `machine_hosts` is pinned in the machine's own
@@ -353,12 +354,15 @@ class Settings:
             raise MachineError("wall_allow is empty: a step could reach nothing")
         if self.grader_user == self.agent_user:
             raise MachineError("grader_user and agent_user must differ")
-        for name in ("grader_user", "agent_user"):
+        for name, home in (
+            ("grader_user", Path("/home") / self.grader_user),
+            ("agent_user", AGENT_STATE),
+        ):
             user = getattr(self, name)
-            if not USER_NAME.fullmatch(user) or user == "root" or can_log_in(user):
+            if not USER_NAME.fullmatch(user) or user == "root" or taken(user, home):
                 raise MachineError(
-                    f"{name} {user!r} is root, a user who can log in, or not a "
-                    "user name; name a user of its own, made by setup"
+                    f"{name} {user!r} is root, a user setup did not make, or not "
+                    "a user name; name a user of its own, made by setup"
                 )
         if "@sha256:" not in self.agent_image:
             raise MachineError("agent_image is pinned by its digest")
@@ -415,16 +419,23 @@ def whole(value: object) -> bool:
     return isinstance(value, int) and not isinstance(value, bool)
 
 
-def can_log_in(user: str) -> bool:
-    """Whether `user` is a user of the machine already, root or one whose
-    shell lets them log in: setup puts the agent's user in the throwaway
-    user's group and walls the throwaway user's traffic, which is for
-    users of their own."""
+def taken(user: str, home: Path) -> bool:
+    """Whether `user` is a user of the machine already that setup did not
+    make: root, one whose shell lets them log in, or one whose home is not
+    `home`, the one setup gives it (`make_users`). Setup puts the agent's
+    user in the throwaway user's group and walls the throwaway user's
+    traffic, which is for users of their own: a system user such as
+    `nobody` or `systemd-resolve` taken for the throwaway user would have
+    its traffic walled, the machine's names with it."""
     try:
         found = pwd.getpwnam(user)
     except KeyError:
         return False
-    return found.pw_uid == 0 or found.pw_shell not in NO_LOGIN
+    return (
+        found.pw_uid == 0
+        or found.pw_shell not in NO_LOGIN
+        or Path(found.pw_dir) != home
+    )
 
 
 def architecture() -> str:
@@ -876,7 +887,15 @@ def make_users(settings: Settings) -> pwd.struct_passwd:
         except KeyError:
             say(f"making the user {user}")
             if user == settings.grader_user:
-                run("useradd", "--create-home", "--shell", "/usr/sbin/nologin", user)
+                run(
+                    "useradd",
+                    "--create-home",
+                    "--home-dir",
+                    f"/home/{user}",
+                    "--shell",
+                    "/usr/sbin/nologin",
+                    user,
+                )
             else:
                 run(
                     "useradd",
@@ -928,7 +947,10 @@ def stop_daemon(settings: Settings, uid: int) -> None:
         check=False,
         timeout=120,
     )
-    if docker("info", "--format", "{{.ServerVersion}}", check=False, timeout=60):
+    # With no daemon to answer, the CLI still prints an empty line.
+    if docker(
+        "info", "--format", "{{.ServerVersion}}", check=False, timeout=60
+    ).strip():
         raise MachineError(
             "the throwaway user's daemon did not stop, so the wall stays up"
         )

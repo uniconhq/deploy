@@ -651,3 +651,29 @@ def test_a_withdrawn_image_is_in_neither_list_a_step_runs_from(
     assert values["UNICON_FILTER_IMAGES"] == FIRST
     assert values["UNICON_PRIVILEGED_IMAGES"] == FIRST
     assert values["UNICON_WITHDRAWN_IMAGES"] == SECOND
+
+
+def test_a_withdrawn_image_is_matched_by_its_digest_and_one_matching_nothing_is_said(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """An entry under another registry's name, or with a tag beside its
+    digest, withdraws the image by its digest; one no primitive runs is
+    said to withdraw nothing."""
+    monkeypatch.setattr(images, "BOXED", (*images.BOXED, "compile"))
+    manifest = _manifest(
+        ("v1", _compile(tmp_path), FIRST), ("v2", _compile_v2(tmp_path), SECOND)
+    )
+    renamed = "mirror.example/compile:v2@" + SECOND.partition("@")[2]
+    nothing = "ghcr.io/uniconhq/primitive-exec@sha256:" + "9" * 64
+    values = {
+        "UNICON_FORGE_ADMIN_TOKEN": TOKEN,
+        "UNICON_WITHDRAWN_IMAGES": f"{renamed},{nothing}",
+    }
+
+    main._seed_platform(FakeForgejo(), DEPLOY, manifest, values, Summary(), False)
+
+    assert values["UNICON_FILTER_IMAGES"] == FIRST
+    assert values["UNICON_PRIVILEGED_IMAGES"] == FIRST
+    said = capsys.readouterr().out
+    assert nothing in said
+    assert renamed not in said
