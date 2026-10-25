@@ -529,7 +529,7 @@ jobs:
           # The grading's own reason is a backend line, and the proxy's
           # access log fills a plain tail before that line is reached.
           docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color backend \
-            | rg "steps\.(faulted|concluded)" || true
+            | grep -E 'steps\.(faulted|concluded)' || true
           docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color | tail -120
 
   workflows:
