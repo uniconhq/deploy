@@ -57,6 +57,18 @@ def test_a_different_browser_failure_stands() -> None:
     assert page.opened == ["http://localhost/tasks"]
 
 
+def test_opens_again_when_chrome_interrupts_the_navigation() -> None:
+    page = _Page(
+        1,
+        'Page.goto: Navigation to "http://localhost/tasks" is interrupted by '
+        'another navigation to "chrome-error://chromewebdata/"',
+    )
+
+    open_page(cast(Page, page), "http://localhost/tasks")
+
+    assert page.opened == ["http://localhost/tasks", "http://localhost/tasks"]
+
+
 def test_the_network_change_stands_after_three_tries() -> None:
     page = _Page(3, "Page.goto: net::ERR_NETWORK_CHANGED at http://localhost")
 

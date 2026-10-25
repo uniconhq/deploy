@@ -49,19 +49,26 @@ needs_stack = pytest.mark.skipif(
 )
 
 
+def _browser_dropped(error: Error) -> bool:
+    """The runner's Chrome aborted before a page existed. The app never saw
+    the navigation. One run says the network changed; the next is sent to
+    Chrome's own error page instead.
+    """
+    text = str(error)
+    return "ERR_NETWORK_CHANGED" in text or "chrome-error://chromewebdata/" in text
+
+
 def _through_a_network_change(load: Callable[[], object]) -> None:
     """Run `load` again when the browser aborts it before a page exists.
 
-    On the runner, Chrome sometimes reports net::ERR_NETWORK_CHANGED while
-    opening or reloading a page. The app never saw that navigation, so the
-    same load is tried again. Any other failure is the test's own.
+    Any other failure is the test's own.
     """
     for attempt in range(3):
         try:
             load()
             return
         except Error as error:
-            if "ERR_NETWORK_CHANGED" not in str(error) or attempt == 2:
+            if not _browser_dropped(error) or attempt == 2:
                 raise
 
 
