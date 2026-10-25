@@ -171,54 +171,15 @@ def submission_rate(page: Page, count: int, per: int) -> None:
     rules.get_by_role("textbox", name="Length of the window (seconds)").fill(str(per))
 
 
-def payloads(files: dict[str, bytes]) -> list[FilePayload]:
-    return [
-        {"name": name, "mimeType": "application/octet-stream", "buffer": content}
-        for name, content in files.items()
-    ]
-
-
-def add_test(
-    page: Page, group: str, files: dict[str, bytes], new_group: bool = False
-) -> None:
-    """One test, by its files, added to `group` from the Tests card, made a
-    new group when `new_group`; the save bar then holds it.
-    """
-    tests = page.get_by_role("region", name="Tests", exact=True)
-    tests.get_by_role("button", name="Add tests", exact=True).click()
-    dialog = page.get_by_role("dialog", name="Add tests")
-    if new_group:
-        dialog.get_by_role("combobox", name="Test group").select_option(
-            label="A new group"
-        )
-        dialog.get_by_role("textbox", name="Name of the new group").fill(group)
-    else:
-        dialog.get_by_role("combobox", name="Test group").select_option(label=group)
-    for part, payload in zip(files, payloads(files), strict=True):
-        dialog.get_by_label(part, exact=True).set_input_files(files=[payload])
-    dialog.get_by_role("button", name="Add the test").click()
-    expect(dialog).to_be_hidden()
-
-
-def replace_test(page: Page, group: str, test: str, files: dict[str, bytes]) -> None:
-    """Replace the files of one test of `group` from the Tests card."""
-    page.get_by_role("group", name=group, exact=True).get_by_role(
-        "button", name=f"Replace test {test}", exact=True
-    ).click()
-    dialog = page.get_by_role("dialog", name=f"Replace test {test} of {group}")
-    for part, payload in zip(files, payloads(files), strict=True):
-        dialog.get_by_label(part, exact=True).set_input_files(files=[payload])
-    dialog.get_by_role("button", name="Replace it").click()
-    expect(dialog).to_be_hidden()
-
-
-def group_rule(page: Page, group: str, rule: str, points: str) -> None:
-    """How a test group earns its points, and how many."""
-    box = page.get_by_role("group", name=group, exact=True)
-    box.get_by_role("combobox", name="How does this group earn points?").select_option(
-        label=rule
-    )
-    box.get_by_role("textbox", name="Points", exact=True).fill(points)
+def upload_run_file(page: Page, row: int, field: str, content: bytes) -> None:
+    """Give one cell of the Runs card `content`. `row` is the row's place on
+    the page, starting at 1, and the editor stores the file at
+    `runs/0/<row - 1>/<field>`."""
+    held = Path(f"/tmp/unicon-e2e-{row}-{field}")
+    held.write_bytes(content)
+    page.get_by_role("region", name="Runs").get_by_label(
+        f"File for row {row} {field}"
+    ).set_input_files(str(held))
 
 
 def contest_settings(page: Page, org: str, contest: str, **fields: str) -> None:

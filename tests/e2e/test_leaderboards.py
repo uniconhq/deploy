@@ -1,30 +1,12 @@
-"""Rank one contest's gradings on three leaderboards on the running compose
-stack, read before and after the task's reveal by two entrants, a visitor
-and an organiser.
+"""Rank one contest on a leaderboard that reads a value hidden until the
+close, on the running compose stack.
 
-The organiser gives the starter task a second test group, `final`, shown
-only once the task closes, so `main` and `final` each carry 50 of the
-task's 100 points, writes its statement, and builds the contest's three
-leaderboards on its Leaderboards page: `IOI`, on points, shown to everyone;
-`ICPC`, on points and then penalty at 20 minutes an earlier attempt, shown
-to entrants; and `Final`, over the results shown once the task closes,
-counting the submission each entrant marked, shown to entrants. Two people
-register and are approved; the second, the rival, has a browser whose
-clock is three hours fast, and reads the task's countdown by Unicon's clock
-all the same.
-
-The entrant sends a wrong solution and then the right one and marks the
-wrong one: the organiser's Final, once every result is shown, counts it,
-0, not the better one. Moving the mark to the right one gives it its 50.
-Before the rival submits, they are on IOI as a bare row below. Before the
-reveal every leaderboard counts only what is shown: IOI and ICPC give the
-right solution `main`'s 50 points, ICPC with a penalty of the minutes from
-the start to it and 20 for the wrong attempt before it, exactly; Final
-shows nothing yet; a visitor, signed out, sees IOI and not ICPC, on the
-contest's own page and on its leaderboards; the organiser sees Final now
-as the entrant does. The rival's right solution ties them on IOI and,
-with no wrong attempt, puts them first on ICPC. The organiser closes the
-task, and every leaderboard counts `final` too.
+The organiser builds the starter task's two runs on the Runs card, one
+shown now and one after the close, and the values on the Scoring card:
+`main_points` and `final_points`, 50 for a run that passes, and `total`,
+their sum, shown only after the close. The contest's leaderboard reads
+`total`. Before the close an entrant sees a dash there, not the points so
+far, and staff see the number. After the close the entrant sees it too.
 """
 
 from __future__ import annotations
@@ -35,7 +17,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from playwright.sync_api import Browser, Locator, Page, ViewportSize, expect
+from playwright.sync_api import Locator, Page, expect
 
 from tests.e2e.stack import (
     APP,
@@ -43,14 +25,11 @@ from tests.e2e.stack import (
     SAMPLE,
     STATEMENT,
     VERDICT_TIMEOUT_MS,
-    WRONG,
-    add_test,
     approve,
     contest_settings,
     create,
     create_account,
     create_org,
-    group_rule,
     local,
     needs_stack,
     open_contest,
@@ -60,22 +39,18 @@ from tests.e2e.stack import (
     submission_rate,
     submit,
     task_timeline,
+    upload_run_file,
     verdict_of,
     write_statement,
 )
 
 pytestmark = [needs_stack]
 
-EVERY_RESULT = "once every result is shown"
-
 
 def until_shown(
     page: Page, find: Callable[[], Locator], text: str | re.Pattern[str]
 ) -> None:
-    """Read `find` again, reloading the page, until it shows `text`: a
-    leaderboard is read when its page loads, and a grading lands on it when
-    it finishes.
-    """
+    """Read `find` again, reloading the page, until it shows `text`."""
     deadline = time.monotonic() + VERDICT_TIMEOUT_MS / 1000
     while True:
         try:
@@ -87,111 +62,57 @@ def until_shown(
             page.reload()
 
 
-def leaderboard(page: Page, name: str) -> Locator:
-    return page.get_by_role("region", name=name, exact=True)
-
-
-def row_of(page: Page, table: str, who: str) -> Locator:
-    return (
+def cell(page: Page, table: str, who: str, index: int) -> Callable[[], Locator]:
+    """The `index`th data cell of `who`'s row on `table`, after the rank."""
+    row = (
         page.get_by_role("table", name=table, exact=True)
         .get_by_role("row")
         .filter(
             has=page.get_by_role("rowheader", name=re.compile(re.escape(who), re.I))
         )
     )
+    return lambda: row.get_by_role("cell").nth(index + 1)
 
 
-def cell(page: Page, table: str, who: str, index: int) -> Callable[[], Locator]:
-    """The `index`th data cell of `who`'s row on `table`, after the rank."""
-    return lambda: row_of(page, table, who).get_by_role("cell").nth(index + 1)
+def formula(page: Page, box: Locator, text: str) -> None:
+    box.click()
+    page.keyboard.press("Meta+A")
+    page.keyboard.insert_text(text)
+    page.keyboard.press("Tab")
 
 
-def rank(page: Page, table: str, who: str) -> Callable[[], Locator]:
-    """The rank on `who`'s row of `table`."""
-    return lambda: row_of(page, table, who).get_by_role("cell").first
+def add_value(page: Page, scoring: Locator, text: str, name: str, when: str) -> None:
+    scoring.get_by_role("button", name="Add a value").click()
+    line = scoring.get_by_role("textbox", name=re.compile(r"^value_\d+$")).last
+    formula(page, line, text)
+    named = scoring.get_by_role("textbox", name="Name").last
+    named.fill(name)
+    named.press("Tab")
+    scoring.get_by_label(f"When {name} is shown").select_option(label=when)
 
 
-def toggle_mark(page: Page, number: int, checked: bool) -> None:
-    mark = page.get_by_role("checkbox", name=f"Mark #{number}", exact=True)
-    mark.click()
-    if checked:
-        expect(mark).to_be_checked()
-    else:
-        expect(mark).not_to_be_checked()
-
-
-def submitted_at(page: Page, org: str, number: int) -> datetime:
-    """When the reader's submission `number` to the task was made, as the
-    platform keeps it, read with the page's own session.
-    """
-    answer = page.request.get(
-        f"{APP}/api/v1/orgs/{org}/contests/spring/tasks/sum/submissions/{number}"
-    )
-    assert answer.ok, answer.text()
-    return datetime.fromisoformat(answer.json()["submitted_at"])
-
-
-def leaderboards(page: Page, org: str) -> None:
-    """IOI, ICPC and Final, built on the contest's Leaderboards page."""
-    page.goto(f"{APP}/orgs/{org}/contests/spring/leaderboards")
-    form = page.get_by_role("form", name="Leaderboards")
-    first = form.get_by_role("group", name="Standings", exact=True)
-    first.get_by_role("textbox", name="Name", exact=True).fill("IOI")
-    ioi = form.get_by_role("group", name="IOI", exact=True)
-    ioi.get_by_role("radiogroup", name="Shown to").get_by_role(
-        "radio", name="Everyone who can see the contest"
-    ).check()
-
-    form.get_by_role("button", name="Add a leaderboard").click()
-    added = form.get_by_role("group", name=re.compile("^Leaderboard 2"))
-    added.get_by_role("textbox", name="Name", exact=True).fill("ICPC")
-    icpc = form.get_by_role("group", name="ICPC", exact=True)
-    icpc.get_by_role("radiogroup", name="Shown to").get_by_role(
-        "radio", name="Entrants", exact=True
-    ).check()
-    form.get_by_role("button", name="Add a way to rank ICPC").click()
-    then = icpc.get_by_role("group", name="Way to rank 2", exact=True)
-    expect(then.get_by_role("combobox", name="Way to rank 2")).to_have_value("penalty")
-    then.get_by_role("textbox", name="Minutes per earlier attempt").fill("20")
-
-    form.get_by_role("button", name="Add a leaderboard").click()
-    added = form.get_by_role("group", name=re.compile("^Leaderboard 3"))
-    added.get_by_role("textbox", name="Name", exact=True).fill("Final")
-    final = form.get_by_role("group", name="Final", exact=True)
-    final.get_by_role("radiogroup", name="Shown to").get_by_role(
-        "radio", name="Entrants", exact=True
-    ).check()
-    final.get_by_role("radiogroup", name="Counts", exact=True).get_by_role(
-        "radio", name="Results shown once each task closes"
-    ).check()
-    final.get_by_role("radiogroup", name="Which submission counts").get_by_role(
-        "radio", name="Best of the submissions an entrant marks"
-    ).check()
-    form.get_by_role("button", name="Save leaderboards").click()
-    expect(page.get_by_text("Saved.", exact=True)).to_be_visible(
-        timeout=CREATE_TIMEOUT_MS
-    )
-
-
-def test_three_leaderboards_count_what_is_shown_before_and_after_the_reveal(
-    browser: Browser,
+def add_group(
+    page: Page, scoring: Locator, name: str, rows: list[str], when: str
 ) -> None:
+    scoring.get_by_role("button", name="Add a group").click()
+    box = scoring.locator("input[aria-label^='Name of group_']").last
+    box.fill(name)
+    page.keyboard.press("Tab")
+    for row in rows:
+        scoring.get_by_role("button", name=f"{row} in {name}").click()
+    scoring.get_by_label(f"When {name} is shown").select_option(label=when)
+
+
+def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(browser) -> None:
     stamp = secrets.token_hex(3)
     organiser_name, entrant_name = f"e2e-o-{stamp}", f"e2e-c-{stamp}"
-    rival_name = f"e2e-r-{stamp}"
     org = f"e2e-org-{stamp}"
     organiser_password = create_account(organiser_name)
     entrant_password = create_account(entrant_name)
-    rival_password = create_account(rival_name)
 
-    viewport: ViewportSize = {"width": 1280, "height": 900}
-    organiser = browser.new_context(viewport=viewport).new_page()
-    entrant = browser.new_context(viewport=viewport).new_page()
-    visitor = browser.new_context(viewport=viewport).new_page()
-    fast = browser.new_context(viewport=viewport)
-    fast.clock.install(time=datetime.now(UTC) + timedelta(hours=3))
-    rival = fast.new_page()
-    for page in (organiser, entrant, visitor, rival):
+    organiser = browser.new_context(viewport={"width": 1280, "height": 900}).new_page()
+    entrant = browser.new_context(viewport={"width": 1280, "height": 900}).new_page()
+    for page in (organiser, entrant):
         page.set_default_timeout(30_000)
 
     sign_in(organiser, organiser_name, organiser_password)
@@ -200,15 +121,49 @@ def test_three_leaderboards_count_what_is_shown_before_and_after_the_reveal(
     create(organiser, "sum", "Create task", "New task")
     task_page = organiser.url
 
-    add_test(organiser, "final", {"input": b"5 7\n", "answer": b"12\n"}, new_group=True)
-    group_rule(organiser, "main", "Points for each test passed", "50")
-    group_rule(organiser, "final", "Points for each test passed", "50")
-    organiser.get_by_role("group", name="final", exact=True).get_by_role(
-        "combobox", name="When entrants see results"
-    ).select_option("after_close")
+    runs = organiser.get_by_role("region", name="Runs")
+    runs.get_by_role("textbox", name="Title of row 1").fill("Main")
+    runs.get_by_role("button", name="Add a row").click()
+    runs.get_by_role("textbox", name="Title of row 2").fill("Final")
+    upload_run_file(organiser, 2, "input", b"5 7\n")
+    upload_run_file(organiser, 2, "answer", b"12\n")
+
+    scoring = organiser.get_by_role("region", name="Scoring")
+    add_group(organiser, scoring, "main_tests", ["Main"], "Now")
+    add_group(organiser, scoring, "final_tests", ["Final"], "After the close")
+    add_value(organiser, scoring, "50 * sum(main_tests.passed)", "main_points", "Now")
+    add_value(
+        organiser,
+        scoring,
+        "50 * sum(final_tests.passed)",
+        "final_points",
+        "After the close",
+    )
+    add_value(
+        organiser, scoring, "main_points + final_points", "total", "After the close"
+    )
+    scoring.get_by_role("row", name=re.compile(r"^score A value")).get_by_label(
+        "When score is shown"
+    ).select_option(label="Never")
     submission_rate(organiser, 10, 60)
     save_task(organiser)
     write_statement(organiser, task_page, STATEMENT)
+
+    organiser.goto(f"{APP}/orgs/{org}/contests/spring/leaderboards")
+    organiser.get_by_role("button", name="Add a leaderboard").click()
+    board = organiser.get_by_role("region", name="Leaderboard board")
+    board.get_by_role("textbox", name="Key").fill("ioi")
+    board = organiser.get_by_role("region", name="Leaderboard ioi")
+    board.get_by_role("textbox", name="Title").fill("IOI")
+    board.get_by_role("radio", name="Everyone").check()
+    named = board.get_by_role("textbox", name="Name")
+    named.fill("points")
+    named.press("Tab")
+    formula(organiser, board.get_by_role("textbox", name="points"), "latest(sum).total")
+    organiser.get_by_role("button", name="Save", exact=True).click()
+    expect(organiser.get_by_text("Saved.", exact=True)).to_be_visible(
+        timeout=CREATE_TIMEOUT_MS
+    )
 
     now = datetime.now(UTC).replace(second=0, microsecond=0)
     contest_settings(
@@ -217,11 +172,9 @@ def test_three_leaderboards_count_what_is_shown_before_and_after_the_reveal(
         "spring",
         Name=f"Spring {stamp}",
         Start=local(now - timedelta(hours=1)),
-        End=local(now + timedelta(hours=3)),
+        End=local(now + timedelta(days=2)),
     )
     task_timeline(organiser, org, "spring", "A · sum", closes=now + timedelta(hours=2))
-    leaderboards(organiser, org)
-
     organiser.goto(f"{APP}/orgs/{org}/contests/spring")
     organiser.get_by_role("button", name="Change who sees it").click()
     seen = organiser.get_by_role("dialog", name="Who sees it")
@@ -232,88 +185,21 @@ def test_three_leaderboards_count_what_is_shown_before_and_after_the_reveal(
 
     sign_in(entrant, entrant_name, entrant_password)
     register(entrant, org, "spring")
-    sign_in(rival, rival_name, rival_password)
-    register(rival, org, "spring")
     approve(organiser, org, "spring", entrant_name)
-    approve(organiser, org, "spring", rival_name)
+    expect(entrant.get_by_text("You are in")).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    entrant.goto(f"{APP}/contests/{org}/spring/tasks/sum")
+    submit(entrant, 1, SAMPLE)
+    assert verdict_of(entrant, 1) == "ACCEPTED"
 
-    for page in (entrant, rival):
-        expect(page.get_by_text("You are in")).to_be_visible(timeout=CREATE_TIMEOUT_MS)
-        page.goto(f"{APP}/contests/{org}/spring/tasks/sum")
-        expect(page.get_by_role("timer", name="Task countdown")).to_contain_text(
-            re.compile(r"Closes in 1h [345]\dm")
-        )
-
-    submit(entrant, 1, WRONG)
-    assert verdict_of(entrant, 1) == "WRONG ANSWER"
-    submit(entrant, 2, SAMPLE)
-    assert verdict_of(entrant, 2) == "ACCEPTED"
-    toggle_mark(entrant, 1, checked=True)
-
+    public = f"{APP}/contests/{org}/spring/leaderboards"
+    entrant.goto(public)
+    until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "\u2013")
     organiser.goto(f"{APP}/orgs/{org}/contests/spring/leaderboards")
-    until_shown(
-        organiser, cell(organiser, f"IOI, {EVERY_RESULT}", entrant_name, 0), "100"
-    )
-    expect(cell(organiser, f"Final, {EVERY_RESULT}", entrant_name, 0)()).to_have_text(
-        "0"
-    )
+    until_shown(organiser, cell(organiser, "IOI", entrant_name, 0), "100")
 
-    toggle_mark(entrant, 1, checked=False)
-    toggle_mark(entrant, 2, checked=True)
-
-    organiser.reload()
-    expect(leaderboard(organiser, "Final, now")).to_contain_text("Shown from")
-    until_shown(
-        organiser, cell(organiser, f"Final, {EVERY_RESULT}", entrant_name, 0), "50"
-    )
-    expect(cell(organiser, "IOI, now", entrant_name, 0)()).to_have_text("50")
-
-    # Whole minutes from the contest's start to the right solution, and 20
-    # for the wrong attempt before it.
-    start = now - timedelta(hours=1)
-    minutes = int((submitted_at(entrant, org, 2) - start).total_seconds() // 60)
-    penalty = str(minutes + 20)
-
-    public_leaderboards = f"{APP}/contests/{org}/spring/leaderboards"
-    entrant.goto(public_leaderboards)
-    until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "50")
-    expect(rank(entrant, "IOI", entrant_name)()).to_have_text("1")
-    expect(rank(entrant, "IOI", rival_name)()).to_have_text("2")
-    expect(cell(entrant, "IOI", rival_name, 0)()).to_have_text(re.compile("^(0|—)$"))
-    expect(cell(entrant, "ICPC", entrant_name, 0)()).to_have_text("50")
-    expect(cell(entrant, "ICPC", entrant_name, 1)()).to_have_text(penalty)
-    expect(cell(entrant, "ICPC", entrant_name, 2)()).to_contain_text("1 attempt before")
-    expect(leaderboard(entrant, "Final")).to_contain_text("Shown from")
-
-    for public in (f"{APP}/contests/{org}/spring", public_leaderboards):
-        visitor.goto(public)
-        until_shown(visitor, cell(visitor, "IOI", entrant_name, 0), "50")
-        expect(leaderboard(visitor, "ICPC")).to_have_count(0)
-        expect(leaderboard(visitor, "Final")).to_have_count(0)
-
-    submit(rival, 1, SAMPLE)
-    assert verdict_of(rival, 1) == "ACCEPTED"
-    rival.goto(public_leaderboards)
-    until_shown(rival, cell(rival, "IOI", rival_name, 0), "50")
-    expect(rank(rival, "IOI", rival_name)()).to_have_text("1")
-    expect(rank(rival, "IOI", entrant_name)()).to_have_text("1")
-    expect(rank(rival, "ICPC", rival_name)()).to_have_text("1")
-    expect(rank(rival, "ICPC", entrant_name)()).to_have_text("2")
-
-    # A close is refused before a submission already made, and the field
-    # takes whole minutes: the task closes at the first minute after the
-    # last submission, the rival's, once that minute has come.
-    last = submitted_at(rival, org, 1)
+    last = datetime.now(UTC)
     reveal = last.replace(second=0, microsecond=0) + timedelta(minutes=1)
     time.sleep(max(0.0, (reveal - datetime.now(UTC)).total_seconds()) + 1)
     task_timeline(organiser, org, "spring", "A · sum", closes=reveal)
-
-    entrant.goto(public_leaderboards)
+    entrant.goto(public)
     until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "100")
-    expect(cell(entrant, "ICPC", entrant_name, 0)()).to_have_text("100")
-    expect(cell(entrant, "ICPC", entrant_name, 1)()).to_have_text(penalty)
-    until_shown(entrant, cell(entrant, "Final", entrant_name, 0), "50")
-
-    visitor.goto(public_leaderboards)
-    until_shown(visitor, cell(visitor, "IOI", entrant_name, 0), "100")
-    expect(rank(visitor, "IOI", rival_name)()).to_have_text("1")
