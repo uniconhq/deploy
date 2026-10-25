@@ -127,3 +127,24 @@ class Garage:
                 "permissions": {"read": True, "write": True, "owner": False},
             },
         )
+
+    def allow_read_only(self, bucket_id: str, access_key_id: str) -> None:
+        """Let the key read the bucket and nothing more. AllowBucketKey only
+        grants what it names, so write and owner are also taken away, in case
+        a key of this name was ever given them."""
+        self._call(
+            "AllowBucketKey",
+            {
+                "bucketId": bucket_id,
+                "accessKeyId": access_key_id,
+                "permissions": {"read": True, "write": False, "owner": False},
+            },
+        )
+        self._call(
+            "DenyBucketKey",
+            {
+                "bucketId": bucket_id,
+                "accessKeyId": access_key_id,
+                "permissions": {"read": False, "write": True, "owner": True},
+            },
+        )

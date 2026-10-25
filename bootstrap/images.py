@@ -1,15 +1,15 @@
 """The image manifest: every image the stack grades with, by digest.
 
 `images.json` in this repo is the release manifest. It pins the runner's
-images, which the stack runs, and each version of each primitive: the image
-its steps run from, and where the primitive's own repository is at that
-release, since bootstrap mirrors that repository into the forge
+worker and Woodpecker's git plugin, and each version of each primitive: the
+image its steps run from, and where the primitive's own repository is at
+that release, since bootstrap mirrors that repository into the forge
 (primitives.py).
 
     {
       "images": {
-        "harness": "ghcr.io/uniconhq/harness@sha256:<64 hex>",
-        "clone": "...", "socket-filter": "...", "worker": "..."
+        "worker": "ghcr.io/uniconhq/worker@sha256:<64 hex>",
+        "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:<64 hex>"
       },
       "primitives": {
         "compile": {
@@ -37,8 +37,15 @@ is there and the release manifest otherwise, unless told which with --images.
 
 Every image is a reference by digest and never by tag, because what a stack
 grades with must not change under it: a tag can be moved, a digest cannot.
-A manifest that names a tag, or lacks one of the three images bootstrap hands
-the services, is refused before anything starts.
+A manifest that names a tag, or lacks the image bootstrap hands the
+services, is refused before anything starts.
+
+A task's pipelines check a submission out with Woodpecker's own git plugin,
+`plugin-git`, which the release manifest pins and a local build copies from
+it, and which the CI lends a repository's credential to alone, so a
+manifest without it is refused. They end with a step on `primitive-base`,
+which a local build makes; the release manifest names no base image yet, so
+it is optional, and a stack without it grades nothing.
 """
 
 from __future__ import annotations
@@ -52,10 +59,11 @@ from typing import Any
 RELEASE_MANIFEST = "images.json"
 LOCAL_MANIFEST = "images.local.json"
 
-HARNESS = "harness"
-CLONE = "clone"
-SOCKET_FILTER = "socket-filter"
-REQUIRED_IMAGES = (HARNESS, CLONE, SOCKET_FILTER)
+PLUGIN_GIT = "plugin-git"
+PRIMITIVE_BASE = "primitive-base"
+REQUIRED_IMAGES = (PLUGIN_GIT,)
+BOXED = ("exec",)
+"""The primitives whose steps make boxes of their own and run privileged."""
 
 _BY_DIGEST = re.compile(
     r"^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?"
@@ -104,16 +112,14 @@ class Manifest:
     primitives: tuple[PrimitiveRelease, ...]
 
     @property
-    def harness(self) -> str:
-        return self.images[HARNESS]
+    def plugin_git(self) -> str:
+        """Woodpecker's git plugin, which every checkout runs."""
+        return self.images[PLUGIN_GIT]
 
     @property
-    def clone(self) -> str:
-        return self.images[CLONE]
-
-    @property
-    def socket_filter(self) -> str:
-        return self.images[SOCKET_FILTER]
+    def primitive_base(self) -> str:
+        """The step wrapper's base image, empty when the manifest names none."""
+        return self.images.get(PRIMITIVE_BASE, "")
 
     @property
     def primitive_names(self) -> list[str]:

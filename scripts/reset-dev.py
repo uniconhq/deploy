@@ -10,11 +10,10 @@ What it leaves, every time:
 - its contest `sample`, "Sample contest", running from an hour ago for 30
   days, open to anyone who signs up, each sign-up approved by an organiser
   (a new contest's own registration);
-- its task `sum`, the starter task on unicon/classic@v2, with a statement
-  of A + B in place of the starter's placeholder, written first since a
-  contest does not open while a task's published statement is the
-  starter's, two tests more than the starter's one, and a submission rate
-  of 10 in any 60 seconds, saved and published so it grades.
+- its task `sum`, on unicon/classic@v3: A + B in Python, its statement,
+  three tests and a submission rate of 10 in any 60 seconds, saved in one
+  save before the contest opens, which waits until that save is published
+  so a submission grades.
 
 Bob has not registered, so signing up as him and approving him as alice is
 the first thing there is to try.
@@ -25,10 +24,11 @@ the images already built: `--build` rebuilds the backend and the frontend
 from their checkouts first. The grading images stay in the local registry,
 outside the stack. The four keys are kept in `.env` by hand; bootstrap keeps
 a key it does not know at the end of the file. Then it makes the accounts with
-Forgejo's own command and the rest from the app's pages, with the same steps
-the browser tests take (`tests/e2e/stack.py`), so a page that changes is
-mended there once for both. Run it from the deploy directory, once
-`uv run playwright install chromium` has been run:
+Forgejo's own command, signs each in through Forgejo's pages, and makes the
+rest through the API as alice, with the same steps the end-to-end tests of a
+task take (`tests/e2e/api.py`), so a change there is mended once for both.
+Run it from the deploy directory, once `uv run playwright install chromium`
+has been run:
 
     uv run scripts/reset-dev.py
 """
@@ -86,10 +86,30 @@ Output:
 
     3
 """
-EXTRA_TESTS = (
-    {"input": b"10 32\n", "answer": b"42\n"},
-    {"input": b"-7 7\n", "answer": b"0\n"},
-)
+TESTS = (("1 2\n", "3\n"), ("10 32\n", "42\n"), ("-7 7\n", "0\n"))
+"""Each test's input and answer."""
+TASK_YAML = """\
+name: A + B
+workflow: unicon/classic@v3
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: python
+  time_limit: 2
+  memory_limit: 256
+repeat:
+  - inputs: [input, answer]
+    tuples:
+      - [tests/1.in, tests/1.ans]
+      - [tests/2.in, tests/2.ans]
+      - [tests/3.in, tests/3.ans]
+scoring:
+  values:
+    passed: {block: sum, over: {runs: all}, of: {run: [all, passed]}}
+  show:
+    now: [passed, all, tests/]
+submissions: {rate: {count: 10, per: 60}}
+"""
+WHEN = "%Y-%m-%dT%H:%M:%SZ"
 READY_TIMEOUT_S = 300
 
 
@@ -184,7 +204,7 @@ def seed(people: dict[str, tuple[str, str]]) -> None:
     """Sign both in, and make the org, the contest and its task as alice."""
     from playwright.sync_api import Page, sync_playwright
 
-    from tests.e2e import stack
+    from tests.e2e import api, stack
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
@@ -197,29 +217,38 @@ def seed(people: dict[str, tuple[str, str]]) -> None:
                 page.set_default_timeout(30_000)
                 stack.sign_in(page, name, password)
                 pages[name] = page
-            alice = pages["alice"]
-            stack.create_org(alice, ORG)
-            stack.create(alice, CONTEST, "Create contest", "New contest")
-            stack.create(alice, TASK, "Create task", "New task")
-            task_page = alice.url
-            stack.write_statement(alice, task_page, STATEMENT)
-            alice.goto(f"{task_page}?card=tests")
-            for files in EXTRA_TESTS:
-                stack.add_test(alice, "main", dict(files))
-            stack.submission_rate(alice, 10, 60)
-            stack.save_task(alice)
+            alice = api.Caller.of(pages["alice"])
+            alice.send("POST", "/orgs", {"name": ORG})
+            contest = f"/orgs/{ORG}/contests/{CONTEST}"
+            alice.send("POST", f"/orgs/{ORG}/contests", {"name": CONTEST})
+            alice.send("POST", f"{contest}/tasks", {"name": TASK})
             now = datetime.now(UTC).replace(second=0, microsecond=0)
-            stack.contest_settings(
-                alice,
-                ORG,
-                CONTEST,
-                Name=CONTEST_NAME,
-                Start=stack.local(now - timedelta(hours=1)),
-                End=stack.local(now + timedelta(days=30)),
-            )
-            stack.open_contest(alice, ORG, CONTEST)
+            api.write_contest(alice, contest, contest_yaml("draft", now))
+            api.save_task(alice, f"{contest}/tasks/{TASK}", task_files())
+            api.open_once_published(alice, contest, contest_yaml("published", now))
         finally:
             browser.close()
+
+
+def task_files() -> dict[str, str]:
+    """The task's files: its settings, its statement and its tests."""
+    files = {"task.yaml": TASK_YAML, "statement.md": STATEMENT}
+    for number, (given, answer) in enumerate(TESTS, start=1):
+        files[f"tests/{number}.in"] = given
+        files[f"tests/{number}.ans"] = answer
+    return files
+
+
+def contest_yaml(state: str, now: datetime) -> str:
+    """The contest, running from an hour before `now` for 30 days, seen by
+    anyone signed in, its registration the one a new contest starts with:
+    anyone may register, and an organiser approves each."""
+    return (
+        f"name: {CONTEST_NAME}\n"
+        f"start: {(now - timedelta(hours=1)).strftime(WHEN)}\n"
+        f"end: {(now + timedelta(days=30)).strftime(WHEN)}\n"
+        f"state: {state}\nvisibility: signed-in\ntasks:\n  - id: {TASK}\n"
+    )
 
 
 def step(what: str) -> None:
