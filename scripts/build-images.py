@@ -80,6 +80,12 @@ built first.
 """
 
 REGISTRY = "localhost:5000"
+REGISTRY_ASKED = "127.0.0.1:5000"
+"""Where this script asks whether the registry answers: the address it is
+published on, not `localhost`, which may name ::1 first, where macOS's
+AirPlay Receiver listens on port 5000 and answers 403. The daemon pushes and
+pulls through `REGISTRY` inside its own machine, where no such listener is.
+"""
 REGISTRY_CONTAINER = "unicon-registry"
 REGISTRY_IMAGE = "registry:2.8.3"
 REGISTRY_VOLUME = "unicon-registry"
@@ -244,7 +250,7 @@ def _ensure_registry() -> None:
             "--restart",
             "unless-stopped",
             "--publish",
-            f"127.0.0.1:{REGISTRY.split(':')[1]}:5000",
+            f"{REGISTRY_ASKED}:5000",
             "--volume",
             f"{REGISTRY_VOLUME}:/var/lib/registry",
             REGISTRY_IMAGE,
@@ -254,7 +260,8 @@ def _ensure_registry() -> None:
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         try:
-            if httpx.get(f"http://{REGISTRY}/v2/", timeout=5.0).status_code == 200:
+            answer = httpx.get(f"http://{REGISTRY_ASKED}/v2/", timeout=5.0)
+            if answer.status_code == 200:
                 return
         except httpx.HTTPError:
             pass
