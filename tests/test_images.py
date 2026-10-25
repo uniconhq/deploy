@@ -29,18 +29,17 @@ def _write(path: Path, document: Any) -> Path:
 
 def _runner(registry: str = "ghcr.io/uniconhq") -> dict[str, str]:
     return {
-        name: f"{registry}/{name}{DIGEST}"
-        for name in ("harness", "clone", "socket-filter", "worker")
+        "worker": f"{registry}/worker{DIGEST}",
+        "plugin-git": f"docker.io/woodpeckerci/plugin-git{DIGEST}",
     }
 
 
 def test_the_release_manifest_in_this_repo_loads() -> None:
     manifest = images.load(DEPLOY / images.RELEASE_MANIFEST)
 
-    assert manifest.harness.startswith("ghcr.io/uniconhq/harness@sha256:")
-    assert manifest.clone.startswith("ghcr.io/uniconhq/clone@sha256:")
-    assert manifest.socket_filter.startswith("ghcr.io/uniconhq/socket-filter@sha256:")
-    assert manifest.primitive_names == ["compile", "diff-check", "sandbox-run"]
+    assert manifest.plugin_git.startswith("docker.io/woodpeckerci/plugin-git@sha256:")
+    assert set(manifest.images) == {"worker", "plugin-git"}
+    assert manifest.primitive_names == ["compile", "exec"]
     for release in manifest.primitives:
         assert isinstance(release.source, GitHubSource)
         assert release.image.startswith(
@@ -56,11 +55,11 @@ def test_both_kinds_of_primitive_source_are_read(tmp_path: Path) -> None:
         {
             "images": _runner("localhost:5000/uniconhq"),
             "primitives": {
-                "sandbox-run": {
+                "exec": {
                     "v1": {
-                        "image": f"ghcr.io/uniconhq/primitive-sandbox-run{DIGEST}",
+                        "image": f"ghcr.io/uniconhq/primitive-exec{DIGEST}",
                         "source": {
-                            "github": "uniconhq/primitive-sandbox-run",
+                            "github": "uniconhq/primitive-exec",
                             "tag": "v1.0.0",
                         },
                     },
@@ -87,17 +86,15 @@ def test_both_kinds_of_primitive_source_are_read(tmp_path: Path) -> None:
     assert [(release.name, release.version) for release in manifest.primitives] == [
         ("compile", "v1"),
         ("compile", "v2"),
-        ("sandbox-run", "v1"),
+        ("exec", "v1"),
     ]
-    compile_v1, compile_v2, sandbox_run = manifest.primitives
+    compile_v1, compile_v2, exec_v1 = manifest.primitives
     assert compile_v1.source == GitHubSource("uniconhq/primitive-compile", "v1.1.1")
     assert compile_v2.source == LocalSource(
         (tmp_path.parent / "primitive-compile").resolve()
     )
-    assert sandbox_run.source == GitHubSource(
-        "uniconhq/primitive-sandbox-run", "v1.0.0"
-    )
-    assert manifest.primitive_names == ["compile", "sandbox-run"]
+    assert exec_v1.source == GitHubSource("uniconhq/primitive-exec", "v1.0.0")
+    assert manifest.primitive_names == ["compile", "exec"]
     assert manifest.versions_of("compile") == [compile_v1, compile_v2]
 
 
@@ -184,9 +181,9 @@ def test_a_primitive_with_no_version_is_refused(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "reference",
     [
-        "ghcr.io/uniconhq/harness:v0.1.0",
-        "ghcr.io/uniconhq/harness@sha256:abc",
-        "harness@sha256:" + "a" * 64,
+        "ghcr.io/uniconhq/worker:v0.1.0",
+        "ghcr.io/uniconhq/worker@sha256:abc",
+        "worker@sha256:" + "a" * 64,
         "",
         None,
     ],
@@ -196,19 +193,19 @@ def test_an_image_not_named_by_digest_is_refused(
 ) -> None:
     path = _write(
         tmp_path / "images.json",
-        {"images": {**_runner(), "harness": reference}, "primitives": {}},
+        {"images": {**_runner(), "worker": reference}, "primitives": {}},
     )
 
-    with pytest.raises(ManifestError, match=r"images\.harness is not an image"):
+    with pytest.raises(ManifestError, match=r"images\.worker is not an image"):
         images.load(path)
 
 
-def test_a_manifest_without_the_clone_image_is_refused(tmp_path: Path) -> None:
+def test_a_manifest_without_the_git_plugin_is_refused(tmp_path: Path) -> None:
     runner = _runner()
-    del runner["clone"]
+    del runner["plugin-git"]
     path = _write(tmp_path / "images.json", {"images": runner, "primitives": {}})
 
-    with pytest.raises(ManifestError, match="has no clone"):
+    with pytest.raises(ManifestError, match="has no plugin-git"):
         images.load(path)
 
 
@@ -254,6 +251,5 @@ def test_env_gets_the_manifest_images() -> None:
 
     main._derive_values(values, manifest, development=False)
 
-    assert values["UNICON_HARNESS_IMAGE"] == manifest.harness
-    assert values["UNICON_CLONE_IMAGE"] == manifest.clone
-    assert values["UNICON_FILTER_IMAGE"] == manifest.socket_filter
+    assert values["UNICON_PLUGIN_GIT_IMAGE"] == manifest.plugin_git
+    assert values["UNICON_PRIMITIVE_BASE_IMAGE"] == ""

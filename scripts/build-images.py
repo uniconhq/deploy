@@ -7,22 +7,25 @@ starts one on this machine, `registry:2` on 127.0.0.1:5000, in a container of
 its own outside the compose stack, with its images in the volume
 `unicon-registry` so they survive a restart. Docker trusts a registry on
 localhost over plain HTTP without being told, and the daemon pulls from it by
-digest the same way it would from ghcr.io, which is what the CI agent and the
-socket filter do. Nothing is pushed anywhere else.
+digest the same way it would from ghcr.io, which is what the CI agent does.
+Nothing is pushed anywhere else.
 
-It builds the runner's four images from ../runner (images/<name>/Dockerfile,
-with the checkout as the context, the way the runner's own CI builds them)
-and each primitive from ../primitive-<name> (its Dockerfile at the root),
-pushes each to the registry, reads back the digest the push gave it, and
-writes images.local.json: the same shape as images.json, with every runner
-image a localhost:5000 reference by digest. Each primitive's checkout fills
-the version at the forge that is the major of the version in its
-pyproject.toml, `v2` for 2.0.0, with its source the sibling checkout; every
-other version of it is copied from images.json as released, the image by its
-digest at ghcr.io and the source its tag on GitHub. So a stack built this way
-seeds v1 of each primitive from its release and v2 from the checkout.
-images.local.json is git-ignored, and bootstrap reads it instead
-of images.json whenever it is there. Run it from the deploy directory:
+It builds the runner's two images from ../runner (images/<name>/Dockerfile,
+with the checkout as the context, the way the runner's own CI builds them),
+primitive-base first and then the worker, and each primitive from
+../primitive-<name> (its Dockerfile at the root) on that primitive-base,
+passed as the build argument BASE_IMAGE by its digest here, pushes each to
+the registry, reads back the digest the push gave it, and writes
+images.local.json: the same shape as images.json, with every runner
+image a localhost:5000 reference by digest, and every other image there,
+Woodpecker's git plugin, copied from images.json as released. Each
+primitive's checkout fills the version at the forge that is the major of
+the version in its pyproject.toml, `v2` for 2.0.0, with its source the
+sibling checkout; every other version of it is copied from images.json as
+released, the image by its digest at ghcr.io and the source its tag on
+GitHub. So a stack built this way seeds compile's v1 from its release and
+its v3 from the checkout. images.local.json is git-ignored, and bootstrap
+reads it instead of images.json whenever it is there. Run it from the deploy directory:
 
     uv run scripts/build-images.py
     uv run bootstrap
@@ -33,7 +36,10 @@ and writes them back, under a scope per image, so a layer whose inputs did
 not change since an earlier run is not built again. The image is loaded into
 Docker and pushed from there, as a laptop's build is, so its digest is read
 the same way and Docker holds the image, which bootstrap then finds without
-a pull.
+a pull. The primitives, on primitive-base, are built by Docker's own builder
+whatever the options, since a buildx builder of its own runs in a container
+of its own, which reaches neither the images Docker holds nor the registry
+on this machine's localhost.
 
 A checkout is built as it is on disk, committed or not, so a change in a
 sibling is one build and one bootstrap away from a grading. An image whose
@@ -65,10 +71,19 @@ import httpx
 
 from bootstrap import images
 
-RUNNER_IMAGES = ("harness", "clone", "socket-filter", "worker")
-PRIMITIVES = ("compile", "sandbox-run", "diff-check")
+RUNNER_IMAGES = ("worker",)
+PRIMITIVES = ("compile", "exec")
+"""The primitives, each built on the runner's `images.PRIMITIVE_BASE`, which
+is built first.
+"""
 
 REGISTRY = "localhost:5000"
+REGISTRY_ASKED = "127.0.0.1:5000"
+"""Where this script asks whether the registry answers: the address it is
+published on, not `localhost`, which may name ::1 first, where macOS's
+AirPlay Receiver listens on port 5000 and answers 403. The daemon pushes and
+pulls through `REGISTRY` inside its own machine, where no such listener is.
+"""
 REGISTRY_CONTAINER = "unicon-registry"
 REGISTRY_IMAGE = "registry:2.8.3"
 REGISTRY_VOLUME = "unicon-registry"
@@ -121,18 +136,20 @@ def main(argv: list[str] | None = None) -> int:
                 context=siblings / "runner",
                 dockerfile=siblings / "runner" / "images" / name / "Dockerfile",
             )
-            for name in RUNNER_IMAGES
+            for name in (images.PRIMITIVE_BASE, *RUNNER_IMAGES)
         }
+        on_base = Build()
         primitives: dict[str, dict[str, Any]] = {}
         for name in PRIMITIVES:
             checkout = siblings / f"primitive-{name}"
             version = _version_of(checkout)
             versions = dict(released.get(name, {}))
             versions[version] = {
-                "image": build.image(
+                "image": on_base.image(
                     f"primitive-{name}",
                     context=checkout,
                     dockerfile=checkout / "Dockerfile",
+                    arguments={"BASE_IMAGE": built[images.PRIMITIVE_BASE]},
                 ),
                 "source": {"path": _relative(checkout, directory)},
             }
@@ -143,6 +160,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"build-images failed: {failure}")
         return 1
 
+    built = {**_released_images(directory, built), **built}
     manifest = directory / images.LOCAL_MANIFEST
     manifest.write_text(
         json.dumps({"images": built, "primitives": primitives}, indent=2) + "\n",
@@ -157,6 +175,19 @@ def main(argv: list[str] | None = None) -> int:
             label = f"primitive-{name} {version}"
             print(f"  {label:<22} {entry['image']}")
     return 0
+
+
+def _released_images(directory: Path, built: dict[str, str]) -> dict[str, str]:
+    """Every image the release manifest pins that this does not build, such
+    as Woodpecker's git plugin, by its digest there."""
+    document = json.loads(
+        (directory / images.RELEASE_MANIFEST).read_text(encoding="utf-8")
+    )
+    return {
+        str(name): str(reference)
+        for name, reference in document["images"].items()
+        if name not in built
+    }
 
 
 def _released_primitives(directory: Path) -> dict[str, dict[str, Any]]:
@@ -214,7 +245,7 @@ def _ensure_registry() -> None:
             "--restart",
             "unless-stopped",
             "--publish",
-            f"127.0.0.1:{REGISTRY.split(':')[1]}:5000",
+            f"{REGISTRY_ASKED}:5000",
             "--volume",
             f"{REGISTRY_VOLUME}:/var/lib/registry",
             REGISTRY_IMAGE,
@@ -224,7 +255,8 @@ def _ensure_registry() -> None:
     deadline = time.monotonic() + 60
     while time.monotonic() < deadline:
         try:
-            if httpx.get(f"http://{REGISTRY}/v2/", timeout=5.0).status_code == 200:
+            answer = httpx.get(f"http://{REGISTRY_ASKED}/v2/", timeout=5.0)
+            if answer.status_code == 200:
                 return
         except httpx.HTTPError:
             pass
@@ -242,8 +274,16 @@ class Build:
     builder: str | None = None
     gha_cache: bool = False
 
-    def image(self, name: str, *, context: Path, dockerfile: Path) -> str:
-        """Build, push and return the image as a reference by digest."""
+    def image(
+        self,
+        name: str,
+        *,
+        context: Path,
+        dockerfile: Path,
+        arguments: dict[str, str] | None = None,
+    ) -> str:
+        """Build, push and return the image as a reference by digest, with
+        `arguments` as its build arguments."""
         if not dockerfile.is_file():
             raise BuildFailed(
                 f"{dockerfile} is missing; is the checkout beside deploy?"
@@ -255,6 +295,11 @@ class Build:
             *self.command(name),
             "--provenance=false",
             "--sbom=false",
+            *[
+                flag
+                for key, value in (arguments or {}).items()
+                for flag in ("--build-arg", f"{key}={value}")
+            ],
             "--file",
             str(dockerfile),
             "--tag",

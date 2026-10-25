@@ -1,0 +1,92 @@
+# unicon/interactive@v1, workflow.yaml: one run of an entrant's program
+# against the task's judge, linked both ways, and the verdict the verdict
+# script gives from how each ended. The format is SIMPLER-CORE.md 7.
+inputs:
+  code: {type: folder, title: Solution}
+  language: {type: enum, options: [c, cpp, java, python], title: Language}
+  judge:
+    type: folder
+    title: Judge
+    help: >-
+      The program that plays the entrant and writes the verdict. It should
+      write its verdict before it may write to an entrant that has gone; a
+      verdict written stands however the judge then ends. A write that fails
+      before then should be caught and judged 1: a judge that ends with no
+      verdict is an error of the step, unless SIGPIPE killed it.
+  judge_language:
+    type: enum
+    options: [c, cpp, java, python]
+    title: Judge's language
+  judge_manifest:
+    type: file
+    title: Judge's program.yaml
+    help: What the judge reports, as its program.yaml declares it.
+  input:
+    type: file
+    title: Input
+    help: The test's input, which the judge alone reads, as the file input.
+  time_limit: {type: number, title: Time limit, unit: seconds}
+  memory_limit: {type: number, title: Memory limit, unit: MB}
+  judge_time_limit:
+    type: number
+    title: Judge's time limit
+    unit: seconds
+    help: >-
+      More than the time limit: each program's wall clock is twice its time
+      limit and a second, and the entrant's should run out first.
+  judge_memory_limit: {type: number, title: Judge's memory limit, unit: MB}
+
+steps:
+  - id: compile
+    use: unicon/compile@v3
+    with:
+      source: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+  - id: judge
+    use: unicon/compile@v3
+    with:
+      source: ${{ inputs.judge }}
+      language: ${{ inputs.judge_language }}
+  - id: game
+    use: unicon/exec@v1
+    with:
+      programs:
+        entrant:
+          program: ${{ steps.compile.program }}
+          time_limit: ${{ inputs.time_limit }}
+          memory_limit: ${{ inputs.memory_limit }}
+        judge:
+          program: ${{ steps.judge.program }}
+          manifest: ${{ inputs.judge_manifest }}
+          files:
+            input: ${{ inputs.input }}
+          time_limit: ${{ inputs.judge_time_limit }}
+          memory_limit: ${{ inputs.judge_memory_limit }}
+      links:
+        - entrant -> judge
+        - judge -> entrant
+  - id: verdict
+    use: unicon/compile@v3
+    with:
+      source: ${{ workflow.verdict/ }}
+      language: python
+  - id: decide
+    use: unicon/exec@v1
+    with:
+      program: ${{ steps.verdict.program }}
+      manifest: ${{ workflow.verdict/program.yaml }}
+      time_limit: 5
+      memory_limit: 64
+      files:
+        facts: ${{ steps.game.facts }}
+
+outputs:
+  time_ms:
+    from: "${{ steps.game.entrant.time_ms }}"
+    title: Run time
+    unit: ms
+  memory_kb:
+    from: "${{ steps.game.entrant.memory_kb }}"
+    title: Memory used
+    unit: KB
+  log: {from: "${{ steps.compile.log }}", title: Compile log}

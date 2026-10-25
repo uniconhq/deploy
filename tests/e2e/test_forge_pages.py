@@ -20,7 +20,7 @@ import secrets
 
 from playwright.sync_api import Browser, expect
 
-from tests.e2e.stack import APP, create_account, needs_stack
+from tests.e2e.stack import APP, create_account, needs_stack, open_page
 
 
 @needs_stack
@@ -31,7 +31,7 @@ def test_back_to_unicon_on_the_consent_page_leads_to_the_apps_home(
     password = create_account(username)
     page = browser.new_context().new_page()
 
-    page.goto(f"{APP}/login?next=%2F")
+    open_page(page, f"{APP}/login?next=%2F")
     page.get_by_role("main").get_by_role(
         "link", name=re.compile("sign in", re.I)
     ).first.click()

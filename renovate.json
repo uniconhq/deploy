@@ -1,0 +1,11 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["local>uniconhq/runner:renovate-preset"],
+  "packageRules": [
+    {
+      "description": "Our own images: the app's from main, and the stack's local builds",
+      "matchPackageNames": ["ghcr.io/uniconhq/**", "unicon/**"],
+      "enabled": false
+    }
+  ]
+}

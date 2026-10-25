@@ -11,16 +11,19 @@ stack's own files.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import secrets
 import shlex
 import subprocess
+import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import FilePayload, Locator, Page, expect
+from playwright.sync_api import Error, FilePayload, Locator, Page, expect
 
 APP = os.environ.get("UNICON_E2E_URL", "").rstrip("/")
 COMPOSE = shlex.split(
@@ -45,6 +48,64 @@ PUBLISHED = re.compile(r"Saved and published as publication \d+\.")
 needs_stack = pytest.mark.skipif(
     not APP, reason="UNICON_E2E_URL names no running stack"
 )
+
+
+def _browser_dropped(error: Error) -> bool:
+    """The runner's Chrome aborted before a page existed. The app never saw
+    the navigation. One run says the network changed; the next is sent to
+    Chrome's own error page instead.
+    """
+    text = str(error)
+    return "ERR_NETWORK_CHANGED" in text or "chrome-error://chromewebdata/" in text
+
+
+def _through_a_network_change(load: Callable[[], object]) -> None:
+    """Run `load` again when the browser aborts it before a page exists.
+
+    Any other failure is the test's own.
+    """
+    for attempt in range(3):
+        try:
+            load()
+            return
+        except Error as error:
+            if not _browser_dropped(error) or attempt == 2:
+                raise
+
+
+def open_page(page: Page, url: str) -> None:
+    """Open `url`, trying again when the browser reports the network changed."""
+    load = page.goto
+    _through_a_network_change(lambda: load(url))
+
+
+def reload_page(page: Page) -> None:
+    """Reload, with the same second try as `open_page`."""
+    load = page.reload
+    _through_a_network_change(load)
+
+
+OFFLINE = "Cannot reach Unicon"
+"""What a page says when a request it sent got no answer."""
+
+
+def save_until(page: Page, save: Locator, done: Locator) -> None:
+    """Click `save` until `done` shows. The runner's Chrome drops a request
+    in flight when its network changes, as it does each time a grading
+    starts a container, and the page then says it cannot reach Unicon and
+    keeps the work. A person saves again then, and so does this, up to three
+    times. Any other outcome is the test's own.
+    """
+    offline = page.get_by_role("alert").filter(has_text=OFFLINE)
+    for attempt in range(3):
+        save.click()
+        if attempt > 0:
+            with contextlib.suppress(AssertionError):
+                expect(offline).to_be_hidden(timeout=2_000)
+        expect(done.or_(offline).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+        if not offline.is_visible():
+            return
+    expect(done).to_be_visible()
 
 
 def create_account(username: str) -> str:
@@ -78,7 +139,7 @@ def sign_in(page: Page, username: str, password: str) -> None:
     Each step waits for the address to leave the page it was on, so what it
     reads next is the page the last one led to.
     """
-    page.goto(f"{APP}/login?next=%2F")
+    open_page(page, f"{APP}/login?next=%2F")
     page.get_by_role("main").get_by_role(
         "link", name=re.compile("sign in", re.I)
     ).first.click()
@@ -128,7 +189,7 @@ def create(
 
 
 def create_org(page: Page, name: str) -> None:
-    page.goto(f"{APP}/orgs")
+    open_page(page, f"{APP}/orgs")
     create(page, name, "Create org", "New org")
 
 
@@ -137,13 +198,13 @@ def save_task(page: Page) -> Locator:
     the contest is running and the save asks; answers the bar.
     """
     bar = page.get_by_role("region", name="Save the task")
-    bar.get_by_role("button", name="Save", exact=True).click()
     publish = bar.get_by_role("button", name="Publish the change")
-    outcome = bar.get_by_text(PUBLISHED).or_(publish)
-    expect(outcome.first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    published = bar.get_by_text(PUBLISHED)
+    save_until(
+        page, bar.get_by_role("button", name="Save", exact=True), published.or_(publish)
+    )
     if publish.is_visible():
-        publish.click()
-        expect(bar.get_by_text(PUBLISHED)).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+        save_until(page, publish, published)
     return bar
 
 
@@ -153,15 +214,35 @@ def write_statement(page: Page, task_page: str, text: str) -> None:
     save asks. A contest opens only once each task's published statement is
     written, not the starter's placeholder.
     """
-    page.goto(f"{task_page}?card=statement")
+    open_page(page, f"{task_page}?card=statement")
     page.get_by_role("textbox", name="Statement source").fill(text)
-    page.get_by_role("button", name="Save statement").click()
     published = page.get_by_role("status").filter(has_text=PUBLISHED)
     publish = page.get_by_role("alert").get_by_role("button", name="Publish the change")
-    expect(published.or_(publish).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    save_until(
+        page, page.get_by_role("button", name="Save statement"), published.or_(publish)
+    )
     if publish.is_visible():
-        publish.click()
-        expect(published).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+        save_until(page, publish, published)
+    _wait_checked(page, task_page)
+
+
+def _wait_checked(page: Page, task_page: str) -> None:
+    """Wait until the task's latest publication has passed its checks. A save
+    that publishes stops the checks of the publication before it, so until
+    the new one passes the contest refuses to open with the task as not
+    published. The task page does not read its state again by itself, so it
+    is loaded again until its chip says Published.
+    """
+    deadline = time.monotonic() + CREATE_TIMEOUT_MS / 1000
+    while True:
+        open_page(page, task_page)
+        checked = page.get_by_text("Published", exact=True)
+        checking = page.get_by_text("Checking", exact=True)
+        expect(checked.or_(checking).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+        if checked.is_visible():
+            return
+        assert time.monotonic() < deadline, "the publication is still being checked"
+        page.wait_for_timeout(1_000)
 
 
 def submission_rate(page: Page, count: int, per: int) -> None:
@@ -171,72 +252,34 @@ def submission_rate(page: Page, count: int, per: int) -> None:
     rules.get_by_role("textbox", name="Length of the window (seconds)").fill(str(per))
 
 
-def payloads(files: dict[str, bytes]) -> list[FilePayload]:
-    return [
-        {"name": name, "mimeType": "application/octet-stream", "buffer": content}
-        for name, content in files.items()
-    ]
-
-
-def add_test(
-    page: Page, group: str, files: dict[str, bytes], new_group: bool = False
-) -> None:
-    """One test, by its files, added to `group` from the Tests card, made a
-    new group when `new_group`; the save bar then holds it.
-    """
-    tests = page.get_by_role("region", name="Tests", exact=True)
-    tests.get_by_role("button", name="Add tests", exact=True).click()
-    dialog = page.get_by_role("dialog", name="Add tests")
-    if new_group:
-        dialog.get_by_role("combobox", name="Test group").select_option(
-            label="A new group"
-        )
-        dialog.get_by_role("textbox", name="Name of the new group").fill(group)
-    else:
-        dialog.get_by_role("combobox", name="Test group").select_option(label=group)
-    for part, payload in zip(files, payloads(files), strict=True):
-        dialog.get_by_label(part, exact=True).set_input_files(files=[payload])
-    dialog.get_by_role("button", name="Add the test").click()
-    expect(dialog).to_be_hidden()
-
-
-def replace_test(page: Page, group: str, test: str, files: dict[str, bytes]) -> None:
-    """Replace the files of one test of `group` from the Tests card."""
-    page.get_by_role("group", name=group, exact=True).get_by_role(
-        "button", name=f"Replace test {test}", exact=True
-    ).click()
-    dialog = page.get_by_role("dialog", name=f"Replace test {test} of {group}")
-    for part, payload in zip(files, payloads(files), strict=True):
-        dialog.get_by_label(part, exact=True).set_input_files(files=[payload])
-    dialog.get_by_role("button", name="Replace it").click()
-    expect(dialog).to_be_hidden()
-
-
-def group_rule(page: Page, group: str, rule: str, points: str) -> None:
-    """How a test group earns its points, and how many."""
-    box = page.get_by_role("group", name=group, exact=True)
-    box.get_by_role("combobox", name="How does this group earn points?").select_option(
-        label=rule
-    )
-    box.get_by_role("textbox", name="Points", exact=True).fill(points)
+def upload_run_file(page: Page, row: int, field: str, content: bytes) -> None:
+    """Give one cell of the Runs card `content`. `row` is the row's place on
+    the page, starting at 1, and the editor stores the file at
+    `runs/0/<row - 1>/<field>`."""
+    held = Path(f"/tmp/unicon-e2e-{row}-{field}")
+    held.write_bytes(content)
+    page.get_by_role("region", name="Runs").get_by_label(
+        f"File for row {row} {field}"
+    ).set_input_files(str(held))
 
 
 def contest_settings(page: Page, org: str, contest: str, **fields: str) -> None:
     """Fill the contest's Settings form, each field by its label, and save."""
-    page.goto(f"{APP}/orgs/{org}/contests/{contest}/settings")
+    open_page(page, f"{APP}/orgs/{org}/contests/{contest}/settings")
     form = page.get_by_role("form", name="Contest settings")
     expect(form.get_by_role("textbox", name="Name", exact=True)).not_to_have_value("")
     for label, value in fields.items():
         form.get_by_role("textbox", name=label, exact=True).fill(value)
-    form.get_by_role("button", name="Save settings").click()
-    expect(page.get_by_text("Saved.", exact=True)).to_be_visible(
-        timeout=CREATE_TIMEOUT_MS
+    save_until(
+        page,
+        form.get_by_role("button", name="Save settings"),
+        page.get_by_text("Saved.", exact=True),
     )
 
 
 def open_contest(page: Page, org: str, contest: str) -> None:
     """Open the contest from its status card, once its checklist holds."""
-    page.goto(f"{APP}/orgs/{org}/contests/{contest}")
+    open_page(page, f"{APP}/orgs/{org}/contests/{contest}")
     status = page.get_by_role("region", name="Status")
     status.get_by_role("button", name="Open the contest").click()
     dialog = page.get_by_role("dialog", name="Open the contest?")
@@ -252,7 +295,7 @@ def task_timeline(
     which opens the task's place in the contest: each of `opens`, `due` and
     `closes` given set at that time.
     """
-    page.goto(f"{APP}/orgs/{org}/contests/{contest}")
+    open_page(page, f"{APP}/orgs/{org}/contests/{contest}")
     page.get_by_role("button", name=f"Change {row} in this contest").click()
     dialog = page.get_by_role("dialog", name=f"{row} in this contest")
     for which, moment in times.items():
@@ -261,9 +304,10 @@ def task_timeline(
             "radio", name="At a time"
         ).check()
         dialog.get_by_label(f"{word} at", exact=True).fill(local(moment))
-    dialog.get_by_role("button", name="Save", exact=True).click()
-    expect(dialog.get_by_role("status").filter(has_text="Saved")).to_be_visible(
-        timeout=CREATE_TIMEOUT_MS
+    save_until(
+        page,
+        dialog.get_by_role("button", name="Save", exact=True),
+        dialog.get_by_role("status").filter(has_text="Saved"),
     )
     dialog.get_by_role("button", name="Close", exact=True).click()
     expect(dialog).to_be_hidden()
@@ -273,7 +317,7 @@ def register(page: Page, org: str, contest: str) -> None:
     """Register alone for the contest from its page, as anyone may by the
     contest's starting sign-up, which an organiser approves.
     """
-    page.goto(f"{APP}/contests/{org}/{contest}")
+    open_page(page, f"{APP}/contests/{org}/{contest}")
     page.get_by_role("form", name="Register").get_by_role(
         "button", name="Register", exact=True
     ).click()
@@ -282,7 +326,7 @@ def register(page: Page, org: str, contest: str) -> None:
 
 def approve(organiser: Page, org: str, contest: str, who: str) -> None:
     """Approve `who`'s registration from the contest's Entrants page."""
-    organiser.goto(f"{APP}/orgs/{org}/contests/{contest}/entrants")
+    open_page(organiser, f"{APP}/orgs/{org}/contests/{contest}/entrants")
     row = (
         organiser.get_by_role("table", name="Entrants")
         .get_by_role("row")
@@ -320,15 +364,14 @@ def submit(page: Page, number: int, source: str) -> None:
     expect(page.get_by_text(f"Submitted as #{number}.")).to_be_visible()
 
 
-FINAL = re.compile(
-    r"ACCEPTED|WRONG ANSWER|TIME LIMIT|MEMORY LIMIT|OUTPUT LIMIT|RUNTIME ERROR|"
-    r"COMPILE ERROR|SYSTEM ERROR|FAILED|CANCELLED|OVER THE LIMIT"
-)
+FINAL = re.compile(r"GRADED|GRADING DELAYED|CANCELLED|OVER THE LIMIT")
+"""The statuses the entrant's list ends on: the run model gives a
+submission no verdict of its own, so the list says where its grading stands."""
 
 
-def verdict_of(page: Page, number: int) -> str:
-    """The outcome the entrant's list shows for submission `number`, once
-    its grading has finished.
+def status_of(page: Page, number: int) -> str:
+    """The status the entrant's list shows for submission `number`, once
+    its grading has ended.
     """
     row = (
         page.get_by_role("table", name="Your submissions")
