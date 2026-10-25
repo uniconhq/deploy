@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import os
 import secrets
+from typing import Any
 
 import pytest
 from playwright.sync_api import Browser
@@ -133,7 +134,7 @@ def test_a_run_over_its_memory_ends_alone(browser: Browser) -> None:
 
     assert grading["status"] == "graded", grading
 
-    def score_of(run: dict) -> str | None:
+    def score_of(run: dict[str, Any]) -> str | None:
         found = next(
             (item["number"] for item in run["reports"] if item["title"] == "score"),
             None,

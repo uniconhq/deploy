@@ -17,7 +17,7 @@ import time
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from playwright.sync_api import Locator, Page, expect
+from playwright.sync_api import Browser, Locator, Page, expect
 
 from tests.e2e.stack import (
     APP,
@@ -103,7 +103,9 @@ def add_group(
     scoring.get_by_label(f"When {name} is shown").select_option(label=when)
 
 
-def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(browser) -> None:
+def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
+    browser: Browser,
+) -> None:
     stamp = secrets.token_hex(3)
     organiser_name, entrant_name = f"e2e-o-{stamp}", f"e2e-c-{stamp}"
     org = f"e2e-org-{stamp}"
