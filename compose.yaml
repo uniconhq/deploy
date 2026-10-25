@@ -57,21 +57,35 @@ x-backend-env: &backend-env
   # names, the access key bootstrap made for the backend, and the bucket
   # bootstrap makes for the grading run logs, which a machine writes through a
   # presigned URL the proxy passes to Garage untouched. What a browser
-  # uploads goes through the upload door into Forgejo's large-file store.
+  # uploads goes through the upload door into Forgejo's large-file store; a
+  # grading machine reads a task's large file from there by a URL signed
+  # with the key bootstrap made that may only read that bucket.
   UNICON_S3_ENDPOINT: http://garage:3900
   UNICON_S3_REGION: garage
   UNICON_S3_ACCESS_KEY: ${UNICON_S3_ACCESS_KEY}
   UNICON_S3_SECRET_KEY: ${UNICON_S3_SECRET_KEY}
   UNICON_S3_RESULTS_BUCKET: unicon-results
-  # Where a grading machine reaches the platform: the envelope, the callback
-  # and the log upload. The public URL unless .env says otherwise;
+  UNICON_S3_LFS_ACCESS_KEY: ${UNICON_S3_LFS_ACCESS_KEY}
+  UNICON_S3_LFS_SECRET_KEY: ${UNICON_S3_LFS_SECRET_KEY}
+  UNICON_S3_LFS_BUCKET: forgejo-lfs
+  # Where a grading machine reaches the platform: each step's door and the
+  # uploads of its files and logs. The public URL unless .env says otherwise;
   # compose.dev.yaml points it at the proxy's name on this network, which the
   # dev agent's steps join.
   UNICON_MACHINE_URL: ${UNICON_MACHINE_URL:-${UNICON_PUBLIC_URL}}
-  # The harness every plan runs, and the image the CI checks the task and the
-  # submission out with, both by digest from the image manifest (images.json).
-  UNICON_HARNESS_IMAGE: ${UNICON_HARNESS_IMAGE}
-  UNICON_CLONE_IMAGE: ${UNICON_CLONE_IMAGE}
+  # A task's pipelines check the submission out with Woodpecker's git plugin
+  # and end with a step on the step wrapper's base image, both by digest from
+  # the image manifest (images.json), which may name no base image yet: a
+  # stack without one grades nothing.
+  UNICON_PLUGIN_GIT_IMAGE: ${UNICON_PLUGIN_GIT_IMAGE}
+  UNICON_PRIMITIVE_BASE_IMAGE: ${UNICON_PRIMITIVE_BASE_IMAGE:-}
+  # The grading machines' slot sizes, name:MB comma separated, which bootstrap
+  # writes from machine/slots.json: the forge fits each run task pipeline in
+  # the smallest that holds it.
+  UNICON_SLOT_SIZES: ${UNICON_SLOT_SIZES}
+  # Step images withdrawn by hand, by digest, comma separated, which no
+  # grading runs (see .env.example).
+  UNICON_WITHDRAWN_IMAGES: ${UNICON_WITHDRAWN_IMAGES:-}
   # The mail server invite mail goes through: the one Forgejo sends its
   # confirmations and password resets through (below), from the same .env
   # keys, so one set of credentials serves both. MAIL_SMTP_ADDR empty sends
@@ -243,18 +257,25 @@ services:
       WOODPECKER_CONFIG_EXTENSION_ENDPOINT: http://backend:8000/api/v1/ci/config
       WOODPECKER_CONFIG_EXTENSION_EXCLUSIVE: "true"
       WOODPECKER_EXTENSIONS_ALLOWED_HOSTS: private
-      # The one image a clone step may hand the repository credential to:
-      # the platform's clone image, by the digest bootstrap took from the
-      # image manifest. A step on this list gets the credential without the
-      # repository being trusted with it, which is how a task repository
+      # The image a clone step may hand the repository credential to:
+      # Woodpecker's git plugin, by the digest bootstrap took from the image
+      # manifest. A step on this list gets the credential without the
+      # repository being trusted with it, which is how a grading's checkout
       # clones with `security` trust off. An entry with a digest matches that
       # digest alone. Setting the list replaces Woodpecker's own, so its git
-      # plugin, which no grading run uses, is lent nothing: every run's two
-      # checkouts are the clone image, named in the extension's answer.
-      WOODPECKER_PLUGINS_TRUSTED_CLONE: ${UNICON_CLONE_IMAGE}
+      # plugin at any other digest is lent nothing: a pipeline checks its
+      # submission out with the plugin at this digest, named in the
+      # extension's answer.
+      WOODPECKER_PLUGINS_TRUSTED_CLONE: ${UNICON_PLUGIN_GIT_IMAGE}
+      # The plugins a step may run privileged as: every image of `exec`
+      # at the forge, by digest, older ones a published plan
+      # still pins among them, since those steps make boxes of their own, but
+      # any in UNICON_WITHDRAWN_IMAGES. A plugin step has no commands,
+      # environment or entrypoint, so what runs is the image alone.
+      WOODPECKER_PLUGINS_PRIVILEGED: ${UNICON_PRIVILEGED_IMAGES:-}
       # Minutes. The forge's clock is built on the default: a run gets 30
       # minutes (RUN_TIMEOUT in the forge package), of which it allows the
-      # checkouts 4 and the reports 1, and caps a harness's wall time at the
+      # checkouts 4 and the reports 1, and plans a pipeline's steps into the
       # 25 left. A grading run still going after that is stuck. Change the two
       # together.
       WOODPECKER_MAX_PIPELINE_TIMEOUT: "60"

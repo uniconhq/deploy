@@ -1,9 +1,9 @@
 """Download one of a task's own files through the real proxy on the running
 compose stack, as the organiser who made it, and not as anyone else.
 
-The organiser creates an org, a contest and a task, replaces the input of
-the task's test from its Tests card with bytes that are not text and past
-what the page saves inline (256 KiB), so the file goes into the forge's
+The organiser creates an org, a contest and a task, and on the Runs card
+replaces the first row's input with bytes that are not text and past what
+the page saves inline (256 KiB), so the file goes into the forge's
 large-file store through the upload door, writes the task's statement and
 opens the contest. The page's
 own read of the file names the version it was read at, and the download
@@ -42,10 +42,10 @@ from tests.e2e.stack import (
     needs_stack,
     open_contest,
     register,
-    replace_test,
     save_task,
     sign_in,
     submission_rate,
+    upload_run_file,
     write_statement,
 )
 
@@ -55,7 +55,7 @@ pytestmark = [needs_stack]
 # not text, which the download must carry unchanged, and long enough that
 # the page sends it through the upload door rather than inline.
 INPUT = b"2 1\r\n" + bytes(range(256)) * 1100
-FILE = "tests/main/1/input"
+FILE = "runs/0/0/input"
 # What Forgejo's media endpoint answers with of its own that the door keeps
 # from the browser: its cookie, and the names it gives the object and the
 # headers its own pages' scripts read.
@@ -123,9 +123,7 @@ def test_an_organiser_downloads_a_tasks_file_and_an_entrant_does_not(
     create(organiser, "sum", "Create task", "New task")
     task_page = organiser.url
     submission_rate(organiser, 10, 60)
-    save_task(organiser)
-    organiser.goto(f"{task_page}?card=tests")
-    replace_test(organiser, "main", "1", {"input": INPUT})
+    upload_run_file(organiser, 1, "input", INPUT)
     save_task(organiser)
 
     stored = _read(organiser, org, FILE)

@@ -16,14 +16,13 @@ fresh stack into one the backend can talk to.
 | `proxy` | `nginx:1.27-alpine` | `http://localhost:8080`, the app, and `http://forge.localhost:8080`, the forge's people pages |
 | `backend`, `frontend` | built from the siblings in development | behind the proxy |
 | `mailpit` | `axllent/mailpit:v1.31.3`, development only | `http://localhost:8025`, the mail Forgejo and the backend send |
-| `woodpecker-agent`, `socket-filter`, `grading-volumes` | development only, under `--profile agent` | nothing; the agent dials out to the server |
+| `woodpecker-agent` | development only, under `--profile agent` | nothing; the agent dials out to the server |
 
 No grading machine is part of the stack: a machine that runs contestant code
 is a separate host, enrolled at the CI with its own token. The server carries
 no shared agent secret, so a machine that presents no issued token is refused.
 `compose.dev.yaml` can run one on the laptop under `--profile agent`: a CI
-agent, the socket filter beside it and the shared store for large task files,
-with the agent's token minted by bootstrap. It is the only place an agent and
+agent, with its token minted by bootstrap. It is the only place an agent and
 the databases share a Docker daemon.
 
 ## Running it
@@ -49,8 +48,8 @@ from `.env`, re-applies the bucket grants, rewrites `.env`, and runs
 `docker compose up -d` for the `backend` container when it is running, because
 a running container never re-reads its environment. Compose recreates it
 exactly when its configuration, the values from `.env` included, changed, and
-bootstrap says so. On a development stack it does the same for the agent and
-the socket filter when they are running. The rewrite drops the keys bootstrap knows nothing reads, ones an
+bootstrap says so. On a development stack it does the same for the agent when
+it is running. The rewrite drops the keys bootstrap knows nothing reads, ones an
 earlier bootstrap wrote, and names them; a key it does not know, such as one
 added by hand, is kept at the end under a comment of its own.
 
@@ -158,9 +157,9 @@ or wrong, so places made before the upgrade get what the release now gives
 each new one. Among those is the protection on each contest's and task's
 branch that lets the platform's account alone push or merge to it, which
 contests and tasks made before that protection came in lack until it runs.
-It also activates every published task at the CI and gives every
-submission at the forge without a grading its grading, which on a stack
-that kept running finds nothing to do. It logs what it did as
+It also gives every submission at the forge without a grading its
+grading, against its task's current publication, which on a stack that
+kept running finds nothing to do. It logs what it did as
 `reconcile.done`, with how many places it secured again, and running it
 again does no harm. A stack bootstrapped fresh on the release needs none of
 this: every contest and task is secured as it is made.
@@ -184,14 +183,14 @@ docker compose -f compose.yaml -f compose.dev.yaml --profile agent up -d
 ```
 
 The first line builds every image a grading runs from the sibling checkouts
-(`runner`, `primitive-compile`, `primitive-sandbox-run` and
-`primitive-diff-check`, beside this repo), pushes them to a registry on
+(`runner`, `primitive-compile` and `primitive-exec`, beside this repo),
+pushes them to a registry on
 `localhost:5000` and writes `images.local.json`, which bootstrap then reads
 instead of `images.json`; see [The image manifest](#the-image-manifest). The
 last line starts the grading machine, whose agent bootstrap has already
 enrolled. Without the first line bootstrap reads `images.json`, and seeds
-the forge only when that pins every primitive version the built-in workflow
-uses.
+the forge only when that pins every primitive version the built-in
+workflows use.
 
 Each primitive checkout fills the version at the forge that is the major of
 its own version, `v2` for 2.0.0, and the versions it does not fill come from
@@ -241,8 +240,8 @@ the backend's repository. Two API paths are
 refused: `/api/v1/events/`, where the forge pushes an org's events, and
 `/api/v1/ci/`, the CI's configuration extension. Both are called inside the
 stack, at `http://backend:8000`, and nothing outside has a reason to call
-them. A grading machine's two calls, a grading's envelope and its callback
-under `/api/v1/gradings/`, go to the backend with the rest of `/api/`. The
+them. A grading machine's calls, each step's door under
+`/api/v1/gradings/`, go to the backend with the rest of `/api/`. The
 access log drops the query string of `/api/v1/auth/callback`, so the login
 `code` and `state` never reach disk, and the same on the forge's host for
 the sign-in's start, `/login/oauth/authorize`, and for the address
@@ -252,12 +251,16 @@ written only at Warn (`forgejo/app.ini`, `[log.router]`), and Garage's
 request log, which would hold presigned signatures, only for server errors
 (`RUST_LOG` in `compose.yaml`).
 
-One object storage path goes to Garage, for the one write that comes from
-outside: `/unicon-results/` takes PUT, a grading machine's run log. The
-request carries a presigned signature the backend made for
-`UNICON_MACHINE_URL`, so the proxy passes the Host header through as it came,
-and Garage, which reads the bucket from the path, checks the signature that
-was made. Nothing else of Garage is reachable, reads and listings included.
+Two object storage paths go to Garage, for what a grading machine moves
+straight to and from it: `/unicon-results/` takes PUT, a run's log and a
+step's outputs, and GET, an earlier step's output, and `/forgejo-lfs/lfs/`
+takes GET, a task's large file. Each request carries a presigned signature
+the backend made for `UNICON_MACHINE_URL`, so the proxy passes the Host
+header through as it came, and Garage, which reads the bucket from the path,
+checks the signature that was made. A GET is routed only with a presigned
+query and the backend signs a read of `forgejo-lfs` with a key that may only
+read it. Nothing else of Garage is reachable: no listing, no write to
+`forgejo-lfs`, no other bucket.
 
 What people upload does not come this way. `/-/uploads/<id>` takes PUT, one
 file, and before nginx reads a byte of the body it asks the backend whether
@@ -318,20 +321,18 @@ and one contest to try things on:
 - the org `demo`, alice its admin, and its contest `sample`, "Sample
   contest", running from an hour before the reset for 30 days, open to
   anyone who signs up and approved by an organiser;
-- its task `sum`, the starter on `unicon/classic@v2` with a statement of
-  A + B, three tests and a submission rate of 10 in any 60 seconds,
-  published, so a submission grades. The statement
-  is written before the contest opens, since a contest does not open while
-  a task's published statement is the starter's placeholder, and every
-  save comes before the contest opens, so none of them asks before it
-  publishes.
+- its task `sum`, on `unicon/classic@v3`: A + B in Python, its statement,
+  three tests and a submission rate of 10 in any 60 seconds, in one save
+  before the contest opens; the contest opens once that save is published,
+  so a submission grades.
 
 Bob has not registered. It takes about three minutes, and it refuses before
 throwing anything away when a key is missing. Sign in again from a new tab
 on the app: bootstrap registers the app at Forgejo afresh, so a page open from
 before the reset sends Forgejo a client id it no longer has ("Client ID not
-registered"). The contest and task are made
-from the pages, with the browser tests' own steps (`tests/e2e/stack.py`), so
+registered"). Alice and bob are signed in through Forgejo's pages and the
+org, the contest and the task made through the API as alice, with the
+browser tests' own steps (`tests/e2e/stack.py` and `tests/e2e/api.py`), so
 it needs `uv run playwright install chromium` once.
 
 ## What bootstrap made
@@ -358,18 +359,20 @@ over standard input so no password or token is ever a command-line argument,
 and to Garage through `garage json-api` inside its container, which speaks the
 same admin API over Garage's internal RPC. Neither needs a port open for it. Two Garage buckets: `forgejo-lfs` for
 Forgejo, which holds every file a person uploads, and `unicon-results` for
-the backend, which holds grading logs, with a separate access key for each
-side. It creates no other bucket and removes none. A Woodpecker API token
+the backend, which holds grading logs and steps' outputs, with a separate
+access key for each side, and a third, `unicon-backend-lfs-read`, that may
+only read `forgejo-lfs`, which the backend signs a grading machine's
+downloads of a task's large files with. It creates no other bucket and removes none. A Woodpecker API token
 for `unicon-ci`.
 
-Three primitives and one workflow at the forge, in the platform org
+The primitives and the built-in workflows at the forge, in the platform org
 `unicon`, which bootstrap makes, owned by `unicon-backend`. A task's first
 save has to find a workflow and its primitives the organiser can read, or
 nothing can be published.
 
 Each primitive the image manifest pins is mirrored from its own repository
 into the public repository `unicon/<name>.primitive` with the topic
-`unicon-primitive`: `compile`, `sandbox-run` and `diff-check`. A primitive's
+`unicon-primitive`: `compile` and `exec`. A primitive's
 version at the forge is its port set, the major of its release tag: the
 release `v1.1.1` is `v1`, and `v2.0.0`, which changes the ports, is `v2`. The
 manifest lists each version a deployment carries, and each is mirrored to its
@@ -395,8 +398,8 @@ every version with the forge before it seeds any, so a run that finds one
 differing seeds nothing and names each that differs; new ports are a new
 version in the manifest. A plan pins each step's image by digest, so a task
 already published keeps grading with the image it was published with until
-it is next saved, and the socket filter's list keeps every image a version
-has named, read from the repository's history. A change to the other files
+it is next saved, and the CI's privileged list keeps every image a version
+of `exec` has named, read from the repository's history. A change to the other files
 alone is no difference, since the program that runs is the one in the image
 and a rebuilt image is a new digest. A run that finds nothing changed makes
 nothing.
@@ -404,45 +407,46 @@ nothing.
 Each built-in workflow is a folder under `workflows/`, and each is the
 public repository `unicon/<name>.workflow` with the topic
 `unicon-workflow`. Each of a workflow's versions is a folder in its own,
-`workflows/classic/v2/` and `workflows/classic-folder/v1/`, holding the `workflow.yaml` and `README.md`
-the version's tag holds, and bootstrap publishes each to its own tag by the
-same rule: a tag that is not there is made, and one that is there and holds
-the same files is left as it is. One whose definition differs only in what
-does not grade, an input's `title`, `help` or `unit`, a reported value's
-`title` or `unit`, a comment or the layout, or whose README differs, is moved to the new files, and the run
-says `(moved)`; so a version is fixed in how it grades, while the words a
-person reads at its tag can change. One whose definition differs in
-anything that grades stops the run the same way. The definitions are
-compared as the forge reads them: an input or test field written as a bare
-type, `time_limit: number`, is `{type: number}`, a reported value written
-as a bare reference is one given `from` alone, and a flag set `false` is
-one left out.
-`unicon/classic` is the built-in workflow: compile the submission, run it on
-every test, compare each output with the answer. `unicon/classic@v2`
-wires the primitives' `v2` in the format of `TASK-FORMAT.md`, with each
-test's `input` and `answer`, and reports the time and memory of every run,
-which pages name "Run time", in ms, and "Memory used", in KB, and the
-compiler's "Compile log"; `unicon/classic-folder@v1` reports the same.
-`unicon/classic-folder@v1` is classic over a folder of sources: the
-contestant gives a folder, its language and the entry point `compile@v2`
-starts from (`TASK-FORMAT.md` section 4.7). A definition changed in how it grades is a new folder. Every primitive version a
+`workflows/classic/v3/` and `workflows/interactive/v1/`, holding
+every file the version's tag holds: its `workflow.yaml` and `README.md`,
+and the files its steps read from the workflow itself, such as
+`classic@v3`'s diff script under `diff/` and `interactive@v1`'s verdict
+script under `verdict/`. Python's caches are left out, and a link is
+refused. Bootstrap publishes each to its own tag by the same rule: a tag
+that is not there is made, and one that is there and holds the same files
+is left as it is. One whose definition differs only in what does not
+grade, an input's `title`, `help` or `unit`, an output's `title` or
+`unit`, a comment or the layout, or whose README differs, with every other
+file the same, is moved to the new files, and the run says `(moved)`; so a
+version is fixed in how it grades, while the words a person reads at its
+tag can change. One whose definition differs in anything that grades, or
+any of whose other files differs, stops the run the same way. The
+definitions are compared as the forge reads them: an input written as a
+bare type, `time_limit: number`, is `{type: number}`, an output written as
+a bare reference is one given `from` alone, and a flag set `false` is one
+left out.
+`unicon/classic@v3` is one run of the entrant's program, in the format of
+`SIMPLER-CORE.md` 7: compiled with `compile@v3`, run with `exec@v1` and
+compared word by word by its diff script; a task repeats it over its tests.
+It gives the run's time and memory, which pages name "Run time", in ms, and
+"Memory used", in KB, and the compiler's "Compile log". `unicon/interactive@v1` runs the
+entrant's program against the task's judge with `exec@v1`'s programs form, and its
+verdict script decides the run. A definition changed in how it grades is a
+new folder. Every primitive version a
 definition `use:`s has to be one the manifest pins: bootstrap refuses one
 that is not before it writes anything, since the forge would refuse every
 task saved against that workflow version.
 
 The one exception to both is a development stack. `uv run bootstrap
---rewrite` rewrites every listed version of the workflow and of each
+--rewrite` rewrites every listed version of each workflow and of each
 primitive in place to what is here now, with a new commit and the tag moved
 to it, rather than stopping at the version at the forge that differs, so a
 declaration changed on the laptop is what the next save compiles against.
 It refuses to run without `compose.dev.yaml` among the compose files.
 
-`unicon/classic@v2` and `unicon/classic-folder@v1` were edited in place
-when a board's value key took over choosing how a value combines across
-tests: their `time_ms` and `memory_kb` no longer say `fold: max`. A
-development stack bootstrapped before that holds the old tags and stops
-at them, so run `uv run bootstrap --rewrite` once, or start the stack
-fresh.
+`unicon/classic@v2` and `unicon/classic-folder@v1` are not seeded. A
+development stack that still has their tags, including one rewritten when
+their `fold: max` lines went, should be started fresh.
 
 On a development stack, one CI agent: `laptop`, enrolled as a global agent
 through Woodpecker's administrator API, its token written to
@@ -455,11 +459,15 @@ left and named in the output. A production stack gets no agent from
 bootstrap, and bootstrap deletes none there: a grading machine enrols itself.
 
 All of it lands in `.env`, which is git-ignored, together with the images a
-grading runs, from the image manifest: `UNICON_HARNESS_IMAGE` and
-`UNICON_CLONE_IMAGE`, which the backend puts into what it hands the CI, and
-`UNICON_FILTER_IMAGE` and `UNICON_FILTER_IMAGES`, the socket filter the dev
-overlay runs and the images it lets containers be made from, which is every
-image any version of a primitive at the forge names. `.env.example` lists every key
+grading runs beside the primitives, from the image manifest:
+`UNICON_PLUGIN_GIT_IMAGE`, Woodpecker's git plugin, which checks the
+submission out and is the one image the CI lends a repository's credential
+to, and `UNICON_PRIMITIVE_BASE_IMAGE`, the step wrapper's base image, which
+runs a pipeline's last step; the backend puts both into what it hands the
+CI. `UNICON_WITHDRAWN_IMAGES` is set by hand: images by digest no grading
+may run any more, matched by the digest whatever name they are given under,
+which bootstrap keeps out of the images the CI lets run privileged, saying
+which entry no primitive at the forge runs, and which the forge refuses. `.env.example` lists every key
 with a comment and is the template bootstrap fills, so a key added there appears
 in the next generated `.env`. The rest of what the backend reads,
 `compose.yaml` writes itself: the database URL, from `UNICON_DB_PASSWORD`; the
@@ -487,10 +495,8 @@ digest, and the release of each primitive's repository that bootstrap mirrors.
 ```json
 {
   "images": {
-    "harness": "ghcr.io/uniconhq/harness@sha256:<64 hex>",
-    "clone": "ghcr.io/uniconhq/clone@sha256:<64 hex>",
-    "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:<64 hex>",
-    "worker": "ghcr.io/uniconhq/worker@sha256:<64 hex>"
+    "worker": "ghcr.io/uniconhq/worker@sha256:<64 hex>",
+    "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:<64 hex>"
   },
   "primitives": {
     "compile": {
@@ -498,17 +504,25 @@ digest, and the release of each primitive's repository that bootstrap mirrors.
         "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
         "source": {"github": "uniconhq/primitive-compile", "tag": "v1.1.1"}
       },
-      "v2": {
+      "v3": {
         "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
-        "source": {"github": "uniconhq/primitive-compile", "tag": "v2.0.0"}
+        "source": {"github": "uniconhq/primitive-compile", "tag": "v3.0.0"}
+      }
+    },
+    "exec": {
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-exec@sha256:<64 hex>",
+        "source": {"github": "uniconhq/primitive-exec", "tag": "v1.0.1"}
       }
     }
   }
 }
 ```
 
-`images` holds the runner's images; `harness`, `clone` and `socket-filter` are
-required, since bootstrap writes them into `.env`. `primitives` holds each
+`images` holds the runner's worker and Woodpecker's git plugin, and on a
+local build the runner's `primitive-base`; `plugin-git` is required, since
+bootstrap writes it into `.env` as the one image the CI lends a
+repository's credential to. `primitives` holds each
 primitive by its name at the forge, and under it each version by its tag at
 the forge, `v1`, `v2` and on: the image that version's steps run, and where
 its repository is at that release. A version is the major of its release
@@ -524,80 +538,128 @@ that holds that version, a new image under the same declaration moves the
 version to it, and any other change to the declaration stops bootstrap,
 since a version's ports never change.
 
-Today it pins runner `v0.9.0`, the primitives' `v1`, `sandbox-run` at
-`v1.3.0` and `compile` and `diff-check` at `v1.1.1`, and their `v2`, all
-three at `v2.2.0`.
+Today it pins runner `v0.10.0`, `compile`'s `v1` at `v1.1.1` and its `v3`
+at `v3.0.0`, and `exec`'s `v1` at `v1.0.1`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
-four from `../runner`, each primitive from `../primitive-<name>`, as they are
-on disk, committed or not. It runs `registry:2.8.3` on `127.0.0.1:5000` in a
+five from `../runner`, `primitive-base` first, each primitive from
+`../primitive-<name>`, as they are on disk, committed or not, each built on
+that `primitive-base` by Docker's own builder. It runs `registry:2.8.3` on `127.0.0.1:5000` in a
 container of its own, `unicon-registry`, outside the compose stack and with
 its images in the volume `unicon-registry`, pushes each image there to learn
 its digest, and writes `images.local.json` in the same shape. Each
 primitive's checkout fills the version that is the major of the version in
 its `pyproject.toml`, with its source the checkout,
 `{"path": "../primitive-compile"}`; every other version of the primitive is
-copied from `images.json` as released, so a stack built this way grades
-`v1` with the released image from ghcr.io and `v2` with the checkout's. On a
-development stack bootstrap pulls every one of those images, since the socket
-filter lets a step start only from an image already on the machine. That file
-is git-ignored. Bootstrap reads it whenever it is there and `images.json`
-otherwise; `--images <file>` names one. Docker pulls from a registry on
-localhost over plain HTTP without being told to, by digest, the same way it
-pulls from ghcr.io, so the agent and the socket filter need nothing different.
+copied from `images.json` as released, so a stack built this way seeds
+`compile`'s `v1` with the released image from ghcr.io and its `v3` with
+the checkout's. That file is git-ignored. Bootstrap reads it whenever it
+is there and `images.json` otherwise; `--images <file>` names one. Docker
+pulls from a registry on localhost over plain HTTP without being told to,
+by digest, the same way it pulls from ghcr.io, so the agent needs nothing
+different.
 The build attaches no provenance attestation, which would carry the build's
 time and make every build a new digest: an image that did not change keeps
 its digest, and bootstrap then leaves its primitive as it is.
 
+## A grading machine
+
+`machine/grading-machine.py` makes an Ubuntu 24.04 host a grading machine
+and checks it, run as root with the machine's settings in a JSON file; its
+docstring and `Settings` say what each setting is:
+
+```sh
+python3 grading-machine.py setup /etc/unicon/machine.json
+python3 grading-machine.py self-test /etc/unicon/machine.json
+```
+
+It builds the one shape stage 4 picked: rootless Docker under a throwaway
+user, `unicon-grader`, with its data root on a filesystem of its own, and
+an nftables table on that user's uid that lets its traffic reach only the
+addresses the settings allow, IPv4 and IPv6 alike. The daemon tells
+containers to ask `192.0.2.1` for names, which answers nothing; every step
+gets `/etc/unicon/hosts` as its `/etc/hosts` and `/etc/unicon/cache-cap`,
+and the names the daemon and the agent use are pinned in the machine's own.
+The root Docker is disabled, and the cgroup hierarchy counts each cgroup's
+memory kills alone, so a box killed for its memory does not fail its step.
+The machine is cut into slots, each of one size of `machine/slots.json`,
+the one table of slot sizes, which bootstrap also writes into `.env` as
+`UNICON_SLOT_SIZES` for the forge to plan each run task pipeline into
+(keep the table beside the script on the machine). A `small` slot is one
+core and 2 GB, which holds a compile, an `exec` step of a 1 GB run or
+of two 512 MB programs; a `big` slot is two cores and
+8 GB. Setup keeps a core and 1.5 GB for the system, the agents and the
+daemon, so the smallest machine it takes has 2 cores and 3584 MB of
+memory as the kernel reports it (`MemTotal`), as a 4 GB machine does,
+and runs one small slot; setup refuses a smaller one and says so. It
+gives a big slot only while at least two small ones still fit beside it,
+then as many small ones as fit: a 4-core 8 GB machine runs three small
+slots, an 8-core 16 GB one a big and three small, a 16-core 64 GB one a
+big and thirteen small. `slots` in the settings gives the counts instead.
+Every slot takes any grading, first come, first served; settings that
+still name `early_share` are refused as unknown. Each slot has an
+agent of its own, `unicon-agent@<slot>.service`, which takes one workflow at a
+time, pins every container of it to the slot's cores and caps it at the
+slot's memory with no swap, and has the labels
+`pool=platform,shape=rootless,size=<size>`; a big slot has `size=*`, so
+small work overflows into it, though Woodpecker gives a pipeline to the
+agent its labels match most exactly first. The throwaway user's
+slice, which holds every container, is capped at the machine's memory
+less 1 GB.
+The slots are fixed until setup runs again. Every agent runs as a user of
+its own, `unicon-agent`, from a binary checked against
+`agent_binary_sha256`, and starts only while the wall is loaded. `setup`
+checks every setting and works the slots out before it changes anything,
+disables every agent first, kills the throwaway user's containers and
+stops its daemon before it takes the wall down, and enables the agents
+only when every check of the self-test passes, each slot's limits among
+them; a check that could not be tried says "not tested". It prints `network wall: on`
+or `off`. Run again, it takes new settings and new pinned addresses. A
+restart or reload of `nftables.service`, whose rules file flushes every
+table, loads the wall again after it.
+
+`agent_binary_sha256` pins the agent binary inside `agent_image` for each
+architecture, by `uname -m`'s name. To find the digests, copy the binary
+out of the pinned image for each platform and hash it, on any machine
+with Docker:
+
+```sh
+image='woodpeckerci/woodpecker-agent:v3.18.1@sha256:...'  # agent_image
+for platform in linux/amd64 linux/arm64; do  # x86_64, then aarch64
+  id=$(docker create --platform "$platform" "$image")
+  docker cp "$id:/bin/woodpecker-agent" - | tar -xO | sha256sum
+  docker rm "$id" > /dev/null
+done
+```
+
+It has run on a real Ubuntu 24.04 (arm64, in a VM), where the self-test
+passed, and on a stand-in, an Ubuntu 24.04 container booting systemd over
+Docker Desktop's kernel, where the kernel settings, the block devices and
+the cgroup option fail, as they should on that kernel.
+
 ## The grading machine in development
 
-`--profile agent` starts what a grading machine is, all from
-`compose.dev.yaml`:
+`--profile agent` starts what a grading machine is, from
+`compose.dev.yaml`: `woodpecker-agent`, with the token bootstrap minted and
+the label `pool=platform`, which every grading run asks for, and any slot
+size, `size=*`, which a run task's pipeline asks for. It also says
+`shape=rootless`, which a pipeline that runs `exec` asks for, though Docker
+Desktop runs Docker as root: the CI server hands every step
+`UNICON_DEV_ROOT_DOCKER=1` (`WOODPECKER_ENVIRONMENT`), and exec then runs
+under root Docker, warning on every step, where it otherwise refuses. Only
+this overlay sets it; a real grading machine is rootless. Its step containers
+join the network `unicon-grading` (`WOODPECKER_BACKEND_DOCKER_NETWORK`), on
+which the proxy is the only service of the stack, so the checkout reaches
+Forgejo through the proxy's git listener and the other steps reach the
+platform at `http://proxy`, which is why the dev overlay sets
+`UNICON_MACHINE_URL` to that. The database, the object store's admin API,
+the CI's API and the backend's own port are not on that network. The agent
+holds the real Docker socket, and no step is given it.
 
-- `woodpecker-agent`, with the token bootstrap minted and the label
-  `pool=platform`, which every grading run asks for. Its step containers join
-  the network `unicon-grading` (`WOODPECKER_BACKEND_DOCKER_NETWORK`), on
-  which the proxy is the only service of the stack, so the clone steps reach
-  Forgejo through the proxy's git listener and the harness reaches the
-  platform at `http://proxy`, which is why the dev overlay sets
-  `UNICON_MACHINE_URL` to that. The database, the object store's admin API,
-  the CI's API and the backend's own port are not on that network. The agent
-  holds the real Docker socket.
-- `socket-filter`, the image the manifest names, which holds the real socket
-  too and serves its own at `/run/unicon/docker.sock` in the volume
-  `unicon-filter`. The harness step mounts that volume read-only and never
-  sees the real socket, and cannot replace the filter's; the filter exits,
-  and is restarted, should its socket ever be replaced. The filter runs as its
-  image's own user, uid 10002, so it joins the group that owns the socket,
-  `DOCKER_SOCKET_GID`, which bootstrap reads from the socket:
-  0 on Docker Desktop, the docker group on Linux. It runs with `pid: host`,
-  because it tells one run's harness from another's by the process that
-  connects, and it takes containers only from the images in
-  `UNICON_FILTER_IMAGES`, compared exactly with the `image` lines of the
-  primitives at the forge; with no primitive seeded that list is empty and
-  the filter refuses to start. It never pulls an image, so every one of those
-  images has to be on the machine before a run needs it: on a development
-  stack bootstrap pulls each one this Docker does not hold yet, and on a
-  platform machine the worker does it when the machine is enrolled. It is
-  healthy once a ping through its own socket reaches the daemon, and the
-  agent starts only then.
-- `grading-volumes`, which hands `unicon-filter` to uid 10002, the filter's
-  account, and exits.
-
-The store for large task files is one volume per org, `unicon-lfs-<org>`,
-which the clone steps mount at `/lfs-cache`, so each large file is fetched
-once per org on the machine and no org's task is served another org's. The
-pipeline names them and Docker makes each on first use; the clone image runs
-as root, so nothing here prepares them. `unicon-filter` has a fixed name
-rather than the compose project's prefixed one, because the pipeline the
-backend hands the CI names it. Task
-repositories are trusted with volumes and nothing else, which the forge sets
-when it activates one.
-
-The run's two checkouts clone the task and the submission repository from
-the URL Forgejo gives them, on `forge.localhost`, and the CI lends its
-credential for that host name alone. Inside a step container the name
+A grading's checkout clones the submission from the URL Forgejo gives it,
+on `forge.localhost`, and the CI lends its credential for that host name
+alone. Inside a step container the name
 reaches nothing: curl, which git and git-lfs speak HTTP through, sends every
 name under `.localhost` to loopback without asking DNS, and the step's
 loopback is the step itself, so a network alias for the name does not help.
@@ -611,7 +673,7 @@ the LFS downloads, to Forgejo and answers 404 to everything else, pushes and
 LFS uploads included, and so does a request for any other host; it is
 reachable only from the compose networks and does not exist in the
 production shape. `WOODPECKER_BACKEND_NO_PROXY` leaves out
-`proxy` and `host.docker.internal`, so the harness reaches the platform
+`proxy` and `host.docker.internal`, so a step reaches the platform
 directly, at the proxy, or on the Docker host where the forge's live tests
 run it. A grading machine
 outside a deployment will read the same repositories through the machine
@@ -685,40 +747,28 @@ than on the Forgejo container disk. If a size fails it halves and tries again,
 so the output names a ceiling that works. `--exact` fails on the size asked
 for, which is how CI runs it.
 
-## Submit and grade from the browser
+## Browser tests
 
 ```sh
 uv run playwright install chromium     # once
 UNICON_E2E_URL=http://localhost:8080 uv run pytest tests/e2e
 ```
 
-`tests/e2e/test_submit_and_grade.py` drives Chromium through the running
-stack, both profiles up, from a new org to two verdicts. It makes an
-organiser and an entrant with `unicon create-account` and signs both in
-through Forgejo's pages. The organiser creates an org, a contest and a task
-from the organiser pages' New buttons, opening each one's page as soon as it
-is made, saves the task from its page so it publishes (with a looser
-submission rate than the starter's one per 30 seconds, so the second submit
-is not refused), writes its statement on its Statement card, since a
-contest does not open while a task's statement is the starter's
-placeholder, sets the contest running now in its settings and opens it
-from its status card. The entrant registers, the organiser approves them
-from the Entrants page, and the entrant submits the sample solution and then
-a wrong one from the submit panel; the test expects `ACCEPTED` and then
-`WRONG ANSWER` in their submissions list. Both are graded by the real CI on
-the dev agent, through the socket filter, with the primitives at the forge.
-The organiser then replaces the task's test from its Tests card, publishes
-the change the running contest asks about, and the gradings feed shows the
-sample solution graded again. Last, the entrant signs out, and signing in
-again asks Forgejo for their password: signing out of the app signed the
-browser out of Forgejo too. Beside it, `test_boards.py` ranks a contest on
-three leaderboards built on its Leaderboards page, before and after a test
-group's reveal, `test_workflows.py` builds a workflow in the editor,
-publishes and shares a version of it and grades with it, and
-`test_downloads.py` downloads one of a task's files through the proxy's
-download door, an uploaded one and a typed one, as the organiser, checking
-the bytes and the door's headers, and finds that an entrant and someone
-signed out get no such file.
+`tests/e2e` drives Chromium through the running stack, both profiles up,
+and the API with a signed-in browser's session. Each test makes its people
+with `unicon create-account` and signs them in through Forgejo's pages.
+`test_leaderboards.py` ranks a contest on three leaderboards built on its
+Leaderboards page, before and after a test group's reveal, its entrants'
+solutions graded by the real CI on the dev agent with the primitives at
+the forge. `test_downloads.py` downloads one of a task's files through the
+proxy's download door, an uploaded one and a typed one, as the organiser,
+checking the bytes and the door's headers, and finds that an entrant and
+someone signed out get no such file. `test_forge_pages.py` follows "Back
+to Unicon" from Forgejo's consent page to the app's home.
+`test_memory.py` and `test_escape.py` grade a task on `unicon/classic@v3`,
+and the runner's escape fixtures, through the API; they need a grading
+machine with `exec`'s shape, so they are skipped unless `UNICON_E2E_ESCAPE`
+is set.
 Every name carries a random suffix, so it runs again on the same stack
 without clearing anything; it takes about a minute. Without `UNICON_E2E_URL`
 it is skipped, so `uv run pytest` stays a unit run. `UNICON_E2E_COMPOSE` is
@@ -733,16 +783,14 @@ together before any of it merges; run by hand, it takes the branch its
 `siblings` input names. On `main` it passes only once each of these is on
 its `main`:
 
-- `forge`: the submit, grading, extension, envelope and callback services
-  (feature 6), which the backend image builds against through the `forge`
+- `forge`: the submit, grading, extension and step services, which the backend image builds against through the `forge`
   context while it develops by path, or through the release it pins;
 - `backend`: the upload, submission, grading and machine routes, and the
   `Dockerfile` with the `forge` stage;
 - `frontend`: the submit panel and the submissions list;
-- `runner`: the harness, the clone image and the socket filter at contract
-  version 5;
-- `primitive-compile`, `primitive-sandbox-run` and `primitive-diff-check`:
-  at 2.0.0, their `v2` at the forge, each with a `Dockerfile` at the root.
+- `runner`: `primitive-base` and the worker;
+- `primitive-compile` and `primitive-exec`: each with a `Dockerfile` at
+  the root, built on `primitive-base`.
 
 ## Checks
 
@@ -761,8 +809,8 @@ docker compose --env-file .env.check -f compose.yaml -f compose.dev.yaml config 
 ```
 
 CI runs exactly these, and then boots the whole stack: it checks out
-`forge`, `backend`, `frontend`, `runner` and the three primitive repositories beside
-this repo, builds the grading images with `scripts/build-images.py`, runs
+`forge`, `backend`, `frontend`, `runner`, `primitive-compile` and
+`primitive-exec` beside this repo, builds the grading images with `scripts/build-images.py`, runs
 bootstrap against `compose.yaml` and `compose.dev.yaml`, starts the `app`
 profile, and checks that `/readyz` answers ready and the frontend serves its
 page through the proxy on one origin. It then tries the proxy from outside:
@@ -775,9 +823,10 @@ listener passes a checkout's reads of the forge's host and answers 404 to a
 push, the forge's API, a path that only becomes a checkout path once
 resolved, and every other host. It checks that sign-up is open on both
 sides, Forgejo's form and the backend's Create account link. It then runs bootstrap a second time and fails if `.env`
-changed or the run made anything, and checks that the three primitives and the
-workflow are at the forge at `v1` and at `v2`, each as this run would write it. Between the two it starts the `agent`
-profile, waits for the dev agent to connect, runs the browser test above,
+changed or the run made anything, and checks that `compile` at `v1` and
+`v3`, `exec` at `v1`, `classic` at `v3` and `interactive` at `v1` are at
+the forge, each as this run would write it. Between the two it starts the `agent`
+profile, waits for the dev agent to connect, runs the browser tests above,
 and runs `scripts/check-lfs.py --exact` for one 500 MB file. Last, it sends a burst of sign-in posts and expects some through and
 some refused with 429, then sets `SIGN_UP_OPEN=false`, runs bootstrap again
 and checks that both sides have closed.

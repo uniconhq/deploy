@@ -17,10 +17,7 @@ from bootstrap.images import Manifest
 DIGEST = "@sha256:" + "0" * 64
 MANIFEST = Manifest(
     path=Path("images.json"),
-    images={
-        name: f"ghcr.io/uniconhq/{name}{DIGEST}"
-        for name in ("harness", "clone", "socket-filter")
-    },
+    images={"plugin-git": f"docker.io/woodpeckerci/plugin-git{DIGEST}"},
     primitives=(),
 )
 BASE = {

@@ -41,8 +41,8 @@ tag to a commit of the release's files with the new image written in. A
 release that changes only a title, a description, what its outcomes mean or
 a comment moves the tag the same way. A task already published keeps
 grading with the digest its plan pinned until it is next saved, so the
-socket filter's list holds every image a version has named, read back from
-the repository's history. A change to the other files alone is no
+CI's privileged list holds every image a version of `exec` has named, read
+back from the repository's history. A change to the other files alone is no
 difference, because it changes nothing that grades: the program that runs is
 the one in the image. A rerun with nothing changed makes nothing. On a
 development stack, --rewrite rewrites each listed version in place whatever
@@ -60,7 +60,7 @@ from pathlib import PurePosixPath
 import httpx
 
 from bootstrap import core_yaml
-from bootstrap.images import GitHubSource, LocalSource, PrimitiveRelease
+from bootstrap.images import GitHubSource, LocalSource, PrimitiveRelease, is_by_digest
 from bootstrap.platform_repos import (
     PLATFORM_ORG,
     Outcome,
@@ -268,21 +268,44 @@ gives back, and on the outcome port what each outcome means."""
 def _without_editor_text(document: dict[str, object]) -> object:
     """The declaration without its own `title` and `description` and without
     each port's `description` and `outcomes`: a port named `description` is
-    a port and stays.
+    a port and stays. A form drops its `description` the same way, and its
+    ports drop theirs.
     """
     found: dict[str, object] = {}
     for key, value in document.items():
         if key in EDITOR_TEXT:
             continue
         if key in PORTS and isinstance(value, dict):
+            value = _ports_without_editor_text(value)
+        elif key == "forms" and isinstance(value, dict):
             value = {
-                name: (
-                    {part: held for part, held in port.items() if part not in PORT_TEXT}
-                    if isinstance(port, dict)
-                    else port
-                )
-                for name, port in value.items()
+                name: _form_without_editor_text(form)
+                if isinstance(form, dict)
+                else form
+                for name, form in value.items()
             }
+        found[key] = value
+    return found
+
+
+def _ports_without_editor_text(ports: dict[str, object]) -> dict[str, object]:
+    return {
+        name: (
+            {part: held for part, held in port.items() if part not in PORT_TEXT}
+            if isinstance(port, dict)
+            else port
+        )
+        for name, port in ports.items()
+    }
+
+
+def _form_without_editor_text(form: dict[str, object]) -> dict[str, object]:
+    found: dict[str, object] = {}
+    for key, value in form.items():
+        if key == "description":
+            continue
+        if key in PORTS and isinstance(value, dict):
+            value = _ports_without_editor_text(value)
         found[key] = value
     return found
 
@@ -328,11 +351,10 @@ def mirror(
 
 def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
     """Every image any version of these primitives names or has named at
-    the forge, sorted and without repeats: the list a socket filter lets
-    containers be made from, since a task published against an older version,
-    or before its version moved to a new image, still runs the image its
-    plan pinned. Read from every commit that changed a declaration, and
-    from each version's own commit in case one is off the default branch.
+    the forge, sorted and without repeats, since a task published against an
+    older version, or before its version moved to a new image, still runs the
+    image its plan pinned. Read from every commit that changed a declaration,
+    and from each version's own commit in case one is off the default branch.
     """
     found: set[str] = set()
     for name in names:
@@ -345,6 +367,14 @@ def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
             if image:
                 found.add(image)
     return sorted(found)
+
+
+def privileged_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
+    """The images of `images_at_forge` named by digest, the list the CI
+    lets run privileged: a tag one of these declarations ever named could
+    since have been moved onto any image.
+    """
+    return [image for image in images_at_forge(repos, names) if is_by_digest(image)]
 
 
 def _key(line: str) -> str | None:

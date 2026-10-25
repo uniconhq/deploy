@@ -1,0 +1,4 @@
+# What the verdict script reports, read by exec as its manifest: no report
+# of its own. Its verdict is the step's outcome, and the judge's reports are
+# shown with the run as extras.
+reports: {}

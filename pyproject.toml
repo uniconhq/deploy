@@ -30,6 +30,9 @@ packages = ["bootstrap"]
 [tool.ruff]
 line-length = 88
 target-version = "py314"
+# The machine script runs on the grading machine's own Python, Ubuntu
+# 24.04's 3.12.
+per-file-target-version = { "machine/*.py" = "py312" }
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
@@ -37,7 +40,7 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.14"
 strict = true
-files = ["bootstrap", "scripts", "tests"]
+files = ["bootstrap", "scripts", "tests", "machine"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
