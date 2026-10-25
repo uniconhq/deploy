@@ -63,15 +63,14 @@ def until_shown(
 
 
 def cell(page: Page, table: str, who: str, index: int) -> Callable[[], Locator]:
-    """The `index`th data cell of `who`'s row on `table`, after the rank."""
+    """The `index`th data cell of `who`'s row on `table`, after the place and
+    the entrant."""
     row = (
         page.get_by_role("table", name=table, exact=True)
         .get_by_role("row")
-        .filter(
-            has=page.get_by_role("rowheader", name=re.compile(re.escape(who), re.I))
-        )
+        .filter(has=page.get_by_role("cell", name=re.compile(re.escape(who), re.I)))
     )
-    return lambda: row.get_by_role("cell").nth(index + 1)
+    return lambda: row.get_by_role("cell").nth(index + 2)
 
 
 def formula(page: Page, box: Locator, text: str) -> None:
@@ -196,7 +195,7 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     public = f"{APP}/contests/{org}/spring/leaderboards"
     entrant.goto(public)
     until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "\u2013")
-    organiser.goto(f"{APP}/orgs/{org}/contests/spring/leaderboards")
+    organiser.goto(public)
     until_shown(organiser, cell(organiser, "IOI", entrant_name, 0), "100")
 
     last = datetime.now(UTC)
