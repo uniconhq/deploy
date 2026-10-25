@@ -76,10 +76,15 @@ def cell(page: Page, table: str, who: str, index: int) -> Callable[[], Locator]:
 
 
 def formula(page: Page, box: Locator, text: str) -> None:
+    """Replace the formula with `text`. A new column already says `1`.
+    ControlOrMeta selects that on the runner and on a Mac, where Meta
+    alone does not, so the typed line replaces it instead of sticking
+    on the end. Escape then closes the completion menu.
+    """
     box.click()
-    page.keyboard.press("Meta+A")
+    page.keyboard.press("ControlOrMeta+A")
     page.keyboard.insert_text(text)
-    page.keyboard.press("Tab")
+    page.keyboard.press("Escape")
 
 
 def add_value(page: Page, scoring: Locator, text: str, name: str, when: str) -> None:
