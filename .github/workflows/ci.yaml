@@ -64,7 +64,7 @@ jobs:
       # compose.dev.yaml builds backend and frontend from the sibling
       # checkouts, with the forge checkout handed to the backend's build as
       # the context `forge`, and scripts/build-images.py builds the grading
-      # images from the runner and the three primitives, so the repos sit
+      # images from the runner and the five primitives, so the repos sit
       # beside each other the way they do on a laptop. Each sibling is checked
       # out at the branch a hand run names; on a pull request, at the
       # sibling's branch of the same name when it has one, so a change made
@@ -76,7 +76,7 @@ jobs:
           NAMED: ${{ inputs.siblings }}
           BRANCH: ${{ github.head_ref }}
         run: |
-          for repo in forge backend frontend runner primitive-compile primitive-sandbox-run primitive-diff-check; do
+          for repo in forge backend frontend runner primitive-compile primitive-sandbox-run primitive-diff-check primitive-exec primitive-interact; do
             ref=main
             if [ -n "$NAMED" ]; then
               ref=$NAMED
@@ -131,6 +131,18 @@ jobs:
           repository: uniconhq/primitive-diff-check
           ref: ${{ steps.refs.outputs['primitive-diff-check'] }}
           path: primitive-diff-check
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: uniconhq/primitive-exec
+          ref: ${{ steps.refs.outputs['primitive-exec'] }}
+          path: primitive-exec
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          repository: uniconhq/primitive-interact
+          ref: ${{ steps.refs.outputs['primitive-interact'] }}
+          path: primitive-interact
           persist-credentials: false
 
       - uses: astral-sh/setup-uv@bec219d24cd3e171d82865faccec33120bb574f4  # v10.1.0
@@ -296,6 +308,15 @@ jobs:
           expect 404 POST "$app/api/v1/ci/config"
           expect 403 PUT "$app/unicon-results/logs/x"
           expect 404 POST "$app/unicon-results/logs/x"
+          # A read of either bucket is routed only with a presigned query,
+          # which Garage then checks, and forgejo-lfs takes no write.
+          expect 404 GET "$app/unicon-results/logs/x"
+          expect 403 GET "$app/unicon-results/logs/x?X-Amz-Signature=0"
+          expect 404 GET "$app/unicon-results/?X-Amz-Signature=0"
+          expect 404 GET "$app/forgejo-lfs/lfs/00/00/0"
+          expect 403 GET "$app/forgejo-lfs/lfs/00/00/0?X-Amz-Signature=0"
+          expect 404 PUT "$app/forgejo-lfs/lfs/00/00/0?X-Amz-Signature=0"
+          expect 404 GET "$app/forgejo-lfs/?X-Amz-Signature=0"
           # The upload door: the one shape it takes needs a session it has
           # not got, so it refuses; everything else is not routed at all. The
           # question the proxy asks the backend is never routed from outside,

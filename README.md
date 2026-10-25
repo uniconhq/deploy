@@ -252,12 +252,16 @@ written only at Warn (`forgejo/app.ini`, `[log.router]`), and Garage's
 request log, which would hold presigned signatures, only for server errors
 (`RUST_LOG` in `compose.yaml`).
 
-One object storage path goes to Garage, for the one write that comes from
-outside: `/unicon-results/` takes PUT, a grading machine's run log. The
-request carries a presigned signature the backend made for
-`UNICON_MACHINE_URL`, so the proxy passes the Host header through as it came,
-and Garage, which reads the bucket from the path, checks the signature that
-was made. Nothing else of Garage is reachable, reads and listings included.
+Two object storage paths go to Garage, for what a grading machine moves
+straight to and from it: `/unicon-results/` takes PUT, a run's log and a
+step's outputs, and GET, an earlier step's output, and `/forgejo-lfs/lfs/`
+takes GET, a task's large file. Each request carries a presigned signature
+the backend made for `UNICON_MACHINE_URL`, so the proxy passes the Host
+header through as it came, and Garage, which reads the bucket from the path,
+checks the signature that was made. A GET is routed only with a presigned
+query and the backend signs a read of `forgejo-lfs` with a key that may only
+read it. Nothing else of Garage is reachable: no listing, no write to
+`forgejo-lfs`, no other bucket.
 
 What people upload does not come this way. `/-/uploads/<id>` takes PUT, one
 file, and before nginx reads a byte of the body it asks the backend whether
@@ -358,8 +362,10 @@ over standard input so no password or token is ever a command-line argument,
 and to Garage through `garage json-api` inside its container, which speaks the
 same admin API over Garage's internal RPC. Neither needs a port open for it. Two Garage buckets: `forgejo-lfs` for
 Forgejo, which holds every file a person uploads, and `unicon-results` for
-the backend, which holds grading logs, with a separate access key for each
-side. It creates no other bucket and removes none. A Woodpecker API token
+the backend, which holds grading logs and steps' outputs, with a separate
+access key for each side, and a third, `unicon-backend-lfs-read`, that may
+only read `forgejo-lfs`, which the backend signs a grading machine's
+downloads of a task's large files with. It creates no other bucket and removes none. A Woodpecker API token
 for `unicon-ci`.
 
 Three primitives and one workflow at the forge, in the platform org
@@ -523,8 +529,10 @@ three at `v2.2.0`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
-four from `../runner`, each primitive from `../primitive-<name>`, as they are
-on disk, committed or not. It runs `registry:2.8.3` on `127.0.0.1:5000` in a
+five from `../runner`, `primitive-base` first, each primitive from
+`../primitive-<name>`, as they are on disk, committed or not, with `exec`,
+`interact` and `compile` built on that `primitive-base` by Docker's own
+builder. It runs `registry:2.8.3` on `127.0.0.1:5000` in a
 container of its own, `unicon-registry`, outside the compose stack and with
 its images in the volume `unicon-registry`, pushes each image there to learn
 its digest, and writes `images.local.json` in the same shape. Each

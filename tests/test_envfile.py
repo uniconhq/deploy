@@ -157,14 +157,16 @@ def test_no_retired_key_is_in_the_template_or_the_compose_files() -> None:
 
 
 def test_compose_names_what_bootstrap_makes() -> None:
-    """compose.yaml writes the bucket name and the platform account into the
+    """compose.yaml writes the bucket names and the platform account into the
     backend's environment itself, so they have to be the ones bootstrap
-    makes. The backend has one bucket: what people upload goes through the
-    upload door into the one Forgejo owns."""
+    makes. The backend writes one bucket: what people upload goes through the
+    upload door into the one Forgejo owns, which the backend only reads, for
+    a grading machine's downloads."""
     text = (DEPLOY / "compose.yaml").read_text(encoding="utf-8")
 
     assert "UNICON_S3_UPLOADS_BUCKET" not in text
     assert f"UNICON_S3_RESULTS_BUCKET: {main.RESULTS_BUCKET}\n" in text
+    assert f"UNICON_S3_LFS_BUCKET: {main.FORGEJO_LFS_BUCKET}\n" in text
     assert f"UNICON_FORGE_PLATFORM_ACCOUNT: {main.BACKEND_ACCOUNT}\n" in text
 
 

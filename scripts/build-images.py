@@ -10,10 +10,12 @@ localhost over plain HTTP without being told, and the daemon pulls from it by
 digest the same way it would from ghcr.io, which is what the CI agent and the
 socket filter do. Nothing is pushed anywhere else.
 
-It builds the runner's four images from ../runner (images/<name>/Dockerfile,
-with the checkout as the context, the way the runner's own CI builds them)
-and each primitive from ../primitive-<name> (its Dockerfile at the root),
-pushes each to the registry, reads back the digest the push gave it, and
+It builds the runner's five images from ../runner (images/<name>/Dockerfile,
+with the checkout as the context, the way the runner's own CI builds them),
+primitive-base first, and each primitive from ../primitive-<name> (its
+Dockerfile at the root), exec, interact and compile on that primitive-base,
+passed as the build argument BASE_IMAGE by its digest here, pushes each to
+the registry, reads back the digest the push gave it, and
 writes images.local.json: the same shape as images.json, with every runner
 image a localhost:5000 reference by digest. Each primitive's checkout fills
 the version at the forge that is the major of the version in its
@@ -33,7 +35,10 @@ and writes them back, under a scope per image, so a layer whose inputs did
 not change since an earlier run is not built again. The image is loaded into
 Docker and pushed from there, as a laptop's build is, so its digest is read
 the same way and Docker holds the image, which bootstrap then finds without
-a pull.
+a pull. The primitives on primitive-base are built by Docker's own builder
+whatever the options, since a buildx builder of its own runs in a container
+of its own, which reaches neither the images Docker holds nor the registry
+on this machine's localhost.
 
 A checkout is built as it is on disk, committed or not, so a change in a
 sibling is one build and one bootstrap away from a grading. An image whose
@@ -65,8 +70,11 @@ import httpx
 
 from bootstrap import images
 
+BASE_IMAGE = "primitive-base"
+"""The runner's image the primitives in ON_BASE build on, built first."""
 RUNNER_IMAGES = ("harness", "clone", "socket-filter", "worker")
-PRIMITIVES = ("compile", "sandbox-run", "diff-check")
+PRIMITIVES = ("compile", "sandbox-run", "diff-check", "exec", "interact")
+ON_BASE = frozenset({"compile", "exec", "interact"})
 
 REGISTRY = "localhost:5000"
 REGISTRY_CONTAINER = "unicon-registry"
@@ -121,18 +129,21 @@ def main(argv: list[str] | None = None) -> int:
                 context=siblings / "runner",
                 dockerfile=siblings / "runner" / "images" / name / "Dockerfile",
             )
-            for name in RUNNER_IMAGES
+            for name in (BASE_IMAGE, *RUNNER_IMAGES)
         }
+        on_base = Build()
         primitives: dict[str, dict[str, Any]] = {}
         for name in PRIMITIVES:
             checkout = siblings / f"primitive-{name}"
             version = _version_of(checkout)
             versions = dict(released.get(name, {}))
+            arguments = {"BASE_IMAGE": built[BASE_IMAGE]} if name in ON_BASE else {}
             versions[version] = {
-                "image": build.image(
+                "image": (on_base if name in ON_BASE else build).image(
                     f"primitive-{name}",
                     context=checkout,
                     dockerfile=checkout / "Dockerfile",
+                    arguments=arguments,
                 ),
                 "source": {"path": _relative(checkout, directory)},
             }
@@ -242,8 +253,16 @@ class Build:
     builder: str | None = None
     gha_cache: bool = False
 
-    def image(self, name: str, *, context: Path, dockerfile: Path) -> str:
-        """Build, push and return the image as a reference by digest."""
+    def image(
+        self,
+        name: str,
+        *,
+        context: Path,
+        dockerfile: Path,
+        arguments: dict[str, str] | None = None,
+    ) -> str:
+        """Build, push and return the image as a reference by digest, with
+        `arguments` as its build arguments."""
         if not dockerfile.is_file():
             raise BuildFailed(
                 f"{dockerfile} is missing; is the checkout beside deploy?"
@@ -255,6 +274,11 @@ class Build:
             *self.command(name),
             "--provenance=false",
             "--sbom=false",
+            *[
+                flag
+                for key, value in (arguments or {}).items()
+                for flag in ("--build-arg", f"{key}={value}")
+            ],
             "--file",
             str(dockerfile),
             "--tag",

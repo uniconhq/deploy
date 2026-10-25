@@ -92,6 +92,7 @@ BACKEND_ACCOUNT = "unicon-backend"
 CI_ACCOUNT = "unicon-ci"
 
 FORGEJO_LFS_BUCKET = "forgejo-lfs"
+LFS_READ_KEY = "unicon-backend-lfs-read"
 RESULTS_BUCKET = "unicon-results"
 UNICON_BUCKETS = (RESULTS_BUCKET,)
 
@@ -544,6 +545,15 @@ def _start_storage(compose: Compose, values: dict[str, str], summary: Summary) -
         garage.allow_read_write(bucket_ids[name], backend_key.access_key_id)
     values["UNICON_S3_ACCESS_KEY"] = backend_key.access_key_id
     values["UNICON_S3_SECRET_KEY"] = backend_key.secret_access_key
+
+    # The backend signs a grading machine's reads of a task's large files
+    # with a key of its own that may only read forgejo-lfs, so a link it
+    # hands out can never write to the store Forgejo owns.
+    lfs_key, created = garage.ensure_key(LFS_READ_KEY)
+    summary.record(f"garage key {LFS_READ_KEY}", created)
+    garage.allow_read_only(bucket_ids[FORGEJO_LFS_BUCKET], lfs_key.access_key_id)
+    values["UNICON_S3_LFS_ACCESS_KEY"] = lfs_key.access_key_id
+    values["UNICON_S3_LFS_SECRET_KEY"] = lfs_key.secret_access_key
 
 
 def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -> None:
