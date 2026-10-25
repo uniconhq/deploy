@@ -32,7 +32,18 @@ def _locations() -> list[str]:
 
 def _location() -> re.Pattern[str]:
     """The submission's location, the one whose fourth part is a number."""
-    found = [pattern for pattern in _locations() if "/versions/" not in pattern]
+    found = [
+        pattern
+        for pattern in _locations()
+        if "/versions/" not in pattern and "/entrants/" not in pattern
+    ]
+    assert len(found) == 1, found
+    return re.compile(found[0])
+
+
+def _staff_location() -> re.Pattern[str]:
+    """A staff download of an entrant's submitted file."""
+    found = [pattern for pattern in _locations() if "/entrants/" in pattern]
     assert len(found) == 1, found
     return re.compile(found[0])
 
@@ -197,6 +208,16 @@ def test_neither_kind_of_address_is_taken_by_the_others_location() -> None:
     assert not any(_task_location().match(asked) for asked in submitted)
     assert not any(_location().match(asked) for asked in task_files)
 
+    staff = (
+        "/-/downloads/acme/spring/sum/entrants/"
+        "00000000-0000-4000-8000-000000000014/1/files/submission/main.py"
+    )
+    assert _staff_location().match(staff)
+    assert not _location().match(staff)
+    assert not _task_location().match(staff)
+    assert not _staff_location().match(submitted[0])
+    assert not _staff_location().match(task_files[0])
+
 
 def _location_body(pattern: str) -> str:
     start = CONFIG.index(f'location ~ "{pattern}" {{')
@@ -214,7 +235,9 @@ def _directives(text: str) -> set[str]:
     return names
 
 
-@pytest.mark.parametrize("pattern", _locations(), ids=["submission", "task file"])
+@pytest.mark.parametrize(
+    "pattern", _locations(), ids=["submission", "staff file", "task file"]
+)
 def test_both_download_locations_share_one_file_of_directives(pattern: str) -> None:
     body = _location_body(pattern)
     own = _directives(body)
