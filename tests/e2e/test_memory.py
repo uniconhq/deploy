@@ -132,13 +132,21 @@ def test_a_run_over_its_memory_ends_alone(browser: Browser) -> None:
     grading = graded(entrant, task, submit(entrant, task, "sum.c", PROGRAM))
 
     assert grading["status"] == "graded", grading
+
+    def score_of(run: dict) -> str | None:
+        found = next(
+            (item["number"] for item in run["reports"] if item["title"] == "score"),
+            None,
+        )
+        return None if found is None else str(found)
+
     ended = {
-        run["key"]["input"]: (run["verdict"], run["reports"].get("score"))
+        run["tuples"][0]["key"]["input"]: (run["verdict"], score_of(run))
         for run in grading["runs"]
     }
     assert ended == {
-        "tests/1.in": ("accepted", 1),
-        "tests/2.in": ("accepted", 1),
+        "tests/1.in": ("accepted", "1"),
+        "tests/2.in": ("accepted", "1"),
         "tests/3.in": ("memory_limit", None),
-        "tests/4.in": ("accepted", 1),
+        "tests/4.in": ("accepted", "1"),
     }, grading
