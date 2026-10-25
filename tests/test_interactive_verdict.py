@@ -9,6 +9,7 @@ checkout beside them.
 
 from __future__ import annotations
 
+import ast
 import importlib.util
 import json
 from pathlib import Path
@@ -20,6 +21,8 @@ from ruamel.yaml import YAML
 
 WORKFLOW = Path(__file__).resolve().parent.parent / "workflows-next/interactive/v1"
 VERDICT = WORKFLOW / "verdict"
+SIBLINGS = Path(__file__).resolve().parents[2]
+"""Where the primitives' checkouts sit beside deploy's."""
 
 
 def load_verdict() -> ModuleType:
@@ -44,6 +47,10 @@ STOPPED: dict[str, Any] = {
     "stopped_by": "entrant",
 }
 PIPE: dict[str, Any] = {"ended": "runtime_error", "signal": "SIGPIPE"}
+"""A native judge killed writing to an entrant that has gone."""
+RAISED: dict[str, Any] = {"ended": "runtime_error"}
+"""A Python or Java judge that wrote to an entrant that has gone: the write
+raised, and the judge exited non-zero, with no signal."""
 
 CASES = [
     # Rule 4: the judge's 0.
@@ -77,7 +84,8 @@ CASES = [
         ran(**STOPPED),
         "time_limit",
     ),
-    # Rule 1's second exception: the closed pipe after the entrant ended.
+    # Rule 1's third exception: the judge was killed by SIGPIPE at or after
+    # the entrant's end, with no verdict.
     ("entrant left cleanly", ran(at=100), ran(**PIPE, at=150), "1"),
     (
         "entrant left by crashing",
@@ -86,8 +94,30 @@ CASES = [
         "runtime_error",
     ),
     ("at the same wake", ran(at=100), ran(**PIPE, at=100), "1"),
+    # Rule 1's second exception: the judge ended at or after the entrant
+    # with a verdict, read as a finished judge's.
     ("a 1 written before the pipe", ran(at=100), ran(**PIPE, at=150, verdict="1"), "1"),
-    ("a 0 written before the pipe", ran(at=100), ran(**PIPE, at=150, verdict="0"), "1"),
+    ("a 0 written before the pipe", ran(at=100), ran(**PIPE, at=150, verdict="0"), "0"),
+    ("a 1 written, then raised", ran(at=100), ran(**RAISED, at=150, verdict="1"), "1"),
+    ("a 0 written, then raised", ran(at=100), ran(**RAISED, at=150, verdict="0"), "0"),
+    (
+        "a 0 written, entrant crashed",
+        ran("runtime_error", 100),
+        ran(**RAISED, at=150, verdict="0"),
+        "runtime_error",
+    ),
+    (
+        "a word written before the pipe",
+        ran(at=100),
+        ran(**PIPE, at=150, verdict="time_limit"),
+        "time_limit",
+    ),
+    (
+        "a 1 written, judge then over its time",
+        ran(at=100),
+        ran("time_limit", 150, verdict="1"),
+        "1",
+    ),
 ]
 
 
@@ -102,12 +132,49 @@ def test_the_rules(
     assert verdict.decide(entrant, judge) == expected
 
 
+@pytest.mark.parametrize("written", ["0", "1", None])
+@pytest.mark.parametrize("entrant_ended", ["finished", "runtime_error"])
+def test_how_a_judge_ended_after_the_entrant_does_not_change_the_verdict(
+    written: str | None, entrant_ended: str
+) -> None:
+    """A judge that writes its verdict and then a farewell line to an entrant
+    that has gone finishes, dies of `SIGPIPE`, or raises and exits non-zero,
+    by when the entrant's end reached it: the verdict is the same. With no
+    verdict, dying of `SIGPIPE` is the entrant's verdict and raising a
+    fault."""
+    entrant = ran(entrant_ended, 100)
+    if written is None:
+        assert verdict.decide(entrant, ran(**PIPE, at=150)) in ("1", entrant_ended)
+        with pytest.raises(verdict.NotJudged):
+            verdict.decide(entrant, ran(**RAISED, at=150))
+        return
+    report = {"verdict": written}
+    endings = [ran(**PIPE, at=150, **report), ran(**RAISED, at=150, **report)]
+    endings.append(ran(at=150, **report))
+    assert len({verdict.decide(entrant, judge) for judge in endings}) == 1
+
+
 NOT_JUDGED = [
-    ("judge crashed", ran(), ran("runtime_error"), "ended in runtime error"),
-    ("judge over its time", ran(), ran("time_limit"), "ended in time limit"),
-    ("judge over memory", ran(stopped_by="judge"), ran("memory_limit"), "memory limit"),
-    ("judge crashed after a 0", ran(), ran("runtime_error", verdict="0"), "runtime"),
-    ("judge crashed after a 1", ran(), ran("runtime_error", verdict="1"), "runtime"),
+    ("judge crashed", ran(), ran("runtime_error", 50), "ended in runtime error"),
+    ("judge over its time", ran(), ran("time_limit", 50), "ended in time limit"),
+    (
+        "judge over memory",
+        ran(stopped_by="judge"),
+        ran("memory_limit", 50),
+        "memory limit",
+    ),
+    (
+        "judge crashed after a 0",
+        ran(),
+        ran("runtime_error", 50, verdict="0"),
+        "before the entrant",
+    ),
+    (
+        "judge crashed after a 1",
+        ran(),
+        ran("runtime_error", 50, verdict="1"),
+        "before the entrant",
+    ),
     (
         "judge stopped by its wall clock",
         ran(),
@@ -118,13 +185,43 @@ NOT_JUDGED = [
         "the pipe before the entrant ended",
         ran(at=200),
         ran(**PIPE, at=150),
-        "ended in runtime error by SIGPIPE",
+        "ended in runtime error by SIGPIPE before the entrant",
     ),
     (
-        "another signal",
-        ran(at=100),
+        "another signal before the entrant ended",
+        ran(at=200),
         ran("runtime_error", 150, signal="SIGSEGV"),
         "SIGSEGV",
+    ),
+    (
+        "judge over its own time after the entrant, no verdict",
+        ran(at=100),
+        ran("time_limit", 150),
+        "time limit with no verdict",
+    ),
+    (
+        "judge over its own memory after the entrant, no verdict",
+        ran(at=100),
+        ran("memory_limit", 150, signal="SIGKILL"),
+        "memory limit by SIGKILL with no verdict",
+    ),
+    (
+        "raised after the entrant left cleanly, no verdict",
+        ran(at=100),
+        ran(**RAISED, at=150),
+        "runtime error with no verdict",
+    ),
+    (
+        "raised after the entrant crashed, no verdict",
+        ran("runtime_error", 100),
+        ran(**RAISED, at=150),
+        "runtime error with no verdict",
+    ),
+    (
+        "another signal after the entrant, no verdict",
+        ran(at=100),
+        ran("runtime_error", 150, signal="SIGSEGV"),
+        "SIGSEGV with no verdict",
     ),
     (
         "stopped by another program",
@@ -211,7 +308,7 @@ def test_a_word_is_written_as_the_verdict(
         b"[]",
         json.dumps({"entrant": ran()}).encode(),
         json.dumps({"entrant": ran(), "judge": {}}).encode(),
-        json.dumps({"entrant": ran(), "judge": ran("runtime_error")}).encode(),
+        json.dumps({"entrant": ran(), "judge": ran("runtime_error", 50)}).encode(),
     ],
 )
 def test_a_fault_exits_non_zero_and_writes_nothing(
@@ -226,12 +323,24 @@ def test_a_fault_exits_non_zero_and_writes_nothing(
 
 
 def test_the_outcome_words_are_interacts_and_execs() -> None:
-    assert verdict.WORDS == (
-        "time_limit",
-        "memory_limit",
-        "output_limit",
-        "runtime_error",
+    """`WORDS` are the endings interact's `ended` names besides `finished`,
+    and the verdict words exec takes from a manifest program, read from the
+    sibling checkouts of both."""
+    exec_source = SIBLINGS / "primitive-exec" / "src" / "exec.py"
+    interact_yaml = SIBLINGS / "primitive-interact" / "primitive.yaml"
+    if not (exec_source.is_file() and interact_yaml.is_file()):
+        pytest.skip("no primitive-exec and primitive-interact checkouts beside deploy")
+    words = next(
+        ast.literal_eval(node.value)
+        for node in ast.parse(exec_source.read_text()).body
+        if isinstance(node, ast.Assign)
+        and [getattr(target, "id", None) for target in node.targets]
+        == ["VERDICT_WORDS"]
     )
+    declared = YAML(typ="safe").load(interact_yaml)
+    ended = declared["inputs"]["programs"]["outputs"]["ended"]["options"]
+    assert tuple(words) == verdict.WORDS
+    assert ["finished", *verdict.WORDS] == ended
 
 
 def test_the_manifest_declares_no_report() -> None:

@@ -1,7 +1,7 @@
 """The diff script unicon/classic@v3 ships, workflows-next/classic/v3/diff/:
 words compared as testlib's wcmp compares them, every case of
-unicon/diff-check@v2's tests judged by that rule, and the report it writes
-for exec.
+unicon/diff-check@v2's tests judged by that rule, the report it writes
+for exec, and the workflow beside it that runs it on the solution's output.
 
 Its run through exec, in manifest mode on the exec image, is in
 primitive-exec's image tests, which read this folder from a deploy checkout
@@ -260,3 +260,17 @@ def test_the_manifest_declares_the_score_with_its_bounds() -> None:
     assert as_json == {
         "reports": {"score": {"better": "higher", "at_least": 0, "at_most": 1}}
     }
+
+
+def test_the_workflow_runs_the_solution_then_the_diff_script_on_its_output() -> None:
+    workflow = core_yaml.load((DIFF.parent / "workflow.yaml").read_bytes())
+    assert "test" not in workflow
+    steps = {step["id"]: step for step in workflow["steps"]}
+    assert list(steps) == ["compile", "solution", "diff", "compare"]
+    assert steps["diff"]["with"]["source"] == "${{ workflow.diff/ }}"
+    compare = steps["compare"]["with"]
+    assert compare["manifest"] == "${{ workflow.diff/program.yaml }}"
+    assert (compare["time_limit"], compare["memory_limit"]) == (10, 256)
+    assert set(compare["files"]) == {"output", "answer"}
+    assert "self_reported" not in compare
+    assert workflow["reports"]["score"] == "${{ steps.compare.score }}"

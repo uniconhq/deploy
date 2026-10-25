@@ -11,9 +11,17 @@ this file as its manifest. It reports through the folder exec names in
    never a verdict. Two cases are not this:
    - the judge was stopped because the entrant broke a limit
      (`stopped_by: entrant`): the run is the entrant's limit;
-   - the judge was killed by the closed pipe (`signal: SIGPIPE`) after the
-     entrant ended (`ended_at`): the entrant left before it was judged, so
-     the run is its crash, or a wrong answer if it exited cleanly.
+   - the judge ended at or after the entrant (`ended_at`) and wrote a
+     verdict, however it ended: it may have died writing to an entrant
+     that had gone, of `SIGPIPE` as a native program does, or of the
+     error Python and Java raise instead. Its verdict is read as if it
+     had finished, by the rules below, so a judge that wrote `0` and died
+     saying goodbye is judged as one that wrote `0` and exited;
+   - the judge was killed by `SIGPIPE` at or after the entrant's end,
+     with no verdict: a native judge that wrote to an entrant that had
+     gone before it judged. The run is the entrant's crash or limit, or
+     a wrong answer if it exited cleanly. Any other judge that ended
+     with no verdict, one whose write raised among them, is a fault.
 2. The judge's wrong answer stands, whichever program ended first, and so
    does an outcome word the judge named as its verdict.
 3. Otherwise a limit the entrant broke, or its crash, is the verdict.
@@ -23,7 +31,7 @@ A judge should judge the entrant leaving: an end of input, or a write that
 fails because the entrant has gone, is a verdict of `1` it writes, not a
 crash. And a judge writes its verdict once it has judged, never a `1` to
 change later: a `1` stands even when the judge is then stopped for the
-entrant's limit.
+entrant's limit, or dies writing to an entrant that has gone.
 
 On every verdict the judge's texts, `label`, `message` and `staff_message`,
 are passed on, and its reports and extras are shown with the run as extras
@@ -76,21 +84,22 @@ def read_facts(path: Path) -> dict[str, dict[str, Any]]:
 
 def decide(entrant: dict[str, Any], judge: dict[str, Any]) -> str:
     """The verdict to write: `0`, `1` or one of `WORDS`, by the rules above."""
-    excused = None
-    if judge["ended"] != "finished":
-        if judge.get("stopped_by") == "entrant":
-            excused = "stopped"
-        elif judge.get("signal") == "SIGPIPE" and judge.get(
-            "ended_at", -1
-        ) >= entrant.get("ended_at", 0):
-            excused = "left"
-        else:
-            raise NotJudged(f"the judge did not judge: it ended in {ended(judge)}")
     verdict = judge.get("verdict")
+    if judge["ended"] != "finished" and judge.get("stopped_by") != "entrant":
+        if judge.get("ended_at", -1) < entrant.get("ended_at", 0):
+            raise NotJudged(
+                f"the judge did not judge: it ended in {ended(judge)} before "
+                "the entrant"
+            )
+        if verdict is None:
+            if judge.get("signal") != "SIGPIPE" or "stopped_by" in judge:
+                raise NotJudged(
+                    f"the judge did not judge: it ended in {ended(judge)} with "
+                    "no verdict"
+                )
+            return "1" if entrant["ended"] == "finished" else str(entrant["ended"])
     if verdict is not None and verdict != "0":
         return str(verdict)
-    if excused == "left":
-        return "1" if entrant["ended"] == "finished" else str(entrant["ended"])
     if entrant["ended"] != "finished":
         return str(entrant["ended"])
     if verdict == "0":
