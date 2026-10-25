@@ -39,7 +39,7 @@ def test_the_release_manifest_in_this_repo_loads() -> None:
 
     assert manifest.plugin_git.startswith("docker.io/woodpeckerci/plugin-git@sha256:")
     assert set(manifest.images) == {"worker", "plugin-git"}
-    assert manifest.primitive_names == ["compile"]
+    assert manifest.primitive_names == ["compile", "exec"]
     for release in manifest.primitives:
         assert isinstance(release.source, GitHubSource)
         assert release.image.startswith(

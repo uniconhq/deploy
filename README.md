@@ -504,6 +504,12 @@ digest, and the release of each primitive's repository that bootstrap mirrors.
         "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
         "source": {"github": "uniconhq/primitive-compile", "tag": "v3.0.0"}
       }
+    },
+    "exec": {
+      "v1": {
+        "image": "ghcr.io/uniconhq/primitive-exec@sha256:<64 hex>",
+        "source": {"github": "uniconhq/primitive-exec", "tag": "v1.0.0"}
+      }
     }
   }
 }
@@ -528,9 +534,8 @@ that holds that version, a new image under the same declaration moves the
 version to it, and any other change to the declaration stops bootstrap,
 since a version's ports never change.
 
-Today it pins runner `v0.9.0` and `compile`'s `v1` at `v1.1.1`. `exec`
-and `compile`'s `v3`, which the built-in workflows use, are not released
-yet, so a stack grades only from a local build.
+Today it pins runner `v0.10.0`, `compile`'s `v1` at `v1.1.1` and its `v3`
+at `v3.0.0`, and `exec`'s `v1` at `v1.0.0`.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
