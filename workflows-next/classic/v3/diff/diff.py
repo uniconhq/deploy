@@ -11,7 +11,13 @@ Two files match when they have the same lines once trailing whitespace
 from every line and trailing blank lines are removed from the end. Leading
 whitespace and blank lines between other lines still count. The files are
 compared as bytes, in blocks, so no text encoding is assumed and the time is
-linear in their size. This is the rule of unicon/diff-check@v2, which this
+linear in their size. The memory is a few blocks for most files, with two
+exceptions. A run of whitespace is held until what follows it is read, so
+an output of nothing but spaces is held whole, up to the 32 MB exec keeps
+of one, and so is a run in the answer. A block whose lines still end in
+whitespace after `TRIM_PASSES` passes is split into lines, which for short
+lines takes about 40 times the block. Together they were measured at
+74 MB, so the step needs a memory limit of 128 MB or more. This is the rule of unicon/diff-check@v2, which this
 script replaces.
 
 A file that is missing or cannot be read ends the script with an error, as a
@@ -83,7 +89,8 @@ def trimmed(first: bytes, stream: BinaryIO) -> Iterator[bytes]:
     The whitespace at the end of what has been read so far is held back, in
     the blocks it was read in, until the next byte that is not whitespace
     shows whether it ends a line: a newline drops it, anything else lets it
-    through. At the end of the stream it is dropped.
+    through. At the end of the stream it is dropped. A long run of
+    whitespace is held whole, however many blocks it takes.
     """
     held: list[bytes] = []
     start = (first,) if first else ()
