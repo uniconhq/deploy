@@ -165,7 +165,10 @@ services:
       WOODPECKER_AGENT_SECRET: ${WOODPECKER_DEV_AGENT_TOKEN}
       WOODPECKER_HOSTNAME: laptop
       # A grading run carries the label pool=platform, which only the
-      # platform's own machines declare.
+      # platform's own machines declare. No shape=rootless here: Docker
+      # Desktop runs Docker as root, and exec refuses the identity map that
+      # gives it, so this agent is not that shape. Which shape a machine
+      # declares is left to the machine setup of phase 4.10.
       WOODPECKER_AGENT_LABELS: pool=platform
       # Onto the volume below. The default path is /etc/woodpecker, which this
       # image does not create, so the agent cannot save the identity the server
@@ -180,6 +183,10 @@ services:
       # the platform at http://proxy, and neither can reach the database, the
       # object store's admin API, the CI's API or anything else inside.
       WOODPECKER_BACKEND_DOCKER_NETWORK: unicon-grading
+      # Bytes. The most memory any step's container may use: the platform
+      # machine's 16 GB, since Woodpecker sets no limit per step and a step's
+      # own limits are kept inside it.
+      WOODPECKER_BACKEND_DOCKER_LIMIT_MEM: "17179869184"
       WOODPECKER_LOG_LEVEL: info
     volumes:
       - woodpecker-agent-data:/var/lib/woodpecker

@@ -3,7 +3,8 @@
     "harness": "ghcr.io/uniconhq/harness@sha256:c90f86f9ec0985ab060019c8668e11e2e43bfd45768131684ab84809570af2ec",
     "clone": "ghcr.io/uniconhq/clone@sha256:cbb645b9c7fd5c333c6b7720f24e59f71c94fa99a4d5c883aafa7f1e1bd341fc",
     "socket-filter": "ghcr.io/uniconhq/socket-filter@sha256:9768e2e588bccc8500151e68de5c3675f0fd7db3eec0200595718e9bb5d36fba",
-    "worker": "ghcr.io/uniconhq/worker@sha256:6423bd27ef322c3efb734870b0ad96d8ef41f52c3907fdadcf4fd53673025157"
+    "worker": "ghcr.io/uniconhq/worker@sha256:6423bd27ef322c3efb734870b0ad96d8ef41f52c3907fdadcf4fd53673025157",
+    "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:550075c844fcec0af41d9d28f9860aa5d8c43e1e9419be4b9266dc02c2f29804"
   },
   "primitives": {
     "compile": {

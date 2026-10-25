@@ -17,11 +17,13 @@ Dockerfile at the root), exec, interact and compile on that primitive-base,
 passed as the build argument BASE_IMAGE by its digest here, pushes each to
 the registry, reads back the digest the push gave it, and
 writes images.local.json: the same shape as images.json, with every runner
-image a localhost:5000 reference by digest. Each primitive's checkout fills
-the version at the forge that is the major of the version in its
-pyproject.toml, `v2` for 2.0.0, with its source the sibling checkout; every
-other version of it is copied from images.json as released, the image by its
-digest at ghcr.io and the source its tag on GitHub. So a stack built this way
+image a localhost:5000 reference by digest, and every other image there,
+Woodpecker's git plugin, copied from images.json as released. Each
+primitive's checkout fills the version at the forge that is the major of
+the version in its pyproject.toml, `v2` for 2.0.0, with its source the
+sibling checkout; every other version of it is copied from images.json as
+released, the image by its digest at ghcr.io and the source its tag on
+GitHub. So a stack built this way
 seeds v1 of each primitive from its release and v2 from the checkout.
 images.local.json is git-ignored, and bootstrap reads it instead
 of images.json whenever it is there. Run it from the deploy directory:
@@ -70,11 +72,12 @@ import httpx
 
 from bootstrap import images
 
-BASE_IMAGE = "primitive-base"
-"""The runner's image the primitives in ON_BASE build on, built first."""
 RUNNER_IMAGES = ("harness", "clone", "socket-filter", "worker")
 PRIMITIVES = ("compile", "sandbox-run", "diff-check", "exec", "interact")
 ON_BASE = frozenset({"compile", "exec", "interact"})
+"""The primitives built on the runner's `images.PRIMITIVE_BASE`, which is
+built first.
+"""
 
 REGISTRY = "localhost:5000"
 REGISTRY_CONTAINER = "unicon-registry"
@@ -129,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
                 context=siblings / "runner",
                 dockerfile=siblings / "runner" / "images" / name / "Dockerfile",
             )
-            for name in (BASE_IMAGE, *RUNNER_IMAGES)
+            for name in (images.PRIMITIVE_BASE, *RUNNER_IMAGES)
         }
         on_base = Build()
         primitives: dict[str, dict[str, Any]] = {}
@@ -137,7 +140,9 @@ def main(argv: list[str] | None = None) -> int:
             checkout = siblings / f"primitive-{name}"
             version = _version_of(checkout)
             versions = dict(released.get(name, {}))
-            arguments = {"BASE_IMAGE": built[BASE_IMAGE]} if name in ON_BASE else {}
+            arguments = (
+                {"BASE_IMAGE": built[images.PRIMITIVE_BASE]} if name in ON_BASE else {}
+            )
             versions[version] = {
                 "image": (on_base if name in ON_BASE else build).image(
                     f"primitive-{name}",
@@ -154,6 +159,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"build-images failed: {failure}")
         return 1
 
+    built = {**_released_images(directory, built), **built}
     manifest = directory / images.LOCAL_MANIFEST
     manifest.write_text(
         json.dumps({"images": built, "primitives": primitives}, indent=2) + "\n",
@@ -168,6 +174,19 @@ def main(argv: list[str] | None = None) -> int:
             label = f"primitive-{name} {version}"
             print(f"  {label:<22} {entry['image']}")
     return 0
+
+
+def _released_images(directory: Path, built: dict[str, str]) -> dict[str, str]:
+    """Every image the release manifest pins that this does not build, such
+    as Woodpecker's git plugin, by its digest there."""
+    document = json.loads(
+        (directory / images.RELEASE_MANIFEST).read_text(encoding="utf-8")
+    )
+    return {
+        str(name): str(reference)
+        for name, reference in document["images"].items()
+        if name not in built
+    }
 
 
 def _released_primitives(directory: Path) -> dict[str, dict[str, Any]]:

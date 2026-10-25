@@ -2,7 +2,8 @@
 on this machine, since the socket filter refuses a pull: each image the filter
 is given, pulled only when the daemon does not hold it yet. The filter is
 given the image of every version at the forge, so a stack that seeds v1 of a
-primitive from its release and v2 from a local build pulls both.
+primitive from its release and v2 from a local build pulls both. Only those
+named by digest may run privileged.
 """
 
 from __future__ import annotations
@@ -19,6 +20,7 @@ from tests.forgejo_fake import FakeForgejo
 COMPILE = "ghcr.io/uniconhq/primitive-compile@sha256:" + "1" * 64
 RUN = "ghcr.io/uniconhq/primitive-sandbox-run@sha256:" + "2" * 64
 LOCAL = "localhost:5000/uniconhq/primitive-compile@sha256:" + "3" * 64
+EXEC = "ghcr.io/uniconhq/primitive-exec@sha256:" + "4" * 64
 
 
 class Daemon(Compose):
@@ -75,3 +77,16 @@ def test_the_image_of_every_version_at_the_forge_is_pulled() -> None:
     main._pull_grading_images(daemon, values, Summary())
 
     assert daemon.pulled == [COMPILE, LOCAL]
+
+
+def test_only_an_image_named_by_digest_may_run_privileged() -> None:
+    forge = FakeForgejo()
+    released = f"name: unicon/exec\nversion: v1\nimage: {EXEC}\n"
+    repo = forge.seed(
+        "unicon/exec.primitive", {"primitive.yaml": released.encode()}, tags=("v1",)
+    )
+    repo.tags["v2"] = repo.commit({"primitive.yaml": b"image: unicon-exec:lab\n"})
+    repos = PlatformRepos(Forgejo(forge, "forgejo"), "token")
+
+    assert primitives.images_at_forge(repos, ["exec"]) == [EXEC, "unicon-exec:lab"]
+    assert primitives.privileged_at_forge(repos, ["exec"]) == [EXEC]

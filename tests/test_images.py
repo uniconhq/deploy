@@ -257,3 +257,27 @@ def test_env_gets_the_manifest_images() -> None:
     assert values["UNICON_HARNESS_IMAGE"] == manifest.harness
     assert values["UNICON_CLONE_IMAGE"] == manifest.clone
     assert values["UNICON_FILTER_IMAGE"] == manifest.socket_filter
+    plugin = values["UNICON_PLUGIN_GIT_IMAGE"]
+    assert plugin.startswith("docker.io/woodpeckerci/plugin-git@sha256:")
+    assert values["UNICON_TRUSTED_CLONE_IMAGES"] == f"{manifest.clone},{plugin}"
+    assert values["UNICON_PRIMITIVE_BASE_IMAGE"] == ""
+
+
+def test_a_manifest_without_the_git_plugin_trusts_the_clone_image_alone(
+    tmp_path: Path,
+) -> None:
+    document = json.loads((DEPLOY / images.RELEASE_MANIFEST).read_text())
+    del document["images"]["plugin-git"]
+    path = tmp_path / "images.json"
+    path.write_text(json.dumps(document))
+    manifest = images.load(path)
+    values = {
+        "UNICON_DB_PASSWORD": "x",
+        "FORGEJO_PUBLIC_URL": "http://f.localhost",
+        "UNICON_SESSION_HARD_TTL": "2592000",
+    }
+
+    main._derive_values(values, manifest, development=False)
+
+    assert values["UNICON_TRUSTED_CLONE_IMAGES"] == manifest.clone
+    assert values["UNICON_PLUGIN_GIT_IMAGE"] == ""

@@ -60,7 +60,7 @@ from pathlib import PurePosixPath
 import httpx
 
 from bootstrap import core_yaml
-from bootstrap.images import GitHubSource, LocalSource, PrimitiveRelease
+from bootstrap.images import GitHubSource, LocalSource, PrimitiveRelease, is_by_digest
 from bootstrap.platform_repos import (
     PLATFORM_ORG,
     Outcome,
@@ -345,6 +345,14 @@ def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
             if image:
                 found.add(image)
     return sorted(found)
+
+
+def privileged_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
+    """The images of `images_at_forge` named by digest, the list a socket
+    filter lets run privileged: a tag one of these declarations ever named
+    could since have been moved onto any image.
+    """
+    return [image for image in images_at_forge(repos, names) if is_by_digest(image)]
 
 
 def _key(line: str) -> str | None:

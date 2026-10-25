@@ -25,7 +25,11 @@ differs, which moves to the new image: every version is compared with the
 forge before any is seeded, and one that differs otherwise stops the run
 there, naming each. The
 manifest also gives the harness, clone and socket filter images, which go into
-.env for the services that run them.
+.env for the services that run them, and, when it pins them, Woodpecker's git
+plugin and the step wrapper's base image, which a run task's pipelines run.
+The images of every version of `exec` and `interact` at the forge go into
+.env too, as the plugins Woodpecker lets run privileged, since those steps
+make boxes of their own.
 
 On a development stack, the one whose compose files include compose.dev.yaml,
 bootstrap also enrols the one CI agent that overlay can run and writes its
@@ -397,8 +401,11 @@ def _derive_values(
     outlives the Forgejo refresh token behind it can no longer act for the
     person, so the two are one length of time, in Forgejo's unit.
 
-    The three images are the image manifest's, so none of them can be set to
-    something that is not there.
+    The images are the image manifest's, so none of them can be set to
+    something that is not there. The clone images Woodpecker lends a
+    repository's credential to are the platform's clone image and, when the
+    manifest pins it, Woodpecker's git plugin, which a run task's pipeline
+    checks its submission out with.
     """
     public_url = values["FORGEJO_PUBLIC_URL"]
     host = urlparse(public_url).hostname
@@ -412,6 +419,11 @@ def _derive_values(
     values["UNICON_HARNESS_IMAGE"] = manifest.harness
     values["UNICON_CLONE_IMAGE"] = manifest.clone
     values["UNICON_FILTER_IMAGE"] = manifest.socket_filter
+    values["UNICON_PLUGIN_GIT_IMAGE"] = manifest.plugin_git
+    values["UNICON_PRIMITIVE_BASE_IMAGE"] = manifest.primitive_base
+    values["UNICON_TRUSTED_CLONE_IMAGES"] = ",".join(
+        filter(None, (manifest.clone, manifest.plugin_git))
+    )
     open_sign_up = sign_up_open(values, development=development)
     values["UNICON_FORGE_REGISTRATION_OPEN"] = "true" if open_sign_up else "false"
     values["FORGEJO_DISABLE_REGISTRATION"] = "false" if open_sign_up else "true"
@@ -698,6 +710,11 @@ def _seed_platform(
 
     values["UNICON_FILTER_IMAGES"] = ",".join(
         primitives.images_at_forge(repos, manifest.primitive_names)
+    )
+    values["UNICON_PRIVILEGED_IMAGES"] = ",".join(
+        primitives.privileged_at_forge(
+            repos, [name for name in manifest.primitive_names if name in images.BOXED]
+        )
     )
 
 

@@ -9,7 +9,8 @@ release, since bootstrap mirrors that repository into the forge
     {
       "images": {
         "harness": "ghcr.io/uniconhq/harness@sha256:<64 hex>",
-        "clone": "...", "socket-filter": "...", "worker": "..."
+        "clone": "...", "socket-filter": "...", "worker": "...",
+        "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:<64 hex>"
       },
       "primitives": {
         "compile": {
@@ -39,6 +40,12 @@ Every image is a reference by digest and never by tag, because what a stack
 grades with must not change under it: a tag can be moved, a digest cannot.
 A manifest that names a tag, or lacks one of the three images bootstrap hands
 the services, is refused before anything starts.
+
+A run task's pipelines (stage 4) check a submission out with Woodpecker's
+own git plugin, `plugin-git`, which the release manifest pins and a local
+build copies from it, and end with a step on `primitive-base`, which a
+local build makes; the release manifest names no base image yet, so both
+are optional, and a stack without them grades no run task.
 """
 
 from __future__ import annotations
@@ -55,7 +62,11 @@ LOCAL_MANIFEST = "images.local.json"
 HARNESS = "harness"
 CLONE = "clone"
 SOCKET_FILTER = "socket-filter"
+PLUGIN_GIT = "plugin-git"
+PRIMITIVE_BASE = "primitive-base"
 REQUIRED_IMAGES = (HARNESS, CLONE, SOCKET_FILTER)
+BOXED = ("exec", "interact")
+"""The primitives whose steps make boxes of their own and run privileged."""
 
 _BY_DIGEST = re.compile(
     r"^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?"
@@ -114,6 +125,16 @@ class Manifest:
     @property
     def socket_filter(self) -> str:
         return self.images[SOCKET_FILTER]
+
+    @property
+    def plugin_git(self) -> str:
+        """Woodpecker's git plugin, empty when the manifest names none."""
+        return self.images.get(PLUGIN_GIT, "")
+
+    @property
+    def primitive_base(self) -> str:
+        """The step wrapper's base image, empty when the manifest names none."""
+        return self.images.get(PRIMITIVE_BASE, "")
 
     @property
     def primitive_names(self) -> list[str]:

@@ -77,6 +77,12 @@ x-backend-env: &backend-env
   # submission out with, both by digest from the image manifest (images.json).
   UNICON_HARNESS_IMAGE: ${UNICON_HARNESS_IMAGE}
   UNICON_CLONE_IMAGE: ${UNICON_CLONE_IMAGE}
+  # A run task's pipelines check the submission out with Woodpecker's git
+  # plugin and end with a step on the step wrapper's base image, both by
+  # digest from the manifest, which may name neither yet: a stack without
+  # them grades no run task.
+  UNICON_PLUGIN_GIT_IMAGE: ${UNICON_PLUGIN_GIT_IMAGE:-}
+  UNICON_PRIMITIVE_BASE_IMAGE: ${UNICON_PRIMITIVE_BASE_IMAGE:-}
   # The mail server invite mail goes through: the one Forgejo sends its
   # confirmations and password resets through (below), from the same .env
   # keys, so one set of credentials serves both. MAIL_SMTP_ADDR empty sends
@@ -248,15 +254,23 @@ services:
       WOODPECKER_CONFIG_EXTENSION_ENDPOINT: http://backend:8000/api/v1/ci/config
       WOODPECKER_CONFIG_EXTENSION_EXCLUSIVE: "true"
       WOODPECKER_EXTENSIONS_ALLOWED_HOSTS: private
-      # The one image a clone step may hand the repository credential to:
-      # the platform's clone image, by the digest bootstrap took from the
-      # image manifest. A step on this list gets the credential without the
-      # repository being trusted with it, which is how a task repository
-      # clones with `security` trust off. An entry with a digest matches that
-      # digest alone. Setting the list replaces Woodpecker's own, so its git
-      # plugin, which no grading run uses, is lent nothing: every run's two
-      # checkouts are the clone image, named in the extension's answer.
-      WOODPECKER_PLUGINS_TRUSTED_CLONE: ${UNICON_CLONE_IMAGE}
+      # The images a clone step may hand the repository credential to: the
+      # platform's clone image and Woodpecker's git plugin, each by the
+      # digest bootstrap took from the image manifest. A step on this list
+      # gets the credential without the repository being trusted with it,
+      # which is how a task repository clones with `security` trust off. An
+      # entry with a digest matches that digest alone. Setting the list
+      # replaces Woodpecker's own, so its git plugin at any other digest is
+      # lent nothing: a run's two checkouts are the clone image, and a run
+      # task's pipeline checks its submission out with the plugin, each
+      # named in the extension's answer.
+      WOODPECKER_PLUGINS_TRUSTED_CLONE: ${UNICON_TRUSTED_CLONE_IMAGES:-${UNICON_CLONE_IMAGE}}
+      # The plugins a step may run privileged as: every image of `exec` and
+      # `interact` at the forge, by digest, older ones a published plan
+      # still pins among them, since those steps make boxes of their own.
+      # A plugin step has no commands, environment or entrypoint, so what
+      # runs is the image alone.
+      WOODPECKER_PLUGINS_PRIVILEGED: ${UNICON_PRIVILEGED_IMAGES:-}
       # Minutes. The forge's clock is built on the default: a run gets 30
       # minutes (RUN_TIMEOUT in the forge package), of which it allows the
       # checkouts 4 and the reports 1, and caps a harness's wall time at the
