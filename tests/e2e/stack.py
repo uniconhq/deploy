@@ -11,6 +11,7 @@ stack's own files.
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import secrets
@@ -82,6 +83,29 @@ def reload_page(page: Page) -> None:
     """Reload, with the same second try as `open_page`."""
     load = page.reload
     _through_a_network_change(load)
+
+
+OFFLINE = "Cannot reach Unicon"
+"""What a page says when a request it sent got no answer."""
+
+
+def save_until(page: Page, save: Locator, done: Locator) -> None:
+    """Click `save` until `done` shows. The runner's Chrome drops a request
+    in flight when its network changes, as it does each time a grading
+    starts a container, and the page then says it cannot reach Unicon and
+    keeps the work. A person saves again then, and so does this, up to three
+    times. Any other outcome is the test's own.
+    """
+    offline = page.get_by_role("alert").filter(has_text=OFFLINE)
+    for attempt in range(3):
+        save.click()
+        if attempt > 0:
+            with contextlib.suppress(AssertionError):
+                expect(offline).to_be_hidden(timeout=2_000)
+        expect(done.or_(offline).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+        if not offline.is_visible():
+            return
+    expect(done).to_be_visible()
 
 
 def create_account(username: str) -> str:
@@ -174,13 +198,13 @@ def save_task(page: Page) -> Locator:
     the contest is running and the save asks; answers the bar.
     """
     bar = page.get_by_role("region", name="Save the task")
-    bar.get_by_role("button", name="Save", exact=True).click()
     publish = bar.get_by_role("button", name="Publish the change")
-    outcome = bar.get_by_text(PUBLISHED).or_(publish)
-    expect(outcome.first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    published = bar.get_by_text(PUBLISHED)
+    save_until(
+        page, bar.get_by_role("button", name="Save", exact=True), published.or_(publish)
+    )
     if publish.is_visible():
-        publish.click()
-        expect(bar.get_by_text(PUBLISHED)).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+        save_until(page, publish, published)
     return bar
 
 
@@ -192,13 +216,13 @@ def write_statement(page: Page, task_page: str, text: str) -> None:
     """
     open_page(page, f"{task_page}?card=statement")
     page.get_by_role("textbox", name="Statement source").fill(text)
-    page.get_by_role("button", name="Save statement").click()
     published = page.get_by_role("status").filter(has_text=PUBLISHED)
     publish = page.get_by_role("alert").get_by_role("button", name="Publish the change")
-    expect(published.or_(publish).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    save_until(
+        page, page.get_by_role("button", name="Save statement"), published.or_(publish)
+    )
     if publish.is_visible():
-        publish.click()
-        expect(published).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+        save_until(page, publish, published)
     _wait_checked(page, task_page)
 
 
@@ -246,9 +270,10 @@ def contest_settings(page: Page, org: str, contest: str, **fields: str) -> None:
     expect(form.get_by_role("textbox", name="Name", exact=True)).not_to_have_value("")
     for label, value in fields.items():
         form.get_by_role("textbox", name=label, exact=True).fill(value)
-    form.get_by_role("button", name="Save settings").click()
-    expect(page.get_by_text("Saved.", exact=True)).to_be_visible(
-        timeout=CREATE_TIMEOUT_MS
+    save_until(
+        page,
+        form.get_by_role("button", name="Save settings"),
+        page.get_by_text("Saved.", exact=True),
     )
 
 
@@ -279,9 +304,10 @@ def task_timeline(
             "radio", name="At a time"
         ).check()
         dialog.get_by_label(f"{word} at", exact=True).fill(local(moment))
-    dialog.get_by_role("button", name="Save", exact=True).click()
-    expect(dialog.get_by_role("status").filter(has_text="Saved")).to_be_visible(
-        timeout=CREATE_TIMEOUT_MS
+    save_until(
+        page,
+        dialog.get_by_role("button", name="Save", exact=True),
+        dialog.get_by_role("status").filter(has_text="Saved"),
     )
     dialog.get_by_role("button", name="Close", exact=True).click()
     expect(dialog).to_be_hidden()

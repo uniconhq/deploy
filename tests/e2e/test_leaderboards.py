@@ -37,6 +37,7 @@ from tests.e2e.stack import (
     register,
     reload_page,
     save_task,
+    save_until,
     sign_in,
     status_of,
     submission_rate,
@@ -168,9 +169,10 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     named.fill("points")
     named.press("Tab")
     formula(organiser, board.get_by_role("textbox", name="points"), "latest(sum).total")
-    organiser.get_by_role("button", name="Save", exact=True).click()
-    expect(organiser.get_by_text("Saved.", exact=True)).to_be_visible(
-        timeout=CREATE_TIMEOUT_MS
+    save_until(
+        organiser,
+        organiser.get_by_role("button", name="Save", exact=True),
+        organiser.get_by_text("Saved.", exact=True),
     )
 
     now = datetime.now(UTC).replace(second=0, microsecond=0)
