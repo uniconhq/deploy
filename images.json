@@ -22,10 +22,10 @@
     },
     "exec": {
       "v1": {
-        "image": "ghcr.io/uniconhq/primitive-exec@sha256:c0b1f8ac8023c8fd5aaa5beebb1e2a844f812c4227cf37acb6236f20d7912924",
+        "image": "ghcr.io/uniconhq/primitive-exec@sha256:5dd4ddd6da3f173a3e57e75797e7f0bce184b0d25df13fb3b8b5cc573325de57",
         "source": {
           "github": "uniconhq/primitive-exec",
-          "tag": "v1.0.0"
+          "tag": "v1.0.1"
         }
       }
     }
