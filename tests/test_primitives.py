@@ -22,7 +22,9 @@ import httpx
 import pytest
 
 from bootstrap import images, main, primitives
+from bootstrap.forgejo import Forgejo
 from bootstrap.images import GitHubSource, LocalSource, Manifest, PrimitiveRelease
+from bootstrap.platform_repos import PlatformRepos
 from bootstrap.primitives import PrimitiveError
 from bootstrap.summary import Summary
 from tests.forgejo_fake import FakeForgejo
@@ -91,10 +93,7 @@ def _manifest(*versions: tuple[str, Path, str]) -> Manifest:
     """
     return Manifest(
         path=DEPLOY / "images.local.json",
-        images={
-            name: f"localhost:5000/uniconhq/{name}{RUNNER}"
-            for name in ("harness", "clone", "socket-filter")
-        },
+        images={"plugin-git": f"docker.io/woodpeckerci/plugin-git{RUNNER}"},
         primitives=tuple(
             PrimitiveRelease("compile", version, image, LocalSource(checkout))
             for version, checkout, image in versions
@@ -111,13 +110,19 @@ def _seed(
     return summary, values
 
 
+def _named(forge: FakeForgejo) -> list[str]:
+    """Every image a version of compile names or has named at the forge."""
+    repos = PlatformRepos(Forgejo(forge, "forgejo"), TOKEN)
+    return primitives.images_at_forge(repos, ["compile"])
+
+
 def test_a_fresh_forge_gets_v1_then_v2(tmp_path: Path) -> None:
     forge = FakeForgejo()
     manifest = _manifest(
         ("v1", _compile(tmp_path), FIRST), ("v2", _compile_v2(tmp_path), SECOND)
     )
 
-    summary, values = _seed(forge, manifest)
+    summary, _ = _seed(forge, manifest)
 
     repo = forge.repos[FULL]
     assert not repo.private
@@ -142,7 +147,7 @@ def test_a_fresh_forge_gets_v1_then_v2(tmp_path: Path) -> None:
     assert v2["primitive.yaml"] == f"image: {SECOND}\n".encode() + UNNAMED
     assert "  created  primitive unicon/compile version v1" in summary.lines()
     assert "  created  primitive unicon/compile version v2" in summary.lines()
-    assert values["UNICON_FILTER_IMAGES"] == f"{FIRST},{SECOND}"
+    assert _named(forge) == [FIRST, SECOND]
 
 
 def test_a_rerun_with_nothing_changed_makes_nothing(tmp_path: Path) -> None:
@@ -153,13 +158,13 @@ def test_a_rerun_with_nothing_changed_makes_nothing(tmp_path: Path) -> None:
     _seed(forge, manifest)
     forge.requests.clear()
 
-    summary, values = _seed(forge, manifest)
+    summary, _ = _seed(forge, manifest)
 
     assert forge.writes() == []
     assert summary.lines()[0].startswith("created: 0,")
     assert "  present  primitive unicon/compile version v1" in summary.lines()
     assert "  present  primitive unicon/compile version v2" in summary.lines()
-    assert values["UNICON_FILTER_IMAGES"] == f"{FIRST},{SECOND}"
+    assert _named(forge) == [FIRST, SECOND]
 
 
 def test_a_v1_written_the_way_bootstrap_always_has_is_present(
@@ -196,7 +201,7 @@ def test_a_new_image_alone_moves_the_version_in_place(tmp_path: Path) -> None:
     """A patch release, a fixed image with the same ports, moves its
     version's tag to a commit naming the new digest, with the release's
     other files. A task already published keeps the digest its plan pinned,
-    so the old image stays on the socket filter's list.
+    so the old image stays among the images the forge has named.
     """
     forge = FakeForgejo()
     checkout = _compile(tmp_path)
@@ -205,7 +210,7 @@ def test_a_new_image_alone_moves_the_version_in_place(tmp_path: Path) -> None:
     before = repo.tags["v1"]
     (checkout / "compile.py").write_bytes(b"print('fixed')\n")
 
-    summary, values = _seed(
+    summary, _ = _seed(
         forge,
         _manifest(("v1", checkout, OTHER), ("v2", _compile_v2(tmp_path), SECOND)),
     )
@@ -218,7 +223,7 @@ def test_a_new_image_alone_moves_the_version_in_place(tmp_path: Path) -> None:
     assert set(repo.files_at("v2")) == {"primitive.yaml", "Dockerfile", "compile.py"}
     assert "  created  primitive unicon/compile version v1 (moved)" in (summary.lines())
     assert "  created  primitive unicon/compile version v2" in summary.lines()
-    assert values["UNICON_FILTER_IMAGES"] == f"{FIRST},{OTHER},{SECOND}"
+    assert _named(forge) == [FIRST, OTHER, SECOND]
 
 
 def test_a_moved_version_is_present_on_the_next_run(tmp_path: Path) -> None:
@@ -228,11 +233,11 @@ def test_a_moved_version_is_present_on_the_next_run(tmp_path: Path) -> None:
     _seed(forge, _manifest(("v1", checkout, OTHER)))
     forge.requests.clear()
 
-    summary, values = _seed(forge, _manifest(("v1", checkout, OTHER)))
+    summary, _ = _seed(forge, _manifest(("v1", checkout, OTHER)))
 
     assert forge.writes() == []
     assert "  present  primitive unicon/compile version v1" in summary.lines()
-    assert values["UNICON_FILTER_IMAGES"] == f"{FIRST},{OTHER}"
+    assert _named(forge) == [FIRST, OTHER]
 
 
 def test_a_new_image_with_other_ports_stops_the_run_before_anything_is_seeded(
@@ -298,13 +303,13 @@ def test_a_declaration_changed_in_nothing_the_compiler_reads_moves_the_version(
     before = repo.tags["v1"]
     (checkout / "primitive.yaml").write_bytes(changed)
 
-    summary, values = _seed(forge, _manifest(("v1", checkout, FIRST)))
+    summary, _ = _seed(forge, _manifest(("v1", checkout, FIRST)))
 
     assert repo.tags["v1"] != before
     declared = repo.files_at("v1")["primitive.yaml"]
     assert declared == primitives.declaration(changed, "compile", "v1", FIRST)
     assert "  created  primitive unicon/compile version v1 (moved)" in summary.lines()
-    assert values["UNICON_FILTER_IMAGES"] == FIRST
+    assert _named(forge) == [FIRST]
 
 
 WITH_OUTCOME = NAMED + b"outputs:\n  outcome:\n    type: outcome\n"
@@ -637,7 +642,7 @@ def test_a_port_named_description_is_a_port_and_its_change_stops_the_run(
     assert forge.writes() == []
 
 
-def test_a_withdrawn_image_is_in_neither_list_a_step_runs_from(
+def test_a_withdrawn_image_is_not_on_the_privileged_list(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(images, "BOXED", (*images.BOXED, "compile"))
@@ -648,7 +653,6 @@ def test_a_withdrawn_image_is_in_neither_list_a_step_runs_from(
 
     main._seed_platform(FakeForgejo(), DEPLOY, manifest, values, Summary(), False)
 
-    assert values["UNICON_FILTER_IMAGES"] == FIRST
     assert values["UNICON_PRIVILEGED_IMAGES"] == FIRST
     assert values["UNICON_WITHDRAWN_IMAGES"] == SECOND
 
@@ -672,7 +676,6 @@ def test_a_withdrawn_image_is_matched_by_its_digest_and_one_matching_nothing_is_
 
     main._seed_platform(FakeForgejo(), DEPLOY, manifest, values, Summary(), False)
 
-    assert values["UNICON_FILTER_IMAGES"] == FIRST
     assert values["UNICON_PRIVILEGED_IMAGES"] == FIRST
     said = capsys.readouterr().out
     assert nothing in said
@@ -702,3 +705,20 @@ forms:
 
     assert primitives.compiled(base) == primitives.compiled(described)
     assert primitives.compiled(base) != primitives.compiled(slower)
+
+
+def test_only_an_image_named_by_digest_may_run_privileged() -> None:
+    exec_image = "ghcr.io/uniconhq/primitive-exec@sha256:" + "4" * 64
+    forge = FakeForgejo()
+    released = f"name: unicon/exec\nversion: v1\nimage: {exec_image}\n"
+    repo = forge.seed(
+        "unicon/exec.primitive", {"primitive.yaml": released.encode()}, tags=("v1",)
+    )
+    repo.tags["v2"] = repo.commit({"primitive.yaml": b"image: unicon-exec:lab\n"})
+    repos = PlatformRepos(Forgejo(forge, "forgejo"), TOKEN)
+
+    assert primitives.images_at_forge(repos, ["exec"]) == [
+        exec_image,
+        "unicon-exec:lab",
+    ]
+    assert primitives.privileged_at_forge(repos, ["exec"]) == [exec_image]

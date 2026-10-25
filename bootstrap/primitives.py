@@ -41,8 +41,8 @@ tag to a commit of the release's files with the new image written in. A
 release that changes only a title, a description, what its outcomes mean or
 a comment moves the tag the same way. A task already published keeps
 grading with the digest its plan pinned until it is next saved, so the
-socket filter's list holds every image a version has named, read back from
-the repository's history. A change to the other files alone is no
+CI's privileged list holds every image a version of `exec` has named, read
+back from the repository's history. A change to the other files alone is no
 difference, because it changes nothing that grades: the program that runs is
 the one in the image. A rerun with nothing changed makes nothing. On a
 development stack, --rewrite rewrites each listed version in place whatever
@@ -351,11 +351,10 @@ def mirror(
 
 def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
     """Every image any version of these primitives names or has named at
-    the forge, sorted and without repeats: the list a socket filter lets
-    containers be made from, since a task published against an older version,
-    or before its version moved to a new image, still runs the image its
-    plan pinned. Read from every commit that changed a declaration, and
-    from each version's own commit in case one is off the default branch.
+    the forge, sorted and without repeats, since a task published against an
+    older version, or before its version moved to a new image, still runs the
+    image its plan pinned. Read from every commit that changed a declaration,
+    and from each version's own commit in case one is off the default branch.
     """
     found: set[str] = set()
     for name in names:
@@ -371,9 +370,9 @@ def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
 
 
 def privileged_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
-    """The images of `images_at_forge` named by digest, the list a socket
-    filter lets run privileged: a tag one of these declarations ever named
-    could since have been moved onto any image.
+    """The images of `images_at_forge` named by digest, the list the CI
+    lets run privileged: a tag one of these declarations ever named could
+    since have been moved onto any image.
     """
     return [image for image in images_at_forge(repos, names) if is_by_digest(image)]
 

@@ -7,26 +7,25 @@ starts one on this machine, `registry:2` on 127.0.0.1:5000, in a container of
 its own outside the compose stack, with its images in the volume
 `unicon-registry` so they survive a restart. Docker trusts a registry on
 localhost over plain HTTP without being told, and the daemon pulls from it by
-digest the same way it would from ghcr.io, which is what the CI agent and the
-socket filter do. Nothing is pushed anywhere else.
+digest the same way it would from ghcr.io, which is what the CI agent does.
+Nothing is pushed anywhere else.
 
-It builds the runner's five images from ../runner (images/<name>/Dockerfile,
+It builds the runner's two images from ../runner (images/<name>/Dockerfile,
 with the checkout as the context, the way the runner's own CI builds them),
-primitive-base first, and each primitive from ../primitive-<name> (its
-Dockerfile at the root), exec and compile on that primitive-base,
+primitive-base first and then the worker, and each primitive from
+../primitive-<name> (its Dockerfile at the root) on that primitive-base,
 passed as the build argument BASE_IMAGE by its digest here, pushes each to
-the registry, reads back the digest the push gave it, and
-writes images.local.json: the same shape as images.json, with every runner
+the registry, reads back the digest the push gave it, and writes
+images.local.json: the same shape as images.json, with every runner
 image a localhost:5000 reference by digest, and every other image there,
 Woodpecker's git plugin, copied from images.json as released. Each
 primitive's checkout fills the version at the forge that is the major of
 the version in its pyproject.toml, `v2` for 2.0.0, with its source the
 sibling checkout; every other version of it is copied from images.json as
 released, the image by its digest at ghcr.io and the source its tag on
-GitHub. So a stack built this way
-seeds v1 of each primitive from its release and v2 from the checkout.
-images.local.json is git-ignored, and bootstrap reads it instead
-of images.json whenever it is there. Run it from the deploy directory:
+GitHub. So a stack built this way seeds compile's v1 from its release and
+its v3 from the checkout. images.local.json is git-ignored, and bootstrap
+reads it instead of images.json whenever it is there. Run it from the deploy directory:
 
     uv run scripts/build-images.py
     uv run bootstrap
@@ -37,7 +36,7 @@ and writes them back, under a scope per image, so a layer whose inputs did
 not change since an earlier run is not built again. The image is loaded into
 Docker and pushed from there, as a laptop's build is, so its digest is read
 the same way and Docker holds the image, which bootstrap then finds without
-a pull. The primitives on primitive-base are built by Docker's own builder
+a pull. The primitives, on primitive-base, are built by Docker's own builder
 whatever the options, since a buildx builder of its own runs in a container
 of its own, which reaches neither the images Docker holds nor the registry
 on this machine's localhost.
@@ -72,11 +71,10 @@ import httpx
 
 from bootstrap import images
 
-RUNNER_IMAGES = ("harness", "clone", "socket-filter", "worker")
-PRIMITIVES = ("compile", "sandbox-run", "diff-check", "exec")
-ON_BASE = frozenset({"compile", "exec"})
-"""The primitives built on the runner's `images.PRIMITIVE_BASE`, which is
-built first.
+RUNNER_IMAGES = ("worker",)
+PRIMITIVES = ("compile", "exec")
+"""The primitives, each built on the runner's `images.PRIMITIVE_BASE`, which
+is built first.
 """
 
 REGISTRY = "localhost:5000"
@@ -146,15 +144,12 @@ def main(argv: list[str] | None = None) -> int:
             checkout = siblings / f"primitive-{name}"
             version = _version_of(checkout)
             versions = dict(released.get(name, {}))
-            arguments = (
-                {"BASE_IMAGE": built[images.PRIMITIVE_BASE]} if name in ON_BASE else {}
-            )
             versions[version] = {
-                "image": (on_base if name in ON_BASE else build).image(
+                "image": on_base.image(
                     f"primitive-{name}",
                     context=checkout,
                     dockerfile=checkout / "Dockerfile",
-                    arguments=arguments,
+                    arguments={"BASE_IMAGE": built[images.PRIMITIVE_BASE]},
                 ),
                 "source": {"path": _relative(checkout, directory)},
             }

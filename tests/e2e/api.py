@@ -12,7 +12,7 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from playwright.sync_api import APIRequestContext, APIResponse, Browser
+from playwright.sync_api import APIRequestContext, APIResponse, Browser, Page
 
 from tests.e2e.stack import APP, VERDICT_TIMEOUT_MS, create_account, sign_in
 
@@ -33,6 +33,13 @@ class Caller:
         context = browser.new_context()
         sign_in(context.new_page(), username, create_account(username))
         self.request: APIRequestContext = context.request
+
+    @classmethod
+    def of(cls, page: Page) -> Caller:
+        """The person `page` is already signed in as."""
+        caller = cls.__new__(cls)
+        caller.request = page.context.request
+        return caller
 
     def get(self, path: str) -> Any:
         return answer(self.request.get(API + path), f"GET {path}")

@@ -11,10 +11,10 @@ Every step checks before it creates, and .env is rewritten after each one, so an
 interrupted run can be resumed by running it again.
 
 After the accounts and the OAuth applications, the forge is seeded with the
-platform org and what is in it: the three primitives, each version the image
+platform org and what is in it: the primitives, each version the image
 manifest lists mirrored from its repository with the manifest's image digest
 written in (primitives.py, images.py), and the built-in workflows,
-unicon/classic and unicon/classic-folder, at each of their versions, which
+unicon/classic and unicon/interactive, at each of their versions, which
 wire them together (workflows.py). A task's first save has to find a
 workflow and its primitives the organiser can read, or nothing can be
 published, so a workflow version
@@ -23,22 +23,21 @@ anything is written. Every version goes to its own tag, and a tag already at
 the forge is never edited, save a primitive version whose image alone
 differs, which moves to the new image: every version is compared with the
 forge before any is seeded, and one that differs otherwise stops the run
-there, naming each. The
-manifest also gives the harness, clone and socket filter images, which go into
-.env for the services that run them, and, when it pins them, Woodpecker's git
-plugin and the step wrapper's base image, which a run task's pipelines run.
-The images of every version of `exec` at the forge go into
-.env too, as the plugins Woodpecker lets run privileged, since those steps
-make boxes of their own. So do the grading machines' slot sizes, from
-machine/slots.json, the one table of them, which a machine's setup reads
-too: the forge plans each run task pipeline into one of them.
+there, naming each. The manifest also gives Woodpecker's git plugin, which
+every pipeline checks a submission out with and the CI lends a repository's
+credential to, and, when it pins it, the step wrapper's base image, which go
+into .env for the services that hand them on. The images of every version
+of `exec` at the forge go into .env too, as the plugins Woodpecker lets run
+privileged, since those steps make boxes of their own. So do the grading
+machines' slot sizes, from machine/slots.json, the one table of them, which
+a machine's setup reads too: the forge plans each run task pipeline into
+one of them.
 
 On a development stack, the one whose compose files include compose.dev.yaml,
 bootstrap also enrols the one CI agent that overlay can run and writes its
-token to .env, with the group that owns the Docker socket on this machine,
-which the overlay's socket filter joins, and deletes any other agent that
-would take a grading run and has gone silent. Only there does --rewrite rewrite
-the built-in versions in place instead of leaving them.
+token to .env, and deletes any other agent that would take a grading run and
+has gone silent. Only there does --rewrite rewrite the built-in versions in
+place instead of leaving them.
 
 Two Garage buckets and no other: FORGEJO_LFS_BUCKET for Forgejo, which holds
 every file a person uploads, and RESULTS_BUCKET for the backend, which holds
@@ -50,10 +49,12 @@ discovered from a service. A key already carrying a value is left alone.
 
 RETIRED lists keys an older .env may hold that nothing reads: the addresses
 of the services on the compose network, the bucket names, the platform
-account and the database URL, which compose.yaml writes itself, and the
-settings whose value the backend works out on its own. A run drops them
-rather than carrying them across, so nothing in .env looks like a setting
-that is not one.
+account and the database URL, which compose.yaml writes itself, the
+settings whose value the backend works out on its own, and what the grading
+of test by test ran on: the harness, clone and socket filter images, the
+filter's list and the group it joined, and the clone images the CI trusted,
+now Woodpecker's git plugin alone. A run drops them rather than carrying
+them across, so nothing in .env looks like a setting that is not one.
 
 UNLOCKS names, for each generated secret that data on disk depends on, the
 volume that data lives in: Forgejo's four secrets decrypt and sign what is in
@@ -107,12 +108,11 @@ COMPOSE_PROJECT = "unicon"
 DEVELOPMENT_OVERLAY = "compose.dev.yaml"
 DEV_AGENT = "laptop"
 GRADING_LABEL = ("pool", "platform")
-SOCKET_PROBE_IMAGE = "busybox:1.37.0"
 SLOT_TABLE = Path("machine") / "slots.json"
 LIVE_STREAMS_CEILING = 65535
 """The most connections nginx's `limit_conn` takes for a cap."""
 
-GRADING_SERVICES = ("socket-filter", "woodpecker-agent")
+GRADING_SERVICES = ("woodpecker-agent",)
 
 RETIRED = frozenset(
     {
@@ -129,6 +129,12 @@ RETIRED = frozenset(
         "UNICON_COOKIE_SECURE",
         "UNICON_FORGE",
         "WOODPECKER_AGENT_SECRET",
+        "UNICON_HARNESS_IMAGE",
+        "UNICON_CLONE_IMAGE",
+        "UNICON_FILTER_IMAGE",
+        "UNICON_FILTER_IMAGES",
+        "UNICON_TRUSTED_CLONE_IMAGES",
+        "DOCKER_SOCKET_GID",
     }
 )
 
@@ -204,8 +210,6 @@ def main(argv: list[str] | None = None) -> int:
         _generate_missing_secrets(values, summary)
         _derive_values(values, manifest, development=development)
         values["UNICON_SLOT_SIZES"] = slot_sizes(options.directory / SLOT_TABLE)
-        if development:
-            values["DOCKER_SOCKET_GID"] = compose.socket_group(SOCKET_PROBE_IMAGE)
         envfile.write(env_path, template, values)
 
         _start_storage(compose, values, summary)
@@ -223,7 +227,6 @@ def main(argv: list[str] | None = None) -> int:
         _start_woodpecker(compose, values, summary)
         if development:
             _enrol_dev_agent(values, summary)
-            _pull_grading_images(compose, values, summary)
         envfile.write(env_path, template, values)
 
         recreate_changed(compose, "backend")
@@ -407,10 +410,7 @@ def _derive_values(
     person, so the two are one length of time, in Forgejo's unit.
 
     The images are the image manifest's, so none of them can be set to
-    something that is not there. The clone images Woodpecker lends a
-    repository's credential to are the platform's clone image and, when the
-    manifest pins it, Woodpecker's git plugin, which a run task's pipeline
-    checks its submission out with.
+    something that is not there.
     """
     public_url = values["FORGEJO_PUBLIC_URL"]
     host = urlparse(public_url).hostname
@@ -421,14 +421,8 @@ def _derive_values(
     values["MAIL_PROTOCOL"] = (
         "smtps" if values.get("MAIL_SMTP_PORT") == "465" else "smtp+starttls"
     )
-    values["UNICON_HARNESS_IMAGE"] = manifest.harness
-    values["UNICON_CLONE_IMAGE"] = manifest.clone
-    values["UNICON_FILTER_IMAGE"] = manifest.socket_filter
     values["UNICON_PLUGIN_GIT_IMAGE"] = manifest.plugin_git
     values["UNICON_PRIMITIVE_BASE_IMAGE"] = manifest.primitive_base
-    values["UNICON_TRUSTED_CLONE_IMAGES"] = ",".join(
-        filter(None, (manifest.clone, manifest.plugin_git))
-    )
     open_sign_up = sign_up_open(values, development=development)
     values["UNICON_FORGE_REGISTRATION_OPEN"] = "true" if open_sign_up else "false"
     values["FORGEJO_DISABLE_REGISTRATION"] = "false" if open_sign_up else "true"
@@ -654,15 +648,15 @@ def _seed_platform(
 ) -> None:
     """The platform org, each version of the primitives the manifest pins and
     each version of every built-in workflow, in that order, since a workflow
-    names the primitives. Then every image the primitives' versions name,
-    which is the socket filter's list.
+    names the primitives. Then every image of `exec`'s versions, which is
+    the CI's privileged list.
 
     Every version is compared with the forge first, so that any that differs
     stops the run before anything is seeded, unless `rewrite`. A primitive
     version whose declaration differs only where the compiler does not read,
     its image, a title, a description or a comment, is not one of them: it
     moves. Nor is a workflow version whose files differ only in its inputs'
-    form text, its reported values' titles and units, a comment or its
+    form text, its outputs' titles and units, a comment or its
     README.
     """
     repos = PlatformRepos(
@@ -723,9 +717,9 @@ def _seed_platform(
         _seed_workflow(repos, name, versions, summary, rewrite)
 
     # An image the operator withdrew runs nowhere, under whatever name it is
-    # given, as it is matched by its digest: the forge refuses it, and
-    # neither the socket filter nor the CI's privileged list takes it. An
-    # entry no primitive at the forge names withdraws nothing, which is said.
+    # given, as it is matched by its digest: the forge refuses it, and the
+    # CI's privileged list does not take it. An entry no primitive at the
+    # forge names withdraws nothing, which is said.
     entries = [
         image.strip()
         for image in values.get("UNICON_WITHDRAWN_IMAGES", "").split(",")
@@ -741,9 +735,6 @@ def _seed_platform(
                 f"note: UNICON_WITHDRAWN_IMAGES names {entry}, which no primitive "
                 "at the forge runs by that digest, so it withdraws nothing"
             )
-    values["UNICON_FILTER_IMAGES"] = ",".join(
-        image for image in named if _digest(image) not in withdrawn
-    )
     boxed = [name for name in manifest.primitive_names if name in images.BOXED]
     values["UNICON_PRIVILEGED_IMAGES"] = ",".join(
         image
@@ -880,23 +871,6 @@ def _enrol_dev_agent(values: dict[str, str], summary: Summary) -> None:
         print(f"note: the CI would not delete the silent woodpecker agent {name}")
 
 
-def _pull_grading_images(
-    compose: Compose, values: dict[str, str], summary: Summary
-) -> None:
-    """Put on this machine every image a grading step may run: the images the
-    socket filter lets a step start from. The filter refuses a pull, so a
-    grading machine has to hold them before a run needs one; on a platform
-    machine the worker does this at enrolment, and on the laptop it is this
-    step. The harness and clone images are the CI's own steps, which the agent
-    pulls itself.
-    """
-    for reference in filter(None, values.get("UNICON_FILTER_IMAGES", "").split(",")):
-        summary.record(
-            f"grading image {reference.rpartition('/')[2]}",
-            compose.ensure_image(reference),
-        )
-
-
 def recreate_changed(compose: Compose, *services: str) -> None:
     """Bring each running service up to the values now in .env.
 
@@ -906,9 +880,9 @@ def recreate_changed(compose: Compose, *services: str) -> None:
     the compose files and .env, interpolated values included, differs from
     the one the container was made with, and leaves it alone otherwise; so
     every running service gets an `up` and compose decides. A service that is
-    not running is left as it is, since the dev overlay's agent and socket
-    filter run only when someone started the `agent` profile; whatever starts
-    it with `up` gives it the new values.
+    not running is left as it is, since the dev overlay's agent runs only
+    when someone started the `agent` profile; whatever starts it with `up`
+    gives it the new values.
     """
     for service in services:
         if not compose.is_running(service):

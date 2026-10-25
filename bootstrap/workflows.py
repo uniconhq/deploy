@@ -1,7 +1,6 @@
 """The built-in workflows the forge is seeded with, each at every one of its
-versions: unicon/classic, unicon/classic-folder, classic over a folder of
-sources with an entry point, and unicon/interactive, an entrant's program
-against the task's judge.
+versions: unicon/classic, an entrant's program compared with the answer,
+and unicon/interactive, an entrant's program against the task's judge.
 
 A task's first save reads the workflow it names through the forge, as the
 saving organiser, so a workflow that organiser can read has to exist before
@@ -10,18 +9,16 @@ any task can be published. Each is a public repository
 `unicon-workflow`, with a tag per version (platform_repos.py).
 
 Each workflow is a folder under workflows/ in this repo, and each version a
-folder in it, workflows/classic/v2/ and on, holding every file the
+folder in it, workflows/classic/v3/ and on, holding every file the
 version's tag holds: workflow.yaml and its README.md, and the files its
 steps read from the workflow itself, such as classic@v3's diff script under
 diff/ and interactive@v1's verdict script under verdict/. So the definition
 is a file a person can read and yamllint checks, not a string in this
 module. Python's caches are left out, and so, in a git checkout, is every
 file git does not track, such as a `.DS_Store`; a link is refused, since
-the forge stages a folder given whole with everything in it. classic@v2 wires
-the three primitives together over the task's tests; classic@v3 is one run
-of the entrant's program, compiled, run with exec and compared by its diff
-script; classic-folder does what classic@v2 does with compile@v2 over a
-folder and its entry. Every primitive version a definition `use:`s has to
+the forge stages a folder given whole with everything in it. classic@v3 is
+one run of the entrant's program, compiled, run with exec and compared by
+its diff script. Every primitive version a definition `use:`s has to
 be one the image manifest pins, or bootstrap refuses before it writes
 anything, since the forge would refuse every task saved against it.
 
@@ -30,7 +27,7 @@ in what grades: a tag already at the forge is left as it is, and one whose
 files here have changed since in anything that grades stops the run before
 anything is seeded, naming it; such a change is a new folder. A change only
 to what the definition tells a person (an input's `title`, `help` and
-`unit`, a report's `title` and `unit`), to its comments or layout, or to the
+`unit`, an output's `title` and `unit`), to its comments or layout, or to the
 README changes nothing that grades, so it moves the tag to the new files
 instead. Any other file, a script a step runs, grades as it is.
 The one exception is a development stack, where bootstrap rewrites each
@@ -168,7 +165,7 @@ FORM_TEXT = ("title", "help", "unit")
 """What an input tells the task's form and nothing else."""
 
 VALUE_TEXT = ("title", "unit")
-"""What a reported value tells the pages that name it and nothing else."""
+"""What an output tells the pages that name it and nothing else."""
 
 TEXT_FILES = (DEFINITION, README)
 """The files of a version that may change without a new version, the
@@ -206,10 +203,9 @@ def graded(definition: bytes) -> object | None:
     comment, the layout and that text change nothing. The forge reads a
     declaration given as a bare type, `time_limit: number`, as `{type:
     number}`, a flag left out as false, and an output given as a bare
-    reference as one given `from` alone, so each is read that way here,
-    under `outputs` in a run workflow and `report` in one with a `test`
-    block. A `reports` key is read the same way, so a file from before the
-    rename still compares. None when it does not parse as a mapping.
+    reference as one given `from` alone, so each is read that way here. A
+    `reports` key is read as `outputs` is, so a file from before the rename
+    still compares. None when it does not parse as a mapping.
     """
     try:
         document = core_yaml.load(definition)
@@ -217,16 +213,12 @@ def graded(definition: bytes) -> object | None:
         return None
     if not isinstance(document, dict):
         return None
-    for section, dropped in (("inputs", FORM_TEXT), ("test", ())):
-        declarations = document.get(section)
-        if isinstance(declarations, dict):
-            document[section] = {
-                key: _long_form(value, dropped) for key, value in declarations.items()
-            }
-    steps = document.get("steps")
-    if isinstance(steps, list):
-        document["steps"] = [_without(step, ()) for step in steps]
-    for section in ("outputs", "reports", "report"):
+    declarations = document.get("inputs")
+    if isinstance(declarations, dict):
+        document["inputs"] = {
+            key: _long_form(value, FORM_TEXT) for key, value in declarations.items()
+        }
+    for section in ("outputs", "reports"):
         reports = document.get(section)
         if isinstance(reports, dict):
             document[section] = {
