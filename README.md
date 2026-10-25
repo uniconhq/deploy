@@ -444,6 +444,10 @@ to it, rather than stopping at the version at the forge that differs, so a
 declaration changed on the laptop is what the next save compiles against.
 It refuses to run without `compose.dev.yaml` among the compose files.
 
+`unicon/classic@v2` and `unicon/classic-folder@v1` are not seeded. A
+development stack that still has their tags, including one rewritten when
+their `fold: max` lines went, should be started fresh.
+
 On a development stack, one CI agent: `laptop`, enrolled as a global agent
 through Woodpecker's administrator API, its token written to
 `WOODPECKER_DEV_AGENT_TOKEN` for the dev overlay to hand it. A rerun finds it
