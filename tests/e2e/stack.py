@@ -16,6 +16,7 @@ import re
 import secrets
 import shlex
 import subprocess
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -162,6 +163,26 @@ def write_statement(page: Page, task_page: str, text: str) -> None:
     if publish.is_visible():
         publish.click()
         expect(published).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+    _wait_checked(page, task_page)
+
+
+def _wait_checked(page: Page, task_page: str) -> None:
+    """Wait until the task's latest publication has passed its checks. A save
+    that publishes stops the checks of the publication before it, so until
+    the new one passes the contest refuses to open with the task as not
+    published. The task page does not read its state again by itself, so it
+    is loaded again until its chip says Published.
+    """
+    deadline = time.monotonic() + CREATE_TIMEOUT_MS / 1000
+    while True:
+        page.goto(task_page)
+        checked = page.get_by_text("Published", exact=True)
+        checking = page.get_by_text("Checking", exact=True)
+        expect(checked.or_(checking).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
+        if checked.is_visible():
+            return
+        assert time.monotonic() < deadline, "the publication is still being checked"
+        page.wait_for_timeout(1_000)
 
 
 def submission_rate(page: Page, count: int, per: int) -> None:
