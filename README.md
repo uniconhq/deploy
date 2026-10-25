@@ -157,9 +157,9 @@ or wrong, so places made before the upgrade get what the release now gives
 each new one. Among those is the protection on each contest's and task's
 branch that lets the platform's account alone push or merge to it, which
 contests and tasks made before that protection came in lack until it runs.
-It also activates every published task at the CI and gives every
-submission at the forge without a grading its grading, which on a stack
-that kept running finds nothing to do. It logs what it did as
+It also gives every submission at the forge without a grading its
+grading, against its task's current publication, which on a stack that
+kept running finds nothing to do. It logs what it did as
 `reconcile.done`, with how many places it secured again, and running it
 again does no harm. A stack bootstrapped fresh on the release needs none of
 this: every contest and task is secured as it is made.

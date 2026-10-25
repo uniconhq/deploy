@@ -1,10 +1,11 @@
 """The download door's patterns in the proxy's config, read from the file as
 nginx reads them: for each of its two kinds of address, the location a
 download is asked at, and the map that lets through only the forge's own
-answer for it. A submission's files sit under `files/<input>/`, a folder
-input's in folders of their own and a per-test input's as `<group>/<test>`,
-and the forge names each at the submission's commit, so both patterns take
-every such path and nothing else. A task's own files are asked for at
+answer for it. A submission's files sit under `files/<input>/`: a folder
+input's in folders of their own, and each part of an input given once per
+tuple under `<part>/`, its tuple's position from 1. The forge names each at
+the submission's commit, so both patterns take every such path and nothing
+else. A task's own files are asked for at
 `versions/<commit>/<path>`, any file of the task at any depth, and the forge
 names each in the task's own repository at that commit. Neither kind's
 patterns take the other's addresses. Everything else the two locations do
@@ -76,7 +77,7 @@ SHA = "0123456789abcdef0123456789abcdef01234567"
     "path",
     [
         "files/submission/main.py",
-        "files/out/main/1.txt",
+        "files/route/1/route.txt",
         "files/program/src/util/io.c",
     ],
 )
@@ -120,7 +121,7 @@ def test_nothing_but_a_file_under_files_is_asked_at_the_door(asked: str) -> None
     [
         "task.yaml",
         "statement.md",
-        "tests/main/1/answer",
+        "tests/1.ans",
         "plans/plan.json",
         "public/a%20b.png",
         "data/x/y/z/weights.bin",
