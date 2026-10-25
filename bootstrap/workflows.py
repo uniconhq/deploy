@@ -15,8 +15,9 @@ version's tag holds: workflow.yaml and its README.md, and the files its
 steps read from the workflow itself, such as classic@v3's diff script under
 diff/ and interactive@v1's verdict script under verdict/. So the definition
 is a file a person can read and yamllint checks, not a string in this
-module. Python's caches are left out, and a link is refused, since the
-forge stages a folder given whole with everything in it. classic@v2 wires
+module. Python's caches are left out, and so, in a git checkout, is every
+file git does not track, such as a `.DS_Store`; a link is refused, since
+the forge stages a folder given whole with everything in it. classic@v2 wires
 the three primitives together over the task's tests; classic@v3 is one run
 of the entrant's program, compiled, run with exec and compared by its diff
 script; classic-folder does what classic@v2 does with compile@v2 over a
@@ -39,6 +40,7 @@ version in place whatever differs when it is run with --rewrite.
 from __future__ import annotations
 
 import re
+import subprocess
 from pathlib import Path
 
 from bootstrap import core_yaml
@@ -49,9 +51,10 @@ WORKFLOW_TOPIC = "unicon-workflow"
 CLASSIC = "classic"
 DEFINITION = "workflow.yaml"
 README = "README.md"
-LEFT_OUT = ("__pycache__",)
-"""Folder names under a version that are never seeded: Python's caches,
-which running the tests of a version's scripts leaves beside them."""
+LEFT_OUT = ("__pycache__", ".DS_Store")
+"""Names under a version that are never seeded: Python's caches, which
+running the tests of a version's scripts leaves beside them, and the
+folder settings macOS's Finder leaves."""
 
 _VERSION = re.compile(r"^v([1-9][0-9]*)$")
 _USE = re.compile(r"(?:^|[\s{,])use\s*:\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s,}]+))")
@@ -109,14 +112,19 @@ def seed_versions(directory: Path, name: str) -> dict[str, dict[str, bytes]]:
 
 def seed_files(directory: Path, name: str, version: str) -> dict[str, bytes]:
     """The files version `version` of the workflow `name` is seeded with:
-    every file in its folder, by its path there, but Python's caches. It
-    must hold workflow.yaml and README.md; a link is refused.
+    every file in its folder, by its path there, but Python's caches, the
+    Finder's .DS_Store and, in a git checkout, any file git ignores. A file
+    not yet added to git is seeded, as it would be once added. It must hold
+    workflow.yaml and README.md; a link is refused.
     """
     root = directory / "workflows" / name / version
+    ignored = _ignored(root)
     files: dict[str, bytes] = {}
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
         if any(part in LEFT_OUT or part.endswith(".pyc") for part in relative.parts):
+            continue
+        if relative.as_posix() in ignored and path.is_file():
             continue
         if path.is_symlink():
             raise WorkflowError(
@@ -129,6 +137,31 @@ def seed_files(directory: Path, name: str, version: str) -> dict[str, bytes]:
         if needed not in files:
             raise WorkflowError(f"{root} holds no {needed}")
     return files
+
+
+def _ignored(root: Path) -> set[str]:
+    """The files under `root` git ignores, by their path there; none when
+    `root` is not in a git checkout."""
+    try:
+        listed = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(root),
+                "ls-files",
+                "-z",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--",
+                ".",
+            ],
+            capture_output=True,
+            check=True,
+        )
+    except OSError, subprocess.CalledProcessError:
+        return set()
+    return {name for name in listed.stdout.decode().split("\0") if name}
 
 
 FORM_TEXT = ("title", "help", "unit")

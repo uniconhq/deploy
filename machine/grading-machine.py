@@ -7,73 +7,101 @@ JSON file (see `Settings`):
     python3 grading-machine.py setup /etc/unicon/machine.json
     python3 grading-machine.py self-test /etc/unicon/machine.json
 
-It builds the one shape phase 4.1 picked, provisionally: rootless Docker
-under a throwaway user, and nothing else takes a step. In order, `setup`:
+It builds one shape, provisionally: rootless Docker under a throwaway
+user, and nothing else takes a step. Ubuntu 24.04 is the one system it was
+run on; another is allowed, with a warning, when the self-test passes
+there. Every setting is checked, and this machine's architecture found in
+`agent_binary_sha256`, before anything on the machine is changed. Then, in
+order, `setup`:
 
-1. makes the throwaway user, which owns the rootless daemon, lingering on
+1. disables the agent, so nothing new is graded while the machine is set
+   up;
+2. makes the throwaway user, which owns the rootless daemon, lingering on
    so its daemon runs without a login, with cpu, cpuset, io, memory and
-   pids delegated to every user's systemd (#94), and the agent's own
-   user, a member of the throwaway user's group so it reaches the
-   daemon's socket and nothing of the throwaway user's traffic is its
-   own (open 18);
-2. allows `rootlesskit` its user namespace where AppArmor restricts them,
-   as Ubuntu 24.04 does (phase 4.1 point 1);
-3. checks that Docker's data root is a filesystem of its own, so a full
-   disk of images and caches stops at its size (#507 item 5);
-4. writes `/etc/unicon/hosts`, the names a step sees: the forge's and
+   pids delegated to every user's systemd, and the agent's own user, a
+   member of the throwaway user's group so it reaches the daemon's socket
+   and nothing of the throwaway user's traffic is its own;
+3. kills every container of the throwaway user's daemon and stops the
+   daemon, since a step's container outlives its agent, and stops there,
+   the wall still up, if the daemon still answers; only then takes the
+   wall down; and disables the machine's root Docker, whose `docker`
+   group is root on the machine and whose containers no wall holds;
+4. allows `rootlesskit` its user namespace where AppArmor restricts them,
+   as Ubuntu 24.04 does;
+5. checks that Docker's data root is a filesystem of its own, so a full
+   disk of images and caches stops at its size;
+6. counts out-of-memory kills in each cgroup alone (`memory_localevents`),
+   at every boot before the throwaway user's systemd starts, so a box's
+   kill does not mark the step container killed, which Woodpecker would
+   fail the step for;
+7. writes `/etc/unicon/hosts`, the names a step sees: the forge's and
    Garage's addresses and no other, and pins every name the daemon and
    the agent use in `/etc/hosts`, since under the wall no lookup of the
-   throwaway user's is answered (open 17);
-5. gives the rootless daemon its daemon.json: `"dns"` at an address that
-   answers nothing, so a container's lookup goes nowhere (phase 4.1
-   check 12), the data root, the socket the agent reaches, and any
-   registry it may pull from over plain HTTP;
-6. installs and starts the rootless daemon, and pulls the images named
-   in the settings while the machine can still reach them;
-7. puts the wall up: an nftables `inet` table on the throwaway user's
-   uid, which holds for IPv4 and IPv6 alike, letting its traffic reach
-   only the addresses the settings allow (phase 4.1 point 7), loaded at
-   every boot before the user's systemd starts;
-8. runs the self-test, and only when it passes starts the agent: as its
-   own user, against the rootless socket, with `/etc/unicon/hosts` as
-   every step's `/etc/hosts`, the memory a step's container may use, its
-   pool label and its shape's label.
+   throwaway user's is answered; and `/etc/unicon/cache-cap`, the most the
+   step cache may hold;
+8. gives the rootless daemon its daemon.json, written as the throwaway
+   user, whose folder it is: `"dns"` at an address that answers nothing,
+   so a container's lookup goes nowhere, the data root, the socket the
+   agent reaches, and any registry it may pull from over plain HTTP;
+9. installs and starts the rootless daemon, pulls the images named in the
+   settings while the machine can still reach them, and installs the
+   agent's binary from its pinned image once its SHA-256 is the one the
+   settings give;
+10. puts the wall up: an nftables `inet` table on the throwaway user's
+    uid, which holds for IPv4 and IPv6 alike, letting its traffic reach
+    only the addresses the settings allow, loaded at every boot before
+    the user's systemd starts, and again whenever `nftables.service`,
+    whose rules file flushes every table, is restarted or reloaded;
+11. runs the self-test, and only when it passes enables the agent: as
+    its own user, against the rootless socket, starting only while the
+    wall is loaded, with `/etc/unicon/hosts` as every step's
+    `/etc/hosts`, the cache's cap, the memory a step's container may use,
+    its pool label and its shape's label.
 
-Run again, it stops the agent, takes the wall down for its pulls, and
-puts everything back, so it is how a machine takes new settings, and how
-the pinned addresses follow the registry's when they change (open 17).
+Run again, it does the same, so it is how a machine takes new settings,
+and how the pinned addresses follow the registry's when they change.
 
 `self-test` checks, from a container of the rootless daemon on a network
 made as Woodpecker makes one per pipeline: that it reaches the first
-address the wall allows; that it reaches none of the outside addresses
-in the settings, over IPv4 or IPv6, and none of the machine's own; that
-a lookup gets no answer; that a container's memory and process limits
-bite, which a box's limits need (#94); that a privileged container, as
-an exec step is, can open no block device; that the daemon is rootless
-on cgroup v2 with the controllers delegated; and the kernel settings a
-box's syscall filter leaves to the machine (opens 26 and 30). It prints
-"network wall: on" or "network wall: off", and exits 1 when any check
-fails.
+address the wall allows; that it reaches none of the outside addresses in
+the settings, over IPv4 or IPv6, and none of the machine's own; and that a
+lookup gets no answer. Then, as the throwaway user in the machine's own
+network namespace, where the daemon's pulls leave: the outside addresses,
+the machine's resolver at 127.0.0.53, and its loopback ports. Each target
+is tried from root first, which the wall does not hold: one root does not
+reach either is "not tested", not passed, and so is one a step has no
+route to, since then no wall refused it; at least one outside address must
+be tested. Then that a container's memory and process limits bite, which a
+box's limits need; that the cgroup hierarchy kept every option it was
+remounted with; that a container over its own memory is marked
+killed and one whose child cgroup was killed is not; that a privileged
+container, as an exec step is, can open no block device; that the daemon
+is rootless on cgroup v2 with the controllers delegated; that the root
+Docker is stopped; and the kernel settings a box's syscall filter leaves
+to the machine. It prints "network wall: on" or "network
+wall: off", and exits 1 when any check fails.
 
-Not yet run on a real machine: everything here ran on a stand-in, an
-Ubuntu 24.04 container booting systemd over Docker Desktop's kernel,
-which has no AppArmor, so step 2 has not run. The production enrolment
-(the worker, feature 12) is to run this script. It stays within Python
-3.12's standard library, the one Ubuntu 24.04 ships.
+Run on a real Ubuntu 24.04 (arm64, in a VM) and on a stand-in, an Ubuntu
+24.04 container booting systemd over Docker Desktop's kernel. The
+production enrolment (the worker, feature 12) is to run this script. It
+stays within Python 3.12's standard library, the one Ubuntu 24.04 ships.
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import ipaddress
 import json
 import os
 import pwd
+import re
 import shutil
 import socket
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from collections.abc import Iterator, Sequence
@@ -88,15 +116,23 @@ SOCKET_DIRECTORY = Path("/run/unicon-docker")
 SOCKET_TMPFILES = Path("/etc/tmpfiles.d/unicon-docker.conf")
 UNICON = Path("/etc/unicon")
 STEP_HOSTS = UNICON / "hosts"
+CACHE_CAP = UNICON / "cache-cap"
 WALL_FILE = UNICON / "wall.nft"
 AGENT_ENV = UNICON / "agent.env"
 AGENT_BINARY = Path("/usr/local/bin/woodpecker-agent")
 AGENT_STATE = Path("/var/lib/unicon-agent")
 UNITS = Path("/etc/systemd/system")
+CGROUP_UNIT = UNITS / "unicon-cgroup.service"
+HOSTS = Path("/etc/hosts")
+CGROUP = Path("/sys/fs/cgroup")
+MOUNTINFO = Path("/proc/self/mountinfo")
+LOCAL_EVENTS = "memory_localevents"
+ROOT_DOCKER = ("docker.socket", "docker.service")
 HOSTS_BEGIN = "# unicon machine names: begin"
 HOSTS_END = "# unicon machine names: end"
 APPARMOR_SWITCH = Path("/proc/sys/kernel/apparmor_restrict_unprivileged_userns")
 APPARMOR_PROFILE = Path("/etc/apparmor.d/unicon-rootlesskit")
+TESTED_ON = ("ubuntu", "24.04")
 REQUIRED_TOOLS = (
     "nft",
     "systemctl",
@@ -106,6 +142,21 @@ REQUIRED_TOOLS = (
     "dockerd-rootless-setuptool.sh",
     "docker",
 )
+# A host name as /etc/hosts takes one: labels of letters, digits and
+# hyphens, dot separated.
+HOST_NAME = re.compile(
+    r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?"
+    r"(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)*"
+)
+SHA256 = re.compile(r"[0-9a-f]{64}")
+ARCHITECTURES = ("x86_64", "aarch64")
+"""The architectures `agent_binary_sha256` may name, as `uname -m` does."""
+USER_NAME = re.compile(r"[a-z_][a-z0-9_-]{0,31}")
+NO_LOGIN = ("/usr/sbin/nologin", "/sbin/nologin", "/bin/false", "/usr/bin/false")
+# An agent label's value: the agent reads its labels as `key=value` pairs
+# split on commas.
+LABEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
+ENVIRONMENT_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 # The kernel settings a box's own filter leaves open, with the least each
 # may be: unprivileged BPF refused (Ubuntu's default is 2), perf events
 # refused to every unprivileged user (Ubuntu's 4; 3 and up is Debian's and
@@ -116,6 +167,9 @@ KERNEL = (
     ("kernel.perf_event_paranoid", 3, "no perf events for unprivileged users"),
 )
 USERFAULTFD = "vm.unprivileged_userfaultfd"
+# What a probe gets when nothing it sent left the step, so no wall
+# refused it: no route, or no such address family.
+NO_ROUTE = ("ENETUNREACH", "EADDRNOTAVAIL", "EAFNOSUPPORT")
 
 
 class MachineError(Exception):
@@ -131,16 +185,24 @@ class Target:
 
     @classmethod
     def parse(cls, text: str) -> Target:
-        """`1.2.3.4:80` or `[fd41::40]:80`."""
+        """`1.2.3.4:80` or `[fd41::40]:80`: an IPv6 address in brackets, so
+        its last group is never read as the port."""
         if text.startswith("["):
-            address, _, port = text[1:].partition("]:")
+            address, bracket, port = text[1:].partition("]:")
         else:
-            address, _, port = text.rpartition(":")
+            address, bracket, port = text.rpartition(":")
         try:
-            ipaddress.ip_address(address)
+            parsed = ipaddress.ip_address(address)
             number = int(port)
         except ValueError as error:
             raise MachineError(f"{text!r} is not an address and a port") from error
+        if not bracket or (parsed.version == 6) != text.startswith("["):
+            raise MachineError(
+                f"{text!r} is not an address and a port; write an IPv6 address "
+                "in brackets, as [2001:db8::1]:443"
+            )
+        if not 1 <= number <= 65535:
+            raise MachineError(f"{text!r} has no port from 1 to 65535")
         return cls(address, number)
 
     @property
@@ -156,24 +218,35 @@ class Target:
 @dataclass(frozen=True)
 class Settings:
     """What the machine is told at enrolment. `server`, `agent_secret_file`,
-    `agent_image`, `data_root`, `step_hosts`, `wall_allow` and `test_image`
-    have no default.
+    `agent_image`, `agent_binary_sha256`, `data_root`, `step_hosts`,
+    `wall_allow` and `test_image` have no default.
 
+    `agent_binary_sha256` is the SHA-256 of `/bin/woodpecker-agent` in
+    `agent_image`, by the machine's architecture as `uname -m` names it,
+    `x86_64` or `aarch64`: the binary is copied out of an image the
+    throwaway user's daemon holds, so it runs only as pinned. `test_image`,
+    which the self-test runs privileged, is pinned by its digest, as
+    `agent_image` is. `grader_user` and `agent_user` differ, and neither is
+    root or a user who can log in. `pool` is a label's value: letters,
+    digits, `.`, `_` and `-`.
     `step_hosts` is every step's `/etc/hosts`: the forge's and Garage's
     names and addresses. `machine_hosts` is pinned in the machine's own
     `/etc/hosts`: every name the daemon pulls from and the agent dials.
     `wall_allow` is every address and port the throwaway user's traffic
     may reach, the step's and the daemon's alike; the first is the one the
     self-test expects a step to reach. `outside` is where the self-test
-    expects a step not to get. `pull` is pulled at setup, before the wall
-    goes up: the test image, and whatever a pipeline runs that the wall
-    keeps the daemon from pulling later. `agent_environment` is passed to
-    the agent as it is, after the variables this script sets.
+    expects a step not to get, and the machine itself to reach. `pull` is
+    pulled at setup, before the wall goes up: the test image, and whatever
+    a pipeline runs that the wall keeps the daemon from pulling later.
+    `cache_cap` is the most the step cache may hold, in bytes; a quarter
+    of the data root's size when not given. `agent_environment` is passed
+    to the agent as it is, after the variables this script sets.
     """
 
     server: str
     agent_secret_file: Path
     agent_image: str
+    agent_binary_sha256: dict[str, str]
     data_root: Path
     step_hosts: dict[str, str]
     wall_allow: tuple[Target, ...]
@@ -189,6 +262,7 @@ class Settings:
     )
     pull: tuple[str, ...] = ()
     insecure_registries: tuple[str, ...] = ()
+    cache_cap: int | None = None
     limit_mem: int | None = None
     max_workflows: int = 4
     agent_environment: dict[str, str] = field(default_factory=dict)
@@ -215,6 +289,7 @@ class Settings:
                 "server",
                 "agent_secret_file",
                 "agent_image",
+                "agent_binary_sha256",
                 "data_root",
                 "step_hosts",
                 "wall_allow",
@@ -226,30 +301,97 @@ class Settings:
             raise MachineError(f"missing settings: {', '.join(missing)}")
         values = dict(raw)
         for name in ("agent_secret_file", "data_root"):
+            if not isinstance(values[name], str):
+                raise MachineError(f"{name} is a path, as a text")
             values[name] = Path(str(values[name]))
         for name in ("wall_allow", "outside"):
             if name in values:
-                values[name] = tuple(Target.parse(str(t)) for t in _list(values, name))
+                values[name] = tuple(Target.parse(t) for t in _texts(values, name))
         for name in ("pull", "insecure_registries"):
             if name in values:
-                values[name] = tuple(str(item) for item in _list(values, name))
+                values[name] = tuple(_texts(values, name))
         settings = cls(**values)  # type: ignore[arg-type]
         settings.check()
         return settings
 
     def check(self) -> None:
+        """Refuse settings of the wrong type or that would leave the machine
+        unfit to grade, all before setup changes anything."""
+        for name in (
+            "server",
+            "agent_image",
+            "test_image",
+            "shape",
+            "pool",
+            "grader_user",
+            "agent_user",
+        ):
+            if not isinstance(getattr(self, name), str):
+                raise MachineError(f"{name} is a text")
+        for name in (
+            "agent_binary_sha256",
+            "step_hosts",
+            "machine_hosts",
+            "agent_environment",
+        ):
+            value = getattr(self, name)
+            if not isinstance(value, dict) or not all(
+                isinstance(key, str) and isinstance(item, str)
+                for key, item in value.items()
+            ):
+                raise MachineError(f"{name} is an object of texts")
         if self.shape not in SHAPES:
             raise MachineError(
                 f"shape {self.shape!r} is not built; the one shape is rootless"
             )
+        if not LABEL.fullmatch(self.pool):
+            raise MachineError(
+                f"pool {self.pool!r} is not a label's value: letters, digits, "
+                "'.', '_' and '-'"
+            )
         if not self.wall_allow:
             raise MachineError("wall_allow is empty: a step could reach nothing")
         if self.grader_user == self.agent_user:
-            raise MachineError("the agent runs as a user of its own (open 18)")
+            raise MachineError("grader_user and agent_user must differ")
+        for name in ("grader_user", "agent_user"):
+            user = getattr(self, name)
+            if not USER_NAME.fullmatch(user) or user == "root" or can_log_in(user):
+                raise MachineError(
+                    f"{name} {user!r} is root, a user who can log in, or not a "
+                    "user name; name a user of its own, made by setup"
+                )
         if "@sha256:" not in self.agent_image:
             raise MachineError("agent_image is pinned by its digest")
+        if "@sha256:" not in self.test_image:
+            raise MachineError(
+                "test_image is pinned by its digest: the self-test runs it privileged"
+            )
+        if (
+            not self.agent_binary_sha256
+            or not set(self.agent_binary_sha256) <= set(ARCHITECTURES)
+            or not all(map(SHA256.fullmatch, self.agent_binary_sha256.values()))
+        ):
+            raise MachineError(
+                "agent_binary_sha256 gives the agent binary's SHA-256 in hex for "
+                f"{' or '.join(ARCHITECTURES)}, or both"
+            )
+        if not whole(self.max_workflows) or self.max_workflows < 1:
+            raise MachineError("max_workflows is a whole number, at least 1")
+        if self.limit_mem is not None and (
+            not whole(self.limit_mem) or self.limit_mem < 1
+        ):
+            raise MachineError("limit_mem is a number of bytes")
+        if self.cache_cap is not None and (
+            not whole(self.cache_cap) or self.cache_cap < 2**30
+        ):
+            raise MachineError("cache_cap is a number of bytes, at least 1 GiB")
+        for name in self.agent_environment:
+            if not ENVIRONMENT_NAME.fullmatch(name):
+                raise MachineError(f"agent_environment names {name!r}")
         for hosts in (self.step_hosts, self.machine_hosts):
             for name, address in hosts.items():
+                if not HOST_NAME.fullmatch(name):
+                    raise MachineError(f"{name!r} is not a host name")
                 try:
                     ipaddress.ip_address(address)
                 except ValueError as error:
@@ -262,11 +404,31 @@ class Settings:
         return f"pool={self.pool},shape={self.shape}"
 
 
-def _list(values: dict[str, object], name: str) -> list[object]:
+def _texts(values: dict[str, object], name: str) -> list[str]:
     value = values[name]
-    if not isinstance(value, list):
-        raise MachineError(f"{name} is a list")
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise MachineError(f"{name} is a list of texts")
     return value
+
+
+def whole(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def can_log_in(user: str) -> bool:
+    """Whether `user` is a user of the machine already, root or one whose
+    shell lets them log in: setup puts the agent's user in the throwaway
+    user's group and walls the throwaway user's traffic, which is for
+    users of their own."""
+    try:
+        found = pwd.getpwnam(user)
+    except KeyError:
+        return False
+    return found.pw_uid == 0 or found.pw_shell not in NO_LOGIN
+
+
+def architecture() -> str:
+    return os.uname().machine
 
 
 # What is written. Each is a function of the settings alone, so a test can
@@ -356,8 +518,10 @@ def daemon_json(settings: Settings, uid: int) -> str:
 
 def agent_environment(settings: Settings, secret: str, limit_mem: int) -> str:
     """The agent's environment file. Woodpecker reads the token from it, so
-    it is written readable by root alone.
+    it is written readable by root alone. Every step gets the machine's
+    hosts file and the cache's cap, read-only.
     """
+    volumes = [f"{STEP_HOSTS}:/etc/hosts:ro", f"{CACHE_CAP}:{CACHE_CAP}:ro"]
     values = {
         "WOODPECKER_SERVER": settings.server,
         "WOODPECKER_AGENT_SECRET": secret,
@@ -368,7 +532,7 @@ def agent_environment(settings: Settings, secret: str, limit_mem: int) -> str:
         "WOODPECKER_HEALTHCHECK_ADDR": "127.0.0.1:3000",
         "WOODPECKER_BACKEND": "docker",
         "DOCKER_HOST": f"unix://{SOCKET_DIRECTORY}/docker.sock",
-        "WOODPECKER_BACKEND_DOCKER_VOLUMES": f"{STEP_HOSTS}:/etc/hosts:ro",
+        "WOODPECKER_BACKEND_DOCKER_VOLUMES": ",".join(volumes),
         "WOODPECKER_BACKEND_DOCKER_LIMIT_MEM": str(limit_mem),
         **settings.agent_environment,
     }
@@ -376,6 +540,12 @@ def agent_environment(settings: Settings, secret: str, limit_mem: int) -> str:
         if "\n" in value:
             raise MachineError(f"{name} holds a line break")
     return "".join(f"{name}={value}\n" for name, value in values.items())
+
+
+def cache_cap(settings: Settings, data_root_size: int) -> int:
+    """The cache's cap: the setting, or a quarter of the data root, which
+    the images and every step's own files share with it."""
+    return settings.cache_cap or data_root_size // 4
 
 
 def rootlesskit_profile() -> str:
@@ -394,33 +564,104 @@ def rootlesskit_profile() -> str:
 
 
 def wall_unit(uid: int) -> str:
+    """The wall at boot: before the network and the throwaway user's
+    systemd, and after `nftables.service`, whose rules file flushes every
+    table. A restart of `nftables.service` restarts it after, and the agent
+    with it, whose unit requires it; a reload loads it again after. Stopping
+    the unit takes the wall down.
+    """
     return (
         "[Unit]\n"
         "Description=Unicon grading wall\n"
         "DefaultDependencies=no\n"
-        "Before=network-pre.target user@" + str(uid) + ".service\n"
+        "After=nftables.service\n"
+        "PartOf=nftables.service\n"
+        "ReloadPropagatedFrom=nftables.service\n"
+        f"Before=network-pre.target user@{uid}.service\n"
         "Wants=network-pre.target\n\n"
         "[Service]\n"
         "Type=oneshot\n"
         "RemainAfterExit=yes\n"
-        f"ExecStart=/usr/sbin/nft -f {WALL_FILE}\n\n"
+        f"ExecStart=/usr/sbin/nft -f {WALL_FILE}\n"
+        f"ExecReload=/usr/sbin/nft -f {WALL_FILE}\n"
+        f"ExecStop=-/usr/sbin/nft delete table inet {WALL_TABLE}\n\n"
+        "[Install]\n"
+        "WantedBy=multi-user.target\n"
+    )
+
+
+def cgroup_mount(mountinfo: str) -> list[str]:
+    """The cgroup2 hierarchy's options at `CGROUP`, from
+    `/proc/self/mountinfo`: the mount's own, such as `nosuid`, then its
+    superblock's, such as `nsdelegate`."""
+    for line in mountinfo.splitlines():
+        fields = line.split()
+        if len(fields) > 5 and fields[4] == str(CGROUP) and " - cgroup2 " in line:
+            superblock = line.split(" - ", 1)[1].split()[2]
+            return fields[5].split(",") + superblock.split(",")
+    raise MachineError(f"{CGROUP} is not a cgroup2 hierarchy")
+
+
+def cgroup_options(mountinfo: str) -> str:
+    """The options to remount the cgroup2 hierarchy with: those it has, the
+    mount's and its superblock's, which a remount would otherwise clear,
+    and `memory_localevents`. Only a process of the machine's own cgroup
+    namespace changes them.
+    """
+    kept = [o for o in cgroup_mount(mountinfo) if o not in ("rw", "ro", LOCAL_EVENTS)]
+    return ",".join(dict.fromkeys([*kept, LOCAL_EVENTS]))
+
+
+def remounted_with(unit: str) -> list[str]:
+    """The options `cgroup_unit` remounts the hierarchy with."""
+    for line in unit.splitlines():
+        if line.startswith("ExecStart=") and " -o remount," in line:
+            return line.split(" -o remount,", 1)[1].split()[0].split(",")
+    raise MachineError(f"{CGROUP_UNIT} remounts nothing")
+
+
+def cgroup_unit(uid: int, options: str) -> str:
+    """`memory_localevents` at boot, before the throwaway user's systemd, so
+    a container's `memory.events` counts its own kills and not its
+    children's: a box killed for its memory leaves exec's container
+    unmarked, and Woodpecker does not fail the step. It fails when the
+    option did not take on the hierarchy at `CGROUP`.
+    """
+    # The hierarchy's own line of mountinfo, its fifth field the mount point,
+    # with the option among its superblock's; systemd reads `$$` as `$`.
+    taken = f"^([^ ]+ ){{4}}{CGROUP} .* - cgroup2 [^ ]+ ([^ ]+,)?{LOCAL_EVENTS}(,|$$)"
+    return (
+        "[Unit]\n"
+        "Description=Unicon: count memory kills in each cgroup alone\n"
+        "DefaultDependencies=no\n"
+        f"Before=user@{uid}.service unicon-agent.service\n\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        "RemainAfterExit=yes\n"
+        f"ExecStart=/usr/bin/mount -o remount,{options} {CGROUP}\n"
+        f"ExecStartPost=/usr/bin/grep -Eq '{taken}' /proc/self/mountinfo\n\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"
     )
 
 
 def agent_unit(settings: Settings, uid: int) -> str:
+    """The agent, as its own user, starting only while the wall's table is
+    loaded and once the cgroup option is set.
+    """
     return (
         "[Unit]\n"
         "Description=Unicon grading agent\n"
-        f"After=network-online.target unicon-wall.service user@{uid}.service\n"
-        f"Requires=unicon-wall.service\n"
+        f"After=network-online.target unicon-wall.service unicon-cgroup.service "
+        f"user@{uid}.service\n"
+        "Requires=unicon-wall.service unicon-cgroup.service\n"
         "Wants=network-online.target\n\n"
         "[Service]\n"
         f"User={settings.agent_user}\n"
         f"Group={settings.agent_user}\n"
         f"SupplementaryGroups={settings.grader_user}\n"
         f"EnvironmentFile={AGENT_ENV}\n"
+        f"ExecStartPre=+/usr/sbin/nft list table inet {WALL_TABLE}\n"
         f"ExecStart={AGENT_BINARY}\n"
         "Restart=always\n"
         "RestartSec=5\n"
@@ -431,6 +672,18 @@ def agent_unit(settings: Settings, uid: int) -> str:
         f"ReadWritePaths={AGENT_STATE}\n\n"
         "[Install]\n"
         "WantedBy=multi-user.target\n"
+    )
+
+
+def system_warning(os_release: str) -> str | None:
+    """A warning when the machine is not the system the setup was run on."""
+    values = dict(line.split("=", 1) for line in os_release.splitlines() if "=" in line)
+    found = tuple(values.get(key, "").strip('"') for key in ("ID", "VERSION_ID"))
+    if found == TESTED_ON:
+        return None
+    return (
+        f"this is {' '.join(found).strip() or 'an unknown system'}, not Ubuntu "
+        "24.04, the one this setup was run on: allowed when the self-test passes"
     )
 
 
@@ -484,9 +737,11 @@ def as_user(user: str, uid: int, *command: str, **options: object) -> str:
     return done.stdout
 
 
-def docker(*arguments: str, check: bool = True, timeout: float = 300) -> str:
+def docker_done(
+    *arguments: str, check: bool = True, timeout: float = 300
+) -> subprocess.CompletedProcess[str]:
     """The rootless daemon, through the agent's socket, as root."""
-    done = run(
+    return run(
         "docker",
         "-H",
         f"unix://{SOCKET_DIRECTORY}/docker.sock",
@@ -495,14 +750,22 @@ def docker(*arguments: str, check: bool = True, timeout: float = 300) -> str:
         capture=True,
         timeout=timeout,
     )
-    return done.stdout
+
+
+def docker(*arguments: str, check: bool = True, timeout: float = 300) -> str:
+    return docker_done(*arguments, check=check, timeout=timeout).stdout
 
 
 def write(path: Path, text: str, mode: int = 0o644) -> None:
+    """`text` at `path`, by way of a file made new, with its mode from the
+    start, and renamed over it."""
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(path.name + ".new")
-    temporary.write_text(text)
-    temporary.chmod(mode)
+    temporary.unlink(missing_ok=True)
+    descriptor = os.open(temporary, os.O_CREAT | os.O_EXCL | os.O_WRONLY, mode)
+    with os.fdopen(descriptor, "w") as file:
+        os.fchmod(file.fileno(), mode)
+        file.write(text)
     temporary.replace(path)
 
 
@@ -525,37 +788,69 @@ def setup(settings: Settings) -> int:
     secret = settings.agent_secret_file.read_text().strip()
     if not secret:
         raise MachineError(f"{settings.agent_secret_file} is empty")
+    if architecture() not in settings.agent_binary_sha256:
+        raise MachineError(
+            f"agent_binary_sha256 gives no digest for this machine's {architecture()}"
+        )
+    with contextlib.suppress(OSError):
+        warning = system_warning(Path("/etc/os-release").read_text())
+        if warning:
+            say(f"warning: {warning}")
 
-    run("systemctl", "stop", "unicon-agent.service", check=False, capture=True)
+    # Nothing is graded until the self-test passes again, and a reboot on
+    # the way does not start the agent. No step runs once the wall is down,
+    # and the wall comes down through its own unit, written first so that
+    # it knows how.
+    run(
+        "systemctl",
+        "disable",
+        "--now",
+        "unicon-agent.service",
+        check=False,
+        capture=True,
+    )
     grader = make_users(settings)
     uid = grader.pw_uid
+    write(UNITS / "unicon-wall.service", wall_unit(uid))
+    run("systemctl", "daemon-reload")
+    stop_daemon(settings, uid)
+    run("systemctl", "stop", "unicon-wall.service", check=False, capture=True)
+    disable_root_docker()
     allow_rootlesskit()
-    check_data_root(settings.data_root, grader)
+    size = check_data_root(settings.data_root, grader)
+    count_kills_locally(uid)
 
     write(STEP_HOSTS, step_hosts(settings.step_hosts))
-    hosts = Path("/etc/hosts")
+    write(CACHE_CAP, f"{cache_cap(settings, size)}\n")
     # In place, not renamed over: in a container, as the stand-in is,
     # /etc/hosts is a mount, which a rename cannot replace.
-    hosts.write_text(pinned_hosts(hosts.read_text(), settings.machine_hosts))
+    HOSTS.write_text(pinned_hosts(HOSTS.read_text(), settings.machine_hosts))
     write(
         SOCKET_TMPFILES,
         f"d {SOCKET_DIRECTORY} 0750 {settings.grader_user} {settings.grader_user} -\n",
     )
     run("systemd-tmpfiles", "--create", str(SOCKET_TMPFILES))
-    config = Path(grader.pw_dir) / ".config/docker"
-    write(config / "daemon.json", daemon_json(settings, uid))
-    run("chown", "-R", f"{grader.pw_uid}:{grader.pw_gid}", str(config.parent))
+    # As the throwaway user, whose folder it is: root writing there would
+    # follow whatever links that user left in it.
+    as_user(
+        settings.grader_user,
+        uid,
+        "sh",
+        "-c",
+        'umask 077 && mkdir -p "$1" && cat > "$1/daemon.json.new" '
+        '&& mv -f "$1/daemon.json.new" "$1/daemon.json"',
+        "sh",
+        str(Path(grader.pw_dir) / ".config/docker"),
+        stdin=daemon_json(settings, uid),
+    )
 
-    run("nft", "delete", "table", "inet", WALL_TABLE, check=False, capture=True)
     start_daemon(settings, grader)
     for image in (settings.test_image, *settings.pull):
         pull(image)
     install_agent(settings)
 
     write(WALL_FILE, wall_table(uid, settings.wall_allow))
-    write(UNITS / "unicon-wall.service", wall_unit(uid))
-    run("systemctl", "daemon-reload")
-    run("systemctl", "enable", "--now", "unicon-wall.service", capture=True)
+    run("systemctl", "enable", "unicon-wall.service", capture=True)
     run("systemctl", "restart", "unicon-wall.service", capture=True)
 
     limit = settings.limit_mem or memory_total()
@@ -567,7 +862,7 @@ def setup(settings: Settings) -> int:
     run("systemctl", "daemon-reload")
 
     if self_test(settings) != 0:
-        say("the self-test failed, so the agent is not started")
+        say("the self-test failed, so the agent is not enabled")
         return 1
     run("systemctl", "enable", "--now", "unicon-agent.service", capture=True)
     say(f"agent started, labels {settings.labels}, memory limit {limit} bytes")
@@ -615,6 +910,30 @@ def make_users(settings: Settings) -> pwd.struct_passwd:
     return grader
 
 
+def stop_daemon(settings: Settings, uid: int) -> None:
+    """Kill every container of the throwaway user's daemon, then stop the
+    daemon, before the wall comes down: a step's container outlives its
+    agent. The daemon starts again only once the settings are in place.
+    Refuses to go on, the wall still up, while the daemon answers."""
+    running = docker("ps", "--quiet", check=False, timeout=60).split()
+    if running:
+        docker("kill", *running, check=False, timeout=60)
+    as_user(
+        settings.grader_user,
+        uid,
+        "systemctl",
+        "--user",
+        "stop",
+        "docker.service",
+        check=False,
+        timeout=120,
+    )
+    if docker("info", "--format", "{{.ServerVersion}}", check=False, timeout=60):
+        raise MachineError(
+            "the throwaway user's daemon did not stop, so the wall stays up"
+        )
+
+
 def subordinate_count(table: Path, user: str) -> int:
     total = 0
     for line in table.read_text().splitlines():
@@ -622,6 +941,16 @@ def subordinate_count(table: Path, user: str) -> int:
         if name == user:
             total += int(rest.split(":")[1])
     return total
+
+
+def disable_root_docker() -> None:
+    """The root daemon `docker-ce` starts, stopped and kept from starting:
+    no step uses it, and its group is root on the machine."""
+    found = run(
+        "systemctl", "disable", "--now", *ROOT_DOCKER, check=False, capture=True
+    )
+    if found.returncode == 0:
+        say("root Docker: stopped and disabled")
 
 
 def allow_rootlesskit() -> None:
@@ -633,7 +962,9 @@ def allow_rootlesskit() -> None:
     say("AppArmor: rootlesskit may make its user namespace")
 
 
-def check_data_root(root: Path, grader: pwd.struct_passwd) -> None:
+def check_data_root(root: Path, grader: pwd.struct_passwd) -> int:
+    """The data root's size, once it is a filesystem of its own and the
+    throwaway user's."""
     if not root.is_dir() or not os.path.ismount(root):
         raise MachineError(
             f"{root} is not a filesystem of its own; mount one there, so a "
@@ -643,6 +974,19 @@ def check_data_root(root: Path, grader: pwd.struct_passwd) -> None:
     root.chmod(0o700)
     usage = shutil.disk_usage(root)
     say(f"data root {root}: {usage.total // 2**30} GiB of its own")
+    return usage.total
+
+
+def count_kills_locally(uid: int) -> None:
+    options = cgroup_options(MOUNTINFO.read_text())
+    write(CGROUP_UNIT, cgroup_unit(uid, options))
+    run("systemctl", "daemon-reload")
+    run("systemctl", "enable", "unicon-cgroup.service", capture=True)
+    started = run(
+        "systemctl", "restart", "unicon-cgroup.service", check=False, capture=True
+    )
+    if started.returncode != 0:
+        say(f"warning: {CGROUP} did not take {LOCAL_EVENTS}; the self-test says why")
 
 
 def start_daemon(settings: Settings, grader: pwd.struct_passwd) -> None:
@@ -682,16 +1026,32 @@ def pull(image: str, tries: int = 3) -> None:
 def install_agent(settings: Settings) -> None:
     """The agent binary, copied out of its pinned image, so the agent runs
     on the machine as its own user rather than in a container of the
-    throwaway user's daemon, whose traffic the wall would hold.
+    throwaway user's daemon, whose traffic the wall would hold. The daemon
+    is the throwaway user's, so what it hands over is installed only as a
+    plain file with the SHA-256 the settings pin for this architecture.
     """
+    expected = settings.agent_binary_sha256[architecture()]
     pull(settings.agent_image)
     container = docker("create", settings.agent_image).strip()
+    staging = Path(
+        tempfile.mkdtemp(prefix=".woodpecker-agent-", dir=AGENT_BINARY.parent)
+    )
     try:
-        docker("cp", f"{container}:/bin/woodpecker-agent", str(AGENT_BINARY))
+        copied = staging / AGENT_BINARY.name
+        docker("cp", f"{container}:/bin/woodpecker-agent", str(copied))
+        if copied.is_symlink() or not copied.is_file():
+            raise MachineError("the agent image's /bin/woodpecker-agent is not a file")
+        digest = hashlib.sha256(copied.read_bytes()).hexdigest()
+        if digest != expected:
+            raise MachineError(
+                f"the agent binary's SHA-256 is {digest}, not the pinned {expected}"
+            )
+        os.chown(copied, 0, 0)
+        copied.chmod(0o755)
+        copied.replace(AGENT_BINARY)
     finally:
         docker("rm", container, check=False)
-    os.chown(AGENT_BINARY, 0, 0)
-    AGENT_BINARY.chmod(0o755)
+        shutil.rmtree(staging, ignore_errors=True)
 
 
 def memory_total() -> int:
@@ -704,18 +1064,23 @@ def memory_total() -> int:
 # The self-test.
 
 PROBE = """
-import json, socket, sys
+import errno, json, socket, sys
+def said(error):
+    return errno.errorcode.get(error.errno, type(error).__name__)
 out = {}
-for spec in json.loads(sys.argv[1]):
-    address, port = spec
+for address, port in json.loads(sys.argv[1]):
     family = socket.AF_INET6 if ":" in address else socket.AF_INET
-    s = socket.socket(family, socket.SOCK_STREAM)
+    try:
+        s = socket.socket(family, socket.SOCK_STREAM)
+    except OSError as error:
+        out[f"{address}:{port}"] = said(error)
+        continue
     s.settimeout(4)
     try:
         s.connect((address, port))
         out[f"{address}:{port}"] = "connected"
     except OSError as error:
-        out[f"{address}:{port}"] = type(error).__name__
+        out[f"{address}:{port}"] = said(error)
     finally:
         s.close()
 try:
@@ -738,6 +1103,31 @@ try:
 except OSError:
     pass
 print(made)
+"""
+# What a box is to the step container exec runs in: a child cgroup with a
+# memory limit of its own, whose process is killed for going over it.
+BOX_KILLED = """
+import os, subprocess
+root = "/sys/fs/cgroup"
+os.makedirs(root + "/init", exist_ok=True)
+with open(root + "/init/cgroup.procs", "w") as f:
+    f.write(str(os.getpid()))
+with open(root + "/cgroup.subtree_control", "w") as f:
+    f.write("+memory")
+os.makedirs(root + "/box", exist_ok=True)
+with open(root + "/box/memory.max", "w") as f:
+    f.write(str(32 * 2**20))
+try:
+    with open(root + "/box/memory.swap.max", "w") as f:
+        f.write("0")
+except OSError:
+    pass
+def enter():
+    with open(root + "/box/cgroup.procs", "w") as f:
+        f.write("0")
+subprocess.call(["python3", "-c", "x = bytearray(256 * 2**20)"], preexec_fn=enter)
+events = dict(line.split() for line in open(root + "/box/memory.events"))
+print(events.get("oom_kill", "0"))
 """
 BLOCK_DEVICES = """
 import os, stat
@@ -765,6 +1155,9 @@ class Report:
             self.failed.append(what)
         return passed
 
+    def untested(self, what: str, why: str) -> None:
+        say(f"--   {what} (not tested: {why})")
+
 
 def self_test(settings: Settings) -> int:
     report = Report()
@@ -778,8 +1171,10 @@ def self_test(settings: Settings) -> int:
     )
     report.check(wall_up, f"the nftables table {WALL_TABLE} is loaded")
     check_daemon(settings, grader, report)
-    held = check_reach(settings, report)
+    check_root_docker(report)
+    held = check_reach(settings, grader, report)
     check_limits(settings, report)
+    check_kills(settings, report)
     check_block_devices(settings, report)
     check_kernel(report)
     say(f"network wall: {'on' if wall_up and held else 'off'}")
@@ -814,6 +1209,22 @@ def check_daemon(settings: Settings, grader: pwd.struct_passwd, report: Report) 
         set(DELEGATED) <= have,
         "cpu, cpuset, io, memory and pids are delegated",
         " ".join(sorted(have)),
+    )
+
+
+def check_root_docker(report: Report) -> None:
+    states = run(
+        "systemctl", "is-active", *ROOT_DOCKER, check=False, capture=True
+    ).stdout.split()
+    active = [
+        unit
+        for unit, state in zip(ROOT_DOCKER, states, strict=False)
+        if state == "active"
+    ]
+    report.check(
+        not active,
+        "the root Docker is stopped",
+        f"{' and '.join(active)} active" if active else "",
     )
 
 
@@ -855,21 +1266,54 @@ def listening() -> Iterator[int]:
         server.close()
 
 
-def check_reach(settings: Settings, report: Report) -> bool:
+def probe(targets: Sequence[Target], *before: str) -> dict[str, str]:
+    """What `PROBE` got for each target and for a lookup, as root on the
+    machine, or run after `before`."""
+    found = json.dumps([[t.address, t.port] for t in targets])
+    output = run(*before, "python3", "-c", PROBE, found, capture=True, timeout=120)
+    return dict(json.loads(output.stdout.strip().splitlines()[-1]))
+
+
+def held_at(report: Report, what: str, control: str, seen: str, side: str) -> bool:
+    """One target the wall must hold, from what root got (`control`), which
+    the wall does not hold, and what `side` got (`seen`). False only when
+    it got through; "not tested" when root does not get there either, or
+    `side` has no route, since then no wall refused it.
+    """
+    if control not in ("connected", "answered"):
+        report.untested(what, f"the machine itself does not get there: {control}")
+        return True
+    if seen in NO_ROUTE:
+        report.untested(what, f"{side} has no route there: {seen}")
+        return True
+    return report.check(seen not in ("connected", "answered"), what, seen)
+
+
+def check_reach(settings: Settings, grader: pwd.struct_passwd, report: Report) -> bool:
     """From a container on a network made as Woodpecker makes one per
-    pipeline. True when nothing outside the wall was reached.
+    pipeline, then as the throwaway user in the machine's own network
+    namespace, where the daemon's pulls leave, each target tried from root
+    first. True when nothing the wall should hold got through.
     """
     network = "unicon-self-test"
     docker("network", "rm", network, check=False)
     docker("network", "create", "--ipv6", network, check=False)
     if network not in docker("network", "ls", "--format", "{{.Name}}"):
         docker("network", "create", network)
-    held = True
+    allowed = settings.wall_allow[0]
     try:
         with listening() as port:
+            # The listener answers on every address of the machine, so
+            # root's own reach of these needs no trying.
             own = [Target(address, port) for address in machine_addresses()]
             own.append(Target("10.0.2.2", port))
-            allowed = settings.wall_allow[0]
+            loopback = [
+                Target("127.0.0.53", 53),
+                Target("127.0.0.1", 3000),
+                Target("127.0.0.1", port),
+            ]
+            control = probe([*settings.outside, *loopback])
+            control |= {f"{t.address}:{t.port}": "connected" for t in own}
             targets = [allowed, *settings.outside, *own]
             raw = docker(
                 "run",
@@ -886,42 +1330,69 @@ def check_reach(settings: Settings, report: Report) -> bool:
                 json.dumps([[t.address, t.port] for t in targets]),
                 timeout=120,
             )
-            seen = json.loads(raw.strip().splitlines()[-1])
+            step = dict(json.loads(raw.strip().splitlines()[-1]))
+            user = probe(
+                [*settings.outside, *loopback],
+                "runuser",
+                "-u",
+                settings.grader_user,
+                "--",
+                "env",
+                f"XDG_RUNTIME_DIR=/run/user/{grader.pw_uid}",
+                "PATH=/usr/local/bin:/usr/bin:/bin",
+            )
     finally:
         docker("network", "rm", network, check=False)
 
-    def result(target: Target) -> str:
-        return str(seen[f"{target.address}:{target.port}"])
+    def key(target: Target) -> str:
+        return f"{target.address}:{target.port}"
 
     report.check(
-        result(allowed) == "connected",
+        step[key(allowed)] == "connected",
         f"a step reaches {allowed}, the first address the wall allows",
-        result(allowed),
+        step[key(allowed)],
     )
+    held = True
     for target in settings.outside:
-        held &= report.check(
-            result(target) != "connected",
-            f"a step does not reach {target} outside",
-            result(target),
-        )
+        what = f"a step does not reach {target} outside"
+        held &= held_at(report, what, control[key(target)], step[key(target)], "a step")
+    tested = [
+        target
+        for target in settings.outside
+        if control[key(target)] == "connected" and step[key(target)] not in NO_ROUTE
+    ]
+    report.check(
+        bool(tested),
+        "at least one outside address was tested from a step",
+        "" if tested else "name one in `outside` that the machine reaches",
+    )
     for target in own:
-        held &= report.check(
-            result(target) != "connected",
-            f"a step does not reach the machine at {target}",
-            result(target),
-        )
-    held &= report.check(
-        seen["lookup"] != "answered", "a step's lookup gets no answer", seen["lookup"]
+        what = f"a step does not reach the machine at {target}"
+        held &= held_at(report, what, control[key(target)], step[key(target)], "a step")
+    held &= held_at(
+        report,
+        "a step's lookup gets no answer",
+        control["lookup"],
+        step["lookup"],
+        "a step",
+    )
+    for target in [*settings.outside, *loopback]:
+        what = f"the throwaway user does not reach {target}"
+        side = "the throwaway user"
+        held &= held_at(report, what, control[key(target)], user[key(target)], side)
+    held &= held_at(
+        report,
+        "the throwaway user's lookup gets no answer",
+        control["lookup"],
+        user["lookup"],
+        "the throwaway user",
     )
     return held
 
 
 def check_limits(settings: Settings, report: Report) -> None:
     limited = ("--memory", "64m", "--memory-swap", "64m", "--pids-limit", "32")
-    hog = run(
-        "docker",
-        "-H",
-        f"unix://{SOCKET_DIRECTORY}/docker.sock",
+    hog = docker_done(
         "run",
         "--rm",
         *limited,
@@ -931,7 +1402,6 @@ def check_limits(settings: Settings, report: Report) -> None:
         "-c",
         MEMORY_HOG,
         check=False,
-        capture=True,
         timeout=120,
     )
     report.check(
@@ -956,6 +1426,74 @@ def check_limits(settings: Settings, report: Report) -> None:
         "a container stops at its process limit",
         f"{forks or 'nothing'} processes made of 200",
     )
+
+
+def check_kills(settings: Settings, report: Report) -> None:
+    """A container's own out-of-memory kill marks it killed, which the agent
+    fails a step for; its child cgroup's, as a box's is, does not, when
+    the hierarchy counts each cgroup's kills alone."""
+    mounted = cgroup_mount(MOUNTINFO.read_text())
+    report.check(
+        LOCAL_EVENTS in mounted,
+        f"{CGROUP} counts each cgroup's memory kills alone ({LOCAL_EVENTS})",
+        ",".join(mounted),
+    )
+    remount = remounted_with(CGROUP_UNIT.read_text()) if CGROUP_UNIT.is_file() else []
+    lost = [option for option in remount if option not in mounted]
+    report.check(
+        bool(remount) and not lost,
+        f"{CGROUP} kept every option it was remounted with",
+        f"lost {','.join(lost)}" if lost else "" if remount else f"no {CGROUP_UNIT}",
+    )
+    for name, arguments, wanted, what in (
+        (
+            "unicon-self-test-own",
+            (
+                "--memory",
+                "64m",
+                "--memory-swap",
+                "64m",
+                "--entrypoint",
+                "python3",
+                settings.test_image,
+                "-c",
+                MEMORY_HOG,
+            ),
+            "true",
+            "a container over its own memory is marked killed",
+        ),
+        (
+            "unicon-self-test-box",
+            (
+                "--privileged",
+                "--entrypoint",
+                "python3",
+                settings.test_image,
+                "-c",
+                BOX_KILLED,
+            ),
+            "false",
+            "a container whose box was killed for its memory is not marked killed",
+        ),
+    ):
+        docker("rm", "-f", name, check=False)
+        try:
+            ran = docker_done(
+                "run", "--name", name, *arguments, check=False, timeout=120
+            )
+            marked = docker("inspect", "--format", "{{.State.OOMKilled}}", name).strip()
+        finally:
+            docker("rm", "-f", name, check=False)
+        detail = f"exit {ran.returncode}, OOMKilled {marked}"
+        if name.endswith("box"):
+            killed = ran.stdout.strip().splitlines()[-1:] == ["1"]
+            report.check(
+                marked == wanted and ran.returncode == 0 and killed,
+                what,
+                detail + ("" if killed else ", the box was not killed"),
+            )
+        else:
+            report.check(marked == wanted, what, detail)
 
 
 def check_block_devices(settings: Settings, report: Report) -> None:

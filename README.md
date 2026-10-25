@@ -579,18 +579,40 @@ user, `unicon-grader`, with its data root on a filesystem of its own, and
 an nftables table on that user's uid that lets its traffic reach only the
 addresses the settings allow, IPv4 and IPv6 alike. The daemon tells
 containers to ask `192.0.2.1` for names, which answers nothing; every step
-gets `/etc/unicon/hosts` as its `/etc/hosts`, and the names the daemon and
-the agent use are pinned in the machine's own. The agent runs as a user of
-its own, `unicon-agent`, against the daemon's socket, with the labels
-`pool=platform,shape=rootless` and `WOODPECKER_BACKEND_DOCKER_LIMIT_MEM`.
-The self-test runs at the end of `setup`, which starts the agent only when
-every check passes, and prints `network wall: on` or `off`. Run again, it
-takes new settings and new pinned addresses.
+gets `/etc/unicon/hosts` as its `/etc/hosts` and `/etc/unicon/cache-cap`,
+and the names the daemon and the agent use are pinned in the machine's own.
+The root Docker is disabled, and the cgroup hierarchy counts each cgroup's
+memory kills alone, so a box killed for its memory does not fail its step.
+The agent runs as a user of its own, `unicon-agent`, from a binary checked
+against `agent_binary_sha256`, starts only while the wall is loaded, and
+has the labels `pool=platform,shape=rootless` and
+`WOODPECKER_BACKEND_DOCKER_LIMIT_MEM`. `setup` checks every setting before
+it changes anything, disables the agent first, kills the throwaway user's
+containers and stops its daemon before it takes the wall down, and
+enables the agent only when every check of the self-test passes; a check
+that could not be tried says "not tested". It prints `network wall: on`
+or `off`. Run again, it takes new settings and new pinned addresses. A
+restart or reload of `nftables.service`, whose rules file flushes every
+table, loads the wall again after it.
 
-It has run on a stand-in, an Ubuntu 24.04 container booting systemd over
-Docker Desktop's kernel, and not yet on a real machine. There, the kernel
-settings and the block devices failed the self-test, as they should on that
-kernel, and the agent was started by hand.
+`agent_binary_sha256` pins the agent binary inside `agent_image` for each
+architecture, by `uname -m`'s name. To find the digests, copy the binary
+out of the pinned image for each platform and hash it, on any machine
+with Docker:
+
+```sh
+image='woodpeckerci/woodpecker-agent:v3.18.1@sha256:...'  # agent_image
+for platform in linux/amd64 linux/arm64; do  # x86_64, then aarch64
+  id=$(docker create --platform "$platform" "$image")
+  docker cp "$id:/bin/woodpecker-agent" - | tar -xO | sha256sum
+  docker rm "$id" > /dev/null
+done
+```
+
+It has run on a real Ubuntu 24.04 (arm64, in a VM), where the self-test
+passed, and on a stand-in, an Ubuntu 24.04 container booting systemd over
+Docker Desktop's kernel, where the kernel settings, the block devices and
+the cgroup option fail, as they should on that kernel.
 
 ## The grading machine in development
 

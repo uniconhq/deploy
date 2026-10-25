@@ -1,18 +1,25 @@
 """`machine/grading-machine.py` writes what the settings say: the wall on the
 throwaway user's uid alone, every step's hosts file, the names pinned in
-the machine's own, the rootless daemon's daemon.json, and the agent's
-environment and unit; and it refuses settings that would leave a machine
-unfit to grade. What it does to a machine ran on a stand-in, by hand: see
-the stage 4 plan's section 9.
+the machine's own, the rootless daemon's daemon.json, the cache's cap, the
+cgroup option that keeps a box's memory kill off its step, and the agent's
+environment and units; it refuses settings that would leave a machine
+unfit to grade, and reads a self-test target as held, got through or not
+tested; and sets a machine up closed, the agent disabled before anything
+else and enabled only once the self-test passes, with what it runs
+stubbed. What it does to a real machine ran on a stand-in and on a real
+Ubuntu, by hand.
 """
 
 from __future__ import annotations
 
 import importlib.util
 import json
+import os
+import pwd
+import subprocess
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
@@ -22,10 +29,15 @@ AGENT = (
     "woodpeckerci/woodpecker-agent:v3.18.1@sha256:"
     "73ee7cc63161b40bfefa4a26eae45c518a09124ab34f7e3c5e781df85e1ba4ac"
 )
+CGROUP_LINE = (
+    "35 24 0:30 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:9 "
+    "- cgroup2 cgroup2 rw,nsdelegate,memory_recursiveprot"
+)
 SETTINGS: dict[str, Any] = {
     "server": "ci.example.org:9000",
     "agent_secret_file": "/etc/unicon/agent-secret",
     "agent_image": AGENT,
+    "agent_binary_sha256": {"aarch64": "b" * 64, "x86_64": "c" * 64},
     "data_root": "/var/lib/unicon-docker",
     "step_hosts": {"forge.example.org": "203.0.113.10"},
     "machine_hosts": {"ghcr.io": "140.82.112.34", "ci.example.org": "203.0.113.12"},
@@ -57,6 +69,23 @@ def test_an_address_and_port_is_read_for_ipv4_and_ipv6(machine: ModuleType) -> N
     assert str(six) == "[2001:db8::10]:443"
     with pytest.raises(machine.MachineError, match="not an address and a port"):
         machine.Target.parse("forge.example.org:443")
+
+
+@pytest.mark.parametrize(
+    ("text", "refusal"),
+    [
+        ("2001:db8::10:443", "IPv6 address in brackets"),
+        ("[203.0.113.10]:443", "IPv6 address in brackets"),
+        ("[2001:db8::10]", "not an address and a port"),
+        ("203.0.113.10:0", "from 1 to 65535"),
+        ("203.0.113.10:65536", "from 1 to 65535"),
+    ],
+)
+def test_an_ambiguous_address_or_a_port_out_of_range_is_refused(
+    machine: ModuleType, text: str, refusal: str
+) -> None:
+    with pytest.raises(machine.MachineError, match=refusal):
+        machine.Target.parse(text)
 
 
 def test_the_wall_holds_the_throwaway_users_traffic_alone(machine: ModuleType) -> None:
@@ -131,7 +160,7 @@ def test_the_agent_gets_its_labels_hosts_and_memory(machine: ModuleType) -> None
 
     assert values["WOODPECKER_AGENT_LABELS"] == "pool=platform,shape=rootless"
     assert values["WOODPECKER_BACKEND_DOCKER_VOLUMES"] == (
-        "/etc/unicon/hosts:/etc/hosts:ro"
+        "/etc/unicon/hosts:/etc/hosts:ro,/etc/unicon/cache-cap:/etc/unicon/cache-cap:ro"
     )
     assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM"] == "17179869184"
     assert values["DOCKER_HOST"] == "unix:///run/unicon-docker/docker.sock"
@@ -148,8 +177,165 @@ def test_the_agent_runs_as_its_own_user_beside_the_daemons(
 
     assert "User=unicon-agent\n" in unit
     assert "SupplementaryGroups=unicon-grader\n" in unit
-    assert "Requires=unicon-wall.service\n" in unit
-    assert "Before=network-pre.target user@1001.service\n" in machine.wall_unit(1001)
+    assert "Requires=unicon-wall.service unicon-cgroup.service\n" in unit
+    # It starts only while the wall's table is loaded, checked as root.
+    assert "ExecStartPre=+/usr/sbin/nft list table inet unicon-wall\n" in unit
+
+
+def test_the_wall_loads_after_what_flushes_the_rules_and_stops_with_its_unit(
+    machine: ModuleType,
+) -> None:
+    unit = machine.wall_unit(1001)
+
+    assert "Before=network-pre.target user@1001.service\n" in unit
+    assert "After=nftables.service\n" in unit
+    assert "ExecStop=-/usr/sbin/nft delete table inet unicon-wall\n" in unit
+    # A restart of nftables.service, whose rules file flushes every table,
+    # restarts the wall after it; a reload loads it again.
+    assert "PartOf=nftables.service\n" in unit
+    assert "ReloadPropagatedFrom=nftables.service\n" in unit
+    assert "ExecReload=/usr/sbin/nft -f /etc/unicon/wall.nft\n" in unit
+
+
+def test_a_remount_for_local_memory_events_keeps_the_hierarchys_options(
+    machine: ModuleType,
+) -> None:
+    mountinfo = (
+        "24 30 0:22 / /sys rw,nosuid shared:7 - sysfs sysfs rw\n"
+        "35 24 0:30 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:9 "
+        "- cgroup2 cgroup2 rw,nsdelegate,memory_recursiveprot\n"
+    )
+
+    options = machine.cgroup_options(mountinfo)
+
+    assert options == (
+        "nosuid,nodev,noexec,relatime,nsdelegate,memory_recursiveprot,"
+        "memory_localevents"
+    )
+    assert machine.cgroup_options(
+        mountinfo.replace("prot\n", "prot,memory_localevents\n")
+    ) == (options)
+    unit = machine.cgroup_unit(1001, options)
+    assert f"ExecStart=/usr/bin/mount -o remount,{options} /sys/fs/cgroup\n" in unit
+    assert "Before=user@1001.service unicon-agent.service\n" in unit
+    assert machine.remounted_with(unit) == options.split(",")
+    with pytest.raises(machine.MachineError, match="not a cgroup2 hierarchy"):
+        machine.cgroup_options(mountinfo.splitlines()[0])
+
+
+@pytest.mark.parametrize(
+    ("mountinfo", "taken"),
+    [
+        (CGROUP_LINE + ",memory_localevents\n", True),
+        (CGROUP_LINE.replace("nsdelegate", "memory_localevents,nsdelegate"), True),
+        (CGROUP_LINE + "\n", False),
+        # The option on another cgroup2 mount, or in a path, is not taken.
+        (
+            CGROUP_LINE + "\n40 24 0:40 / /run/memory_localevents rw - cgroup2 cgroup2 "
+            "rw,memory_localevents\n",
+            False,
+        ),
+    ],
+)
+def test_the_remount_is_checked_on_the_hierarchys_own_line(
+    machine: ModuleType, tmp_path: Path, mountinfo: str, taken: bool
+) -> None:
+    unit = machine.cgroup_unit(1001, "nsdelegate,memory_localevents")
+    post = next(line for line in unit.splitlines() if line.startswith("ExecStartPost="))
+    pattern = post.split("'")[1].replace("$$", "$")
+    (tmp_path / "mountinfo").write_text(mountinfo)
+
+    found = subprocess.run(["grep", "-Eq", pattern, str(tmp_path / "mountinfo")])
+
+    assert post.startswith("ExecStartPost=/usr/bin/grep -Eq '")
+    assert (found.returncode == 0) is taken
+
+
+def test_the_self_test_names_each_option_the_remount_lost(
+    machine: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    unit = tmp_path / "unicon-cgroup.service"
+    unit.write_text(machine.cgroup_unit(1001, "nosuid,nodev,nsdelegate"))
+    monkeypatch.setattr(machine, "CGROUP_UNIT", unit)
+    monkeypatch.setattr(machine, "docker", lambda *_, **__: "false")
+    monkeypatch.setattr(
+        machine,
+        "docker_done",
+        lambda *_, **__: subprocess.CompletedProcess([], 0, "1\n", ""),
+    )
+    mountinfo = tmp_path / "mountinfo"
+    mountinfo.write_text(
+        "35 24 0:30 / /sys/fs/cgroup rw,nosuid shared:9 - cgroup2 cgroup2 rw\n"
+    )
+    monkeypatch.setattr(machine, "MOUNTINFO", mountinfo)
+    report = machine.Report()
+
+    machine.check_kills(settings(machine), report)
+
+    printed = capsys.readouterr().out
+    assert "FAIL /sys/fs/cgroup kept every option it was remounted with" in printed
+    assert "(lost nodev,nsdelegate)" in printed
+
+
+def test_the_cache_cap_is_the_setting_or_a_quarter_of_the_data_root(
+    machine: ModuleType,
+) -> None:
+    assert machine.cache_cap(settings(machine), 24 * 2**30) == 6 * 2**30
+    assert machine.cache_cap(settings(machine, cache_cap=2**31), 24 * 2**30) == 2**31
+
+
+def test_a_system_other_than_ubuntu_24_04_is_warned_of(machine: ModuleType) -> None:
+    assert machine.system_warning('ID=ubuntu\nVERSION_ID="24.04"\n') is None
+    assert "this is debian 13, not Ubuntu 24.04" in machine.system_warning(
+        'ID=debian\nVERSION_ID="13"\n'
+    )
+
+
+def test_a_file_is_written_new_with_its_mode_from_the_start(
+    machine: ModuleType, tmp_path: Path
+) -> None:
+    elsewhere = tmp_path / "elsewhere"
+    elsewhere.write_text("kept")
+    path = tmp_path / "agent.env"
+    # A link left where the new file is made is replaced, not followed.
+    (tmp_path / "agent.env.new").symlink_to(elsewhere)
+
+    machine.write(path, "TOKEN=x\n", mode=0o600)
+
+    assert path.read_text() == "TOKEN=x\n"
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert elsewhere.read_text() == "kept"
+    assert not (tmp_path / "agent.env.new").exists()
+
+
+@pytest.mark.parametrize(
+    ("control", "seen", "said", "held"),
+    [
+        ("connected", "ECONNREFUSED", "ok  ", True),
+        ("connected", "TimeoutError", "ok  ", True),
+        ("connected", "connected", "FAIL", False),
+        ("ETIMEDOUT", "ECONNREFUSED", "--  ", True),
+        ("connected", "ENETUNREACH", "--  ", True),
+        ("answered", "gaierror", "ok  ", True),
+    ],
+)
+def test_a_target_is_held_got_through_or_not_tested(
+    machine: ModuleType,
+    capsys: pytest.CaptureFixture[str],
+    control: str,
+    seen: str,
+    said: str,
+    held: bool,
+) -> None:
+    report = machine.Report()
+
+    assert machine.held_at(report, "the outside", control, seen, "a step") is held
+
+    assert capsys.readouterr().out.startswith(said)
+    assert report.failed == ([] if held else ["the outside"])
 
 
 @pytest.mark.parametrize(
@@ -157,9 +343,37 @@ def test_the_agent_runs_as_its_own_user_beside_the_daemons(
     [
         ({"shape": "root"}, "is not built"),
         ({"wall_allow": []}, "wall_allow is empty"),
-        ({"agent_user": "unicon-grader"}, "a user of its own"),
+        ({"agent_user": "unicon-grader"}, "grader_user and agent_user must differ"),
+        ({"grader_user": "root"}, "is root, a user who can log in"),
+        ({"agent_user": "root"}, "is root, a user who can log in"),
+        ({"grader_user": "Not A User"}, "not a user name"),
+        ({"test_image": "ubuntu:24.04"}, "test_image is pinned by its digest"),
+        ({"agent_binary_sha256": {}}, "for x86_64 or aarch64"),
+        ({"agent_binary_sha256": {"arm64": "b" * 64}}, "for x86_64 or aarch64"),
+        ({"agent_binary_sha256": ["b" * 64]}, "an object of texts"),
+        ({"step_hosts": ["forge.example.org"]}, "step_hosts is an object of texts"),
+        ({"agent_environment": {"X": 1}}, "agent_environment is an object of texts"),
+        ({"agent_environment": {"A B": "1"}}, "agent_environment names 'A B'"),
+        ({"pool": "platform,shape=root"}, "not a label's value"),
+        ({"pool": "a=b"}, "not a label's value"),
+        ({"pool": ""}, "not a label's value"),
+        ({"server": 9000}, "server is a text"),
+        ({"data_root": 1}, "data_root is a path"),
+        ({"pull": [1]}, "pull is a list of texts"),
+        ({"wall_allow": "203.0.113.10:443"}, "wall_allow is a list of texts"),
+        ({"max_workflows": True}, "max_workflows is a whole number"),
+        ({"max_workflows": 0}, "max_workflows is a whole number"),
+        ({"limit_mem": "1g"}, "limit_mem is a number of bytes"),
         ({"agent_image": "woodpeckerci/woodpecker-agent:v3.18.1"}, "its digest"),
         ({"step_hosts": {"forge": "forge.example.org"}}, "not an address"),
+        (
+            {"step_hosts": {"forge\n203.0.113.9 evil": "203.0.113.10"}},
+            "not a host name",
+        ),
+        ({"machine_hosts": {"-ghcr.io": "140.82.112.34"}}, "not a host name"),
+        ({"agent_binary_sha256": {"x86_64": "abc"}}, "SHA-256 in hex"),
+        ({"cache_cap": 1024}, "at least 1 GiB"),
+        ({"outside": ["2606:4700:4700::1111:443"]}, "in brackets"),
         ({"colour": "blue"}, "unknown settings: colour"),
     ],
 )
@@ -168,6 +382,16 @@ def test_settings_that_leave_a_machine_unfit_are_refused(
 ) -> None:
     with pytest.raises(machine.MachineError, match=refusal):
         settings(machine, **changed)
+
+
+def test_a_user_who_can_log_in_is_refused_as_either_user(
+    machine: ModuleType,
+) -> None:
+    person = pwd.getpwuid(os.getuid()).pw_name
+
+    for name in ("grader_user", "agent_user"):
+        with pytest.raises(machine.MachineError, match="a user who can log in"):
+            settings(machine, **{name: person})
 
 
 def test_a_missing_setting_is_named(machine: ModuleType) -> None:
@@ -185,3 +409,166 @@ def test_the_subordinate_ids_are_counted_over_every_range(
     assert machine.subordinate_count(table, "unicon-grader") == 30000
     table.write_text(table.read_text() + "unicon-grader:300000:40000\n")
     assert machine.subordinate_count(table, "unicon-grader") == 70000
+
+
+# Setup's order, with everything it runs stubbed.
+
+
+@pytest.fixture
+def stubbed(
+    machine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> list[tuple[str, ...]]:
+    """setup's way of changing the machine replaced by a record of each
+    command and step, in order, and its files moved under `tmp_path`."""
+    done: list[tuple[str, ...]] = []
+
+    def run(*command: str, **_: object) -> subprocess.CompletedProcess[str]:
+        done.append(command)
+        return subprocess.CompletedProcess(command, 0, "", "")
+
+    def docker(*arguments: str, **_: object) -> str:
+        done.append(("docker", *arguments))
+        return "c1 c2\n" if arguments[0] == "ps" else ""
+
+    def as_user(user: str, uid: int, *command: str, **_: object) -> str:
+        done.append((f"as {user}", *command))
+        return ""
+
+    def step(name: str, answer: object = None) -> Any:
+        def stub(*_: object, **__: object) -> object:
+            done.append((name,))
+            return answer
+
+        return stub
+
+    monkeypatch.setattr(machine, "run", run)
+    monkeypatch.setattr(machine, "docker", docker)
+    monkeypatch.setattr(machine, "as_user", as_user)
+    grader = SimpleNamespace(pw_uid=1001, pw_gid=1001, pw_dir=str(tmp_path))
+    monkeypatch.setattr(machine, "make_users", step("make users", grader))
+    for name in (
+        "disable_root_docker",
+        "allow_rootlesskit",
+        "count_kills_locally",
+        "start_daemon",
+        "pull",
+        "install_agent",
+    ):
+        monkeypatch.setattr(machine, name, step(name))
+    monkeypatch.setattr(machine, "check_data_root", step("check_data_root", 2**35))
+    monkeypatch.setattr(machine, "memory_total", lambda: 2**33)
+    monkeypatch.setattr(machine, "architecture", lambda: "aarch64")
+    monkeypatch.setattr(machine.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(machine.os, "chown", lambda *_: None)
+    monkeypatch.setattr(machine.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+    agent = SimpleNamespace(pw_uid=999, pw_gid=999, pw_shell="/usr/sbin/nologin")
+    monkeypatch.setattr(machine.pwd, "getpwnam", lambda name: agent)
+    for name in (
+        "UNITS",
+        "STEP_HOSTS",
+        "CACHE_CAP",
+        "WALL_FILE",
+        "AGENT_ENV",
+        "AGENT_STATE",
+        "SOCKET_TMPFILES",
+    ):
+        monkeypatch.setattr(machine, name, tmp_path / name.lower())
+    (tmp_path / "hosts").write_text("127.0.0.1 localhost\n")
+    monkeypatch.setattr(machine, "HOSTS", tmp_path / "hosts")
+    return done
+
+
+def setup_settings(machine: ModuleType, tmp_path: Path) -> Any:
+    (tmp_path / "secret").write_text("agent-secret\n")
+    return settings(machine, agent_secret_file=str(tmp_path / "secret"))
+
+
+DISABLE_AGENT = ("systemctl", "disable", "--now", "unicon-agent.service")
+KILL = ("docker", "kill", "c1", "c2")
+STOP_DAEMON = ("as unicon-grader", "systemctl", "--user", "stop", "docker.service")
+WALL_DOWN = ("systemctl", "stop", "unicon-wall.service")
+WALL_UP = ("systemctl", "restart", "unicon-wall.service")
+ENABLE_AGENT = ("systemctl", "enable", "--now", "unicon-agent.service")
+
+
+def test_setup_enables_the_agent_last_once_the_self_test_passes(
+    machine: ModuleType,
+    stubbed: list[tuple[str, ...]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def passes(_: object) -> int:
+        stubbed.append(("self_test",))
+        return 0
+
+    monkeypatch.setattr(machine, "self_test", passes)
+
+    assert machine.setup(setup_settings(machine, tmp_path)) == 0
+
+    assert stubbed[0] == DISABLE_AGENT
+    order = [stubbed.index(each) for each in (KILL, STOP_DAEMON, WALL_DOWN)]
+    assert order == sorted(order)
+    assert stubbed.index(WALL_DOWN) < stubbed.index(WALL_UP)
+    assert stubbed[-2:] == [("self_test",), ENABLE_AGENT]
+
+
+def test_setup_leaves_the_agent_disabled_when_the_self_test_fails(
+    machine: ModuleType,
+    stubbed: list[tuple[str, ...]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(machine, "self_test", lambda _: 1)
+
+    assert machine.setup(setup_settings(machine, tmp_path)) == 1
+
+    assert stubbed[0] == DISABLE_AGENT
+    assert ENABLE_AGENT not in stubbed
+
+
+def test_setup_stopped_midway_leaves_the_agent_disabled(
+    machine: ModuleType,
+    stubbed: list[tuple[str, ...]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail(*_: object) -> None:
+        raise machine.MachineError("no filesystem of its own")
+
+    monkeypatch.setattr(machine, "check_data_root", fail)
+    monkeypatch.setattr(machine, "self_test", lambda _: 0)
+
+    with pytest.raises(machine.MachineError, match="no filesystem"):
+        machine.setup(setup_settings(machine, tmp_path))
+
+    assert stubbed[0] == DISABLE_AGENT
+    assert ENABLE_AGENT not in stubbed
+
+
+def test_setup_keeps_the_wall_up_when_the_daemon_will_not_stop(
+    machine: ModuleType,
+    stubbed: list[tuple[str, ...]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(machine, "docker", lambda *a, **_: "29.0.1\n")
+
+    with pytest.raises(machine.MachineError, match="the wall stays up"):
+        machine.setup(setup_settings(machine, tmp_path))
+
+    assert WALL_DOWN not in stubbed
+    assert ENABLE_AGENT not in stubbed
+
+
+def test_setup_changes_nothing_on_a_machine_the_agent_binary_is_not_pinned_for(
+    machine: ModuleType,
+    stubbed: list[tuple[str, ...]],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(machine, "architecture", lambda: "riscv64")
+
+    with pytest.raises(machine.MachineError, match="no digest for this machine's"):
+        machine.setup(setup_settings(machine, tmp_path))
+
+    assert stubbed == []

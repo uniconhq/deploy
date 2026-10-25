@@ -13,6 +13,8 @@ run bootstrap's seeding step against the in-memory Forgejo of forgejo_fake.py.
 from __future__ import annotations
 
 import base64
+import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -734,6 +736,33 @@ def test_a_version_is_seeded_with_its_whole_folder_but_pythons_caches(
         "README.md",
         "diff/diff.py",
         "diff/program.yaml",
+    }
+
+
+def test_a_file_git_ignores_and_the_finders_are_left_out_of_a_version(
+    tmp_path: Path,
+) -> None:
+    directory = _deploy_with(tmp_path, {"v1": b"steps: [1]\n"})
+    root = directory / "workflows" / CLASSIC / "v1"
+    subprocess.run(["git", "init", "-q", str(directory)], check=True)
+    subprocess.run(["git", "-C", str(directory), "add", "workflows"], check=True)
+    (directory / ".gitignore").write_text("*.log\n")
+    (root / ".DS_Store").write_bytes(b"\0")
+    (root / "run.log").write_bytes(b"local\n")
+    (root / "check.py").write_bytes(b"print(1)\n")
+
+    assert seed_files(directory, CLASSIC, "v1") == {
+        "README.md": b"# classic\n",
+        "check.py": b"print(1)\n",
+        "workflow.yaml": b"steps: [1]\n",
+    }
+    # Outside a git checkout only the Finder's file is left out.
+    shutil.rmtree(directory / ".git")
+    assert set(seed_files(directory, CLASSIC, "v1")) == {
+        "README.md",
+        "check.py",
+        "run.log",
+        "workflow.yaml",
     }
 
 

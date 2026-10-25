@@ -270,7 +270,7 @@ def test_the_workflow_runs_the_solution_then_the_diff_script_on_its_output() -> 
     assert steps["diff"]["with"]["source"] == "${{ workflow.diff/ }}"
     compare = steps["compare"]["with"]
     assert compare["manifest"] == "${{ workflow.diff/program.yaml }}"
-    assert (compare["time_limit"], compare["memory_limit"]) == (10, 256)
+    assert (compare["time_limit"], compare["memory_limit"]) == (3, 256)
     assert set(compare["files"]) == {"output", "answer"}
     assert "self_reported" not in compare
     assert workflow["reports"]["score"] == "${{ steps.compare.score }}"

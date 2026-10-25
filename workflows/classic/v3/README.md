@@ -18,6 +18,12 @@ else the diff script's: `accepted` when the output's words are the
 answer's, split on spaces, tabs, carriage returns and line feeds, as
 testlib's `wcmp` reads them, and `wrong_answer` when they are not.
 
+The diff script runs with a time limit of 3 s and 256 MB of memory, its
+own and not the task's, enough to read two files of output. The planner
+counts each step's worst case against a pipeline's 25 minutes, and
+exec's is twice its time limit and 3 s more, so each run's compare
+counts 9 s beside the solution's.
+
 Each run reports `score`, 1 when accepted and 0 when not; `time_ms`, "Run
 time" in ms, the program's CPU time; and `memory_kb`, "Memory used" in KB,
 its peak memory. The compiler's output is `log`, "Compile log", so code

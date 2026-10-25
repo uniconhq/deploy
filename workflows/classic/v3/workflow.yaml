@@ -32,7 +32,7 @@ steps:
     with:
       program: ${{ steps.diff.program }}
       manifest: ${{ workflow.diff/program.yaml }}
-      time_limit: 10
+      time_limit: 3
       memory_limit: 256
       files:
         output: ${{ steps.solution.output }}
