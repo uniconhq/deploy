@@ -36,11 +36,11 @@ from tests.e2e.stack import (
     register,
     save_task,
     sign_in,
+    status_of,
     submission_rate,
     submit,
     task_timeline,
     upload_run_file,
-    verdict_of,
     write_statement,
 )
 
@@ -191,7 +191,7 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     expect(entrant.get_by_text("You are in")).to_be_visible(timeout=CREATE_TIMEOUT_MS)
     entrant.goto(f"{APP}/contests/{org}/spring/tasks/sum")
     submit(entrant, 1, SAMPLE)
-    assert verdict_of(entrant, 1) == "ACCEPTED"
+    assert status_of(entrant, 1) == "GRADED"
 
     public = f"{APP}/contests/{org}/spring/leaderboards"
     entrant.goto(public)

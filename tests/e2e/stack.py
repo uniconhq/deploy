@@ -281,15 +281,14 @@ def submit(page: Page, number: int, source: str) -> None:
     expect(page.get_by_text(f"Submitted as #{number}.")).to_be_visible()
 
 
-FINAL = re.compile(
-    r"ACCEPTED|WRONG ANSWER|TIME LIMIT|MEMORY LIMIT|OUTPUT LIMIT|RUNTIME ERROR|"
-    r"COMPILE ERROR|SYSTEM ERROR|FAILED|CANCELLED|OVER THE LIMIT"
-)
+FINAL = re.compile(r"GRADED|GRADING DELAYED|CANCELLED|OVER THE LIMIT")
+"""The statuses the entrant's list ends on: the run model gives a
+submission no verdict of its own, so the list says where its grading stands."""
 
 
-def verdict_of(page: Page, number: int) -> str:
-    """The outcome the entrant's list shows for submission `number`, once
-    its grading has finished.
+def status_of(page: Page, number: int) -> str:
+    """The status the entrant's list shows for submission `number`, once
+    its grading has ended.
     """
     row = (
         page.get_by_role("table", name="Your submissions")
