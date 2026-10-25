@@ -33,7 +33,9 @@ from tests.e2e.stack import (
     local,
     needs_stack,
     open_contest,
+    open_page,
     register,
+    reload_page,
     save_task,
     sign_in,
     status_of,
@@ -59,7 +61,7 @@ def until_shown(
         except AssertionError:
             if time.monotonic() > deadline:
                 raise
-            page.reload()
+            reload_page(page)
 
 
 def cell(page: Page, table: str, who: str, index: int) -> Callable[[], Locator]:
@@ -150,7 +152,7 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     save_task(organiser)
     write_statement(organiser, task_page, STATEMENT)
 
-    organiser.goto(f"{APP}/orgs/{org}/contests/spring/leaderboards")
+    open_page(organiser, f"{APP}/orgs/{org}/contests/spring/leaderboards")
     organiser.get_by_role("button", name="Add a leaderboard").click()
     board = organiser.get_by_role("region", name="Leaderboard board")
     board.get_by_role("textbox", name="Key").fill("ioi")
@@ -176,7 +178,7 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
         End=local(now + timedelta(days=2)),
     )
     task_timeline(organiser, org, "spring", "A · sum", closes=now + timedelta(hours=2))
-    organiser.goto(f"{APP}/orgs/{org}/contests/spring")
+    open_page(organiser, f"{APP}/orgs/{org}/contests/spring")
     organiser.get_by_role("button", name="Change who sees it").click()
     seen = organiser.get_by_role("dialog", name="Who sees it")
     seen.get_by_role("radio", name="Anyone, signed in or not").check()
@@ -188,19 +190,19 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     register(entrant, org, "spring")
     approve(organiser, org, "spring", entrant_name)
     expect(entrant.get_by_text("You are in")).to_be_visible(timeout=CREATE_TIMEOUT_MS)
-    entrant.goto(f"{APP}/contests/{org}/spring/tasks/sum")
+    open_page(entrant, f"{APP}/contests/{org}/spring/tasks/sum")
     submit(entrant, 1, SAMPLE)
     assert status_of(entrant, 1) == "GRADED"
 
     public = f"{APP}/contests/{org}/spring/leaderboards"
-    entrant.goto(public)
+    open_page(entrant, public)
     until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "\u2013")
-    organiser.goto(public)
+    open_page(organiser, public)
     until_shown(organiser, cell(organiser, "IOI", entrant_name, 0), "100")
 
     last = datetime.now(UTC)
     reveal = last.replace(second=0, microsecond=0) + timedelta(minutes=1)
     time.sleep(max(0.0, (reveal - datetime.now(UTC)).total_seconds()) + 1)
     task_timeline(organiser, org, "spring", "A · sum", closes=reveal)
-    entrant.goto(public)
+    open_page(entrant, public)
     until_shown(entrant, cell(entrant, "IOI", entrant_name, 0), "100")

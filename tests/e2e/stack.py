@@ -17,11 +17,12 @@ import secrets
 import shlex
 import subprocess
 import time
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
 import pytest
-from playwright.sync_api import FilePayload, Locator, Page, expect
+from playwright.sync_api import Error, FilePayload, Locator, Page, expect
 
 APP = os.environ.get("UNICON_E2E_URL", "").rstrip("/")
 COMPOSE = shlex.split(
@@ -46,6 +47,34 @@ PUBLISHED = re.compile(r"Saved and published as publication \d+\.")
 needs_stack = pytest.mark.skipif(
     not APP, reason="UNICON_E2E_URL names no running stack"
 )
+
+
+def _through_a_network_change(load: Callable[[], object]) -> None:
+    """Run `load` again when the browser aborts it before a page exists.
+
+    On the runner, Chrome sometimes reports net::ERR_NETWORK_CHANGED while
+    opening or reloading a page. The app never saw that navigation, so the
+    same load is tried again. Any other failure is the test's own.
+    """
+    for attempt in range(3):
+        try:
+            load()
+            return
+        except Error as error:
+            if "ERR_NETWORK_CHANGED" not in str(error) or attempt == 2:
+                raise
+
+
+def open_page(page: Page, url: str) -> None:
+    """Open `url`, trying again when the browser reports the network changed."""
+    load = page.goto
+    _through_a_network_change(lambda: load(url))
+
+
+def reload_page(page: Page) -> None:
+    """Reload, with the same second try as `open_page`."""
+    load = page.reload
+    _through_a_network_change(load)
 
 
 def create_account(username: str) -> str:
@@ -79,7 +108,7 @@ def sign_in(page: Page, username: str, password: str) -> None:
     Each step waits for the address to leave the page it was on, so what it
     reads next is the page the last one led to.
     """
-    page.goto(f"{APP}/login?next=%2F")
+    open_page(page, f"{APP}/login?next=%2F")
     page.get_by_role("main").get_by_role(
         "link", name=re.compile("sign in", re.I)
     ).first.click()
@@ -129,7 +158,7 @@ def create(
 
 
 def create_org(page: Page, name: str) -> None:
-    page.goto(f"{APP}/orgs")
+    open_page(page, f"{APP}/orgs")
     create(page, name, "Create org", "New org")
 
 
@@ -154,7 +183,7 @@ def write_statement(page: Page, task_page: str, text: str) -> None:
     save asks. A contest opens only once each task's published statement is
     written, not the starter's placeholder.
     """
-    page.goto(f"{task_page}?card=statement")
+    open_page(page, f"{task_page}?card=statement")
     page.get_by_role("textbox", name="Statement source").fill(text)
     page.get_by_role("button", name="Save statement").click()
     published = page.get_by_role("status").filter(has_text=PUBLISHED)
@@ -175,7 +204,7 @@ def _wait_checked(page: Page, task_page: str) -> None:
     """
     deadline = time.monotonic() + CREATE_TIMEOUT_MS / 1000
     while True:
-        page.goto(task_page)
+        open_page(page, task_page)
         checked = page.get_by_text("Published", exact=True)
         checking = page.get_by_text("Checking", exact=True)
         expect(checked.or_(checking).first).to_be_visible(timeout=CREATE_TIMEOUT_MS)
@@ -205,7 +234,7 @@ def upload_run_file(page: Page, row: int, field: str, content: bytes) -> None:
 
 def contest_settings(page: Page, org: str, contest: str, **fields: str) -> None:
     """Fill the contest's Settings form, each field by its label, and save."""
-    page.goto(f"{APP}/orgs/{org}/contests/{contest}/settings")
+    open_page(page, f"{APP}/orgs/{org}/contests/{contest}/settings")
     form = page.get_by_role("form", name="Contest settings")
     expect(form.get_by_role("textbox", name="Name", exact=True)).not_to_have_value("")
     for label, value in fields.items():
@@ -218,7 +247,7 @@ def contest_settings(page: Page, org: str, contest: str, **fields: str) -> None:
 
 def open_contest(page: Page, org: str, contest: str) -> None:
     """Open the contest from its status card, once its checklist holds."""
-    page.goto(f"{APP}/orgs/{org}/contests/{contest}")
+    open_page(page, f"{APP}/orgs/{org}/contests/{contest}")
     status = page.get_by_role("region", name="Status")
     status.get_by_role("button", name="Open the contest").click()
     dialog = page.get_by_role("dialog", name="Open the contest?")
@@ -234,7 +263,7 @@ def task_timeline(
     which opens the task's place in the contest: each of `opens`, `due` and
     `closes` given set at that time.
     """
-    page.goto(f"{APP}/orgs/{org}/contests/{contest}")
+    open_page(page, f"{APP}/orgs/{org}/contests/{contest}")
     page.get_by_role("button", name=f"Change {row} in this contest").click()
     dialog = page.get_by_role("dialog", name=f"{row} in this contest")
     for which, moment in times.items():
@@ -255,7 +284,7 @@ def register(page: Page, org: str, contest: str) -> None:
     """Register alone for the contest from its page, as anyone may by the
     contest's starting sign-up, which an organiser approves.
     """
-    page.goto(f"{APP}/contests/{org}/{contest}")
+    open_page(page, f"{APP}/contests/{org}/{contest}")
     page.get_by_role("form", name="Register").get_by_role(
         "button", name="Register", exact=True
     ).click()
@@ -264,7 +293,7 @@ def register(page: Page, org: str, contest: str) -> None:
 
 def approve(organiser: Page, org: str, contest: str, who: str) -> None:
     """Approve `who`'s registration from the contest's Entrants page."""
-    organiser.goto(f"{APP}/orgs/{org}/contests/{contest}/entrants")
+    open_page(organiser, f"{APP}/orgs/{org}/contests/{contest}/entrants")
     row = (
         organiser.get_by_role("table", name="Entrants")
         .get_by_role("row")
