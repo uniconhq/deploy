@@ -104,6 +104,11 @@ services:
       # there.
       WOODPECKER_BACKEND_HTTP_PROXY: http://proxy:3128
       WOODPECKER_BACKEND_NO_PROXY: proxy,host.docker.internal
+      # Every step on the laptop is told it may run under root Docker, which
+      # is all Docker Desktop has: exec refuses root Docker's identity map
+      # without this, and says on every step that it is set. Only this file
+      # sets it; a grading machine is rootless and never does.
+      WOODPECKER_ENVIRONMENT: UNICON_DEV_ROOT_DOCKER:1
 
   # Same build and same tag as backend, so the image is built once and both
   # services run it. The forge checkout beside it is handed to the build as
@@ -162,12 +167,13 @@ services:
       WOODPECKER_AGENT_SECRET: ${WOODPECKER_DEV_AGENT_TOKEN}
       WOODPECKER_HOSTNAME: laptop
       # A grading run carries the label pool=platform, which only the
-      # platform's own machines declare. No shape=rootless here: Docker
-      # Desktop runs Docker as root, and exec refuses the identity map that
-      # gives it, so this agent is not that shape. Which shape a machine
-      # declares is left to its setup, machine/grading-machine.py. A run
-      # task's pipeline asks for a slot size too; this one agent takes any.
-      WOODPECKER_AGENT_LABELS: pool=platform,size=*
+      # platform's own machines declare. A pipeline that runs exec asks for
+      # shape=rootless too. Docker Desktop runs Docker as root, so this agent
+      # is not that shape, but it says it is, so the laptop grades every task:
+      # the server's UNICON_DEV_ROOT_DOCKER above lets exec run here. A real
+      # machine's shape is left to its setup, machine/grading-machine.py. A
+      # run task's pipeline asks for a slot size too; this one agent takes any.
+      WOODPECKER_AGENT_LABELS: pool=platform,shape=rootless,size=*
       # Onto the volume below. The default path is /etc/woodpecker, which this
       # image does not create, so the agent cannot save the identity the server
       # gave it: every restart registers a new agent and leaves the old row

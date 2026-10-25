@@ -634,7 +634,12 @@ the cgroup option fail, as they should on that kernel.
 `--profile agent` starts what a grading machine is, from
 `compose.dev.yaml`: `woodpecker-agent`, with the token bootstrap minted and
 the label `pool=platform`, which every grading run asks for, and any slot
-size, `size=*`, which a run task's pipeline asks for. Its step containers
+size, `size=*`, which a run task's pipeline asks for. It also says
+`shape=rootless`, which a pipeline that runs `exec` asks for, though Docker
+Desktop runs Docker as root: the CI server hands every step
+`UNICON_DEV_ROOT_DOCKER=1` (`WOODPECKER_ENVIRONMENT`), and exec then runs
+under root Docker, warning on every step, where it otherwise refuses. Only
+this overlay sets it; a real grading machine is rootless. Its step containers
 join the network `unicon-grading` (`WOODPECKER_BACKEND_DOCKER_NETWORK`), on
 which the proxy is the only service of the stack, so the checkout reaches
 Forgejo through the proxy's git listener and the other steps reach the

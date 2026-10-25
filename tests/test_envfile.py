@@ -156,6 +156,23 @@ def test_no_retired_key_is_in_the_template_or_the_compose_files() -> None:
         assert RETIRED.isdisjoint(read), name
 
 
+def test_only_the_development_overlay_lets_exec_run_under_root_docker() -> None:
+    """exec runs under root Docker only where UNICON_DEV_ROOT_DOCKER is 1,
+    which the laptop's stack sets on every step and nothing else may."""
+    assert "UNICON_DEV_ROOT_DOCKER" not in (DEPLOY / "compose.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "UNICON_DEV_ROOT_DOCKER" not in (DEPLOY / ".env.example").read_text(
+        encoding="utf-8"
+    )
+    assert "UNICON_DEV_ROOT_DOCKER" not in (
+        DEPLOY / "machine" / "grading-machine.py"
+    ).read_text(encoding="utf-8")
+    assert "WOODPECKER_ENVIRONMENT: UNICON_DEV_ROOT_DOCKER:1\n" in (
+        DEPLOY / "compose.dev.yaml"
+    ).read_text(encoding="utf-8")
+
+
 def test_compose_names_what_bootstrap_makes() -> None:
     """compose.yaml writes the bucket names and the platform account into the
     backend's environment itself, so they have to be the ones bootstrap
