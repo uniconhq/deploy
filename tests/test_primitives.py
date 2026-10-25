@@ -21,7 +21,7 @@ from typing import Any
 import httpx
 import pytest
 
-from bootstrap import main, primitives
+from bootstrap import images, main, primitives
 from bootstrap.images import GitHubSource, LocalSource, Manifest, PrimitiveRelease
 from bootstrap.primitives import PrimitiveError
 from bootstrap.summary import Summary
@@ -635,3 +635,19 @@ def test_a_port_named_description_is_a_port_and_its_change_stops_the_run(
         _seed(forge, _manifest(("v1", checkout, OTHER)))
 
     assert forge.writes() == []
+
+
+def test_a_withdrawn_image_is_in_neither_list_a_step_runs_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(images, "BOXED", (*images.BOXED, "compile"))
+    manifest = _manifest(
+        ("v1", _compile(tmp_path), FIRST), ("v2", _compile_v2(tmp_path), SECOND)
+    )
+    values = {"UNICON_FORGE_ADMIN_TOKEN": TOKEN, "UNICON_WITHDRAWN_IMAGES": SECOND}
+
+    main._seed_platform(FakeForgejo(), DEPLOY, manifest, values, Summary(), False)
+
+    assert values["UNICON_FILTER_IMAGES"] == FIRST
+    assert values["UNICON_PRIVILEGED_IMAGES"] == FIRST
+    assert values["UNICON_WITHDRAWN_IMAGES"] == SECOND

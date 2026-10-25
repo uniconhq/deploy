@@ -708,13 +708,23 @@ def _seed_platform(
     for name, versions in definitions.items():
         _seed_workflow(repos, name, versions, summary, rewrite)
 
+    # An image the operator withdrew runs nowhere: the forge refuses it, and
+    # neither the socket filter nor the CI's privileged list takes it.
+    withdrawn = {
+        image.strip()
+        for image in values.get("UNICON_WITHDRAWN_IMAGES", "").split(",")
+        if image.strip()
+    }
     values["UNICON_FILTER_IMAGES"] = ",".join(
-        primitives.images_at_forge(repos, manifest.primitive_names)
+        image
+        for image in primitives.images_at_forge(repos, manifest.primitive_names)
+        if image not in withdrawn
     )
+    boxed = [name for name in manifest.primitive_names if name in images.BOXED]
     values["UNICON_PRIVILEGED_IMAGES"] = ",".join(
-        primitives.privileged_at_forge(
-            repos, [name for name in manifest.primitive_names if name in images.BOXED]
-        )
+        image
+        for image in primitives.privileged_at_forge(repos, boxed)
+        if image not in withdrawn
     )
 
 
