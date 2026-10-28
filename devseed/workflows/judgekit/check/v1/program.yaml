@@ -1,0 +1,4 @@
+# What a checker given to judgekit/check@v1 reports: a score from 0 to 1,
+# with verdict 0 for an answer it takes and 1 for one it does not.
+reports:
+  score: {better: higher, at_least: 0, at_most: 1}

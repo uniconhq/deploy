@@ -1,0 +1,24 @@
+name: Sum of Two
+workflow: unicon/classic@v3
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: {entrant: {options: [python, cpp], default: python}}
+  time_limit: 1
+  memory_limit: 256
+repeat:
+  - inputs: [input, answer]
+    tuples:
+      - {input: samples/1.in, answer: samples/1.ans, title: Sample}
+      - [tests/1.in, tests/1.ans]
+      - [tests/2.in, tests/2.ans]
+      - {input: tests/3.in, answer: tests/3.ans, title: Both at the bound}
+      - [tests/4.in, tests/4.ans]
+scoring:
+  groups:
+    sample: {input: [samples/1.in]}
+  values:
+    solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
+  show:
+    now: [solved, sample, all, samples/, log]
+    after_close: [tests/]
+submissions: {rate: {count: 10, per: 60}}

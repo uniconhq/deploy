@@ -1,0 +1,43 @@
+# riverside/coins@v1: one run of a Making Change solution on one amount.
+# The solution is built by judgekit/build@v2 and run here, and judged by
+# judgekit/check@v1 with the checker beside this file, given as its answer
+# data/fewest.bin, the fewest coins for every amount up to 1,000,000, so a
+# test needs no answer file.
+description: >-
+  Judges a Making Change solution on one amount. It builds and runs the
+  solution, then the checker beside this file checks the coins add up
+  and are as few as can be, using data/fewest.bin, the fewest coins for
+  every amount up to 1,000,000. So a test is only an amount, with no
+  answer file.
+inputs:
+  code: {type: file, title: Solution}
+  language: {type: enum, options: [c, cpp, java, python], title: Language}
+  input: {type: file, title: Amount}
+  time_limit: {type: number, title: Time limit, unit: seconds}
+  memory_limit: {type: number, title: Memory limit, unit: MB}
+
+steps:
+  - id: build
+    use: judgekit/build@v2
+    with:
+      code: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+  - id: solution
+    use: unicon/exec@v1
+    with:
+      program: ${{ steps.build.program }}
+      stdin: ${{ inputs.input }}
+      time_limit: ${{ inputs.time_limit }}
+      memory_limit: ${{ inputs.memory_limit }}
+  - id: check
+    use: judgekit/check@v1
+    with:
+      checker: ${{ workflow.checker/ }}
+      input: ${{ inputs.input }}
+      output: ${{ steps.solution.output }}
+      answer: ${{ workflow.data/fewest.bin }}
+
+outputs:
+  score: ${{ steps.check.score }}
+  time_ms: {from: "${{ steps.solution.time_ms }}", title: Run time, unit: ms}
+  log: ${{ steps.build.log }}

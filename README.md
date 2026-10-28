@@ -305,35 +305,46 @@ uv run scripts/reset-dev.py            # --build to rebuild the backend and fron
 ```
 
 throws the dev stack's data away (`down -v`), bootstraps an empty stack,
-starts both profiles from the images already built, and leaves two people
-and one contest to try things on:
+starts both profiles from the images already built, and seeds it through
+the API as each person would, every submission graded by the real grading
+machine. `devseed/__init__.py` says what it leaves in full:
 
-- `alice` and `bob`, with the passwords and email addresses in `.env`,
-  which you add by hand and bootstrap keeps:
+- five people, `alice`, `bob`, `carol`, `dan` and `erin`, with the
+  passwords and email addresses in `.env`, which bootstrap keeps:
 
   ```sh
   DEV_ALICE_PASSWORD=...
   DEV_ALICE_EMAIL=...
-  DEV_BOB_PASSWORD=...
-  DEV_BOB_EMAIL=...
+  # and the same for BOB, CAROL, DAN and ERIN
   ```
 
-- the org `demo`, alice its admin, and its contest `sample`, "Sample
-  contest", running from an hour before the reset for 30 days, open to
-  anyone who signs up and approved by an organiser;
-- its task `sum`, on `unicon/classic@v3`: A + B in Python, its statement,
-  three tests and a submission rate of 10 in any 60 seconds, in one save
-  before the contest opens; the contest opens once that save is published,
-  so a submission grades.
+- alice's org `riverside`, the Riverside Coding Club, with dan a manager,
+  and dan's org `judgekit`, which publishes judging workflows;
+- workflows that use each other's versions as steps: judgekit's `build`
+  (v1 and v2), `check` and `special`, the club's `standard` and its
+  `coins` with an uploaded table and a draft ahead of its version, dan's
+  `round-trip` shared with
+  alice alone, and bob's `practice`;
+- Spring Open 2026, closed with its results released: four tasks on
+  `unicon/classic@v3`, `riverside/standard@v1`, `riverside/coins@v1` and
+  `unicon/interactive@v1`, ICPC standings and a points board, a task due
+  before the close with two late submissions, a question answered in
+  public and an announcement;
+- Summer Relay 2026, running in teams of up to two, bob and carol one
+  team and erin alone, on `judgekit/special@v1` and `dan/round-trip@v1`,
+  two more days on Round Trip for erin, and a question waiting;
+- Autumn Open 2026, a draft.
 
-Bob has not registered. It takes about three minutes, and it refuses before
+The seed's files are in `devseed/`: each workflow version's folder, each
+task's files, and each entrant's program, some of them wrong on purpose.
+It takes about ten minutes, most of it grading, and it refuses before
 throwing anything away when a key is missing. Sign in again from a new tab
-on the app: bootstrap registers the app at Forgejo afresh, so a page open from
-before the reset sends Forgejo a client id it no longer has ("Client ID not
-registered"). Alice and bob are signed in through Forgejo's pages and the
-org, the contest and the task made through the API as alice, with the
-browser tests' own steps (`tests/e2e/stack.py` and `tests/e2e/api.py`), so
-it needs `uv run playwright install chromium` once.
+on the app: bootstrap registers the app at Forgejo afresh, so a page open
+from before the reset sends Forgejo a client id it no longer has ("Client
+ID not registered"). Each person is signed in through Forgejo's pages, and
+the rest made through the API, with the browser tests' own steps
+(`tests/e2e/stack.py` and `tests/e2e/api.py`), so it needs
+`uv run playwright install chromium` once.
 
 ## What bootstrap made
 

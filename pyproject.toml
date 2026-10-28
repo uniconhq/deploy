@@ -30,6 +30,9 @@ packages = ["bootstrap"]
 [tool.ruff]
 line-length = 88
 target-version = "py314"
+# The seed's entrants' programs are wrong on purpose, some of them not
+# even Python a parser takes.
+extend-exclude = ["devseed/programs"]
 # The machine script runs on the grading machine's own Python, Ubuntu
 # 24.04's 3.12.
 per-file-target-version = { "machine/*.py" = "py312" }
@@ -40,7 +43,10 @@ select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
 [tool.mypy]
 python_version = "3.14"
 strict = true
-files = ["bootstrap", "scripts", "tests", "machine"]
+files = ["bootstrap", "devseed", "scripts", "tests", "machine"]
+# The seed's data: entrants' programs, and checkers and judges run by the
+# grading machine, as the workflows folder's are.
+exclude = ["^devseed/(programs|contests|workflows)/"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

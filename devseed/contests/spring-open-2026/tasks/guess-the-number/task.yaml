@@ -1,0 +1,28 @@
+name: Guess the Number
+workflow: unicon/interactive@v1
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: {entrant: {options: [python, cpp], default: python}}
+  judge: judge/
+  judge_language: python
+  judge_manifest: judge/program.yaml
+  time_limit: 1
+  memory_limit: 256
+  judge_time_limit: 3
+  judge_memory_limit: 256
+repeat:
+  - inputs: [input]
+    tuples:
+      - {input: samples/1.in, title: Sample}
+      - tests/1.in
+      - tests/2.in
+      - tests/3.in
+      - {input: tests/4.in, title: The largest}
+scoring:
+  groups:
+    sample: {input: [samples/1.in]}
+  values:
+    solved: {block: min, over: {runs: all}, of: {run: [all, passed]}}
+  show:
+    now: [solved, all, log]
+submissions: {rate: {count: 10, per: 60}}

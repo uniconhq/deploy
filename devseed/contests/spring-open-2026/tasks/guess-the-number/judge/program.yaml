@@ -1,0 +1,2 @@
+reports:
+  guesses: {better: lower, at_least: 0, at_most: 20}

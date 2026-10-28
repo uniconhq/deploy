@@ -11,7 +11,15 @@ from types import ModuleType
 import pytest
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "reset-dev.py"
-ALICE = {"DEV_ALICE_PASSWORD": "a-password", "DEV_ALICE_EMAIL": "alice@example.com"}
+PEOPLE = ("alice", "bob", "carol", "dan", "erin")
+KEYS = {
+    key: value
+    for name in PEOPLE
+    for key, value in (
+        (f"DEV_{name.upper()}_PASSWORD", f"{name}-password"),
+        (f"DEV_{name.upper()}_EMAIL", f"{name}@example.com"),
+    )
+}
 
 
 @pytest.fixture
@@ -31,13 +39,10 @@ def reset_dev(monkeypatch: pytest.MonkeyPatch) -> ModuleType:
 def test_the_accounts_are_each_persons_password_and_address(
     reset_dev: ModuleType,
 ) -> None:
-    found = reset_dev.accounts(
-        ALICE | {"DEV_BOB_PASSWORD": "b-password", "DEV_BOB_EMAIL": "bob@example.com"}
-    )
+    found = reset_dev.accounts(KEYS)
 
     assert found == {
-        "alice": ("a-password", "alice@example.com"),
-        "bob": ("b-password", "bob@example.com"),
+        name: (f"{name}-password", f"{name}@example.com") for name in PEOPLE
     }
 
 
@@ -46,7 +51,10 @@ def test_a_missing_or_empty_key_is_named(reset_dev: ModuleType) -> None:
         reset_dev.ResetFailed,
         match=r"\.env has no DEV_BOB_PASSWORD, DEV_BOB_EMAIL; nothing was changed",
     ):
-        reset_dev.accounts(ALICE | {"DEV_BOB_PASSWORD": ""})
+        reset_dev.accounts(
+            {key: value for key, value in KEYS.items() if key != "DEV_BOB_EMAIL"}
+            | {"DEV_BOB_PASSWORD": ""}
+        )
 
 
 def test_a_missing_key_stops_the_reset_before_the_stack_is_touched(
@@ -56,7 +64,10 @@ def test_a_missing_key_stops_the_reset_before_the_stack_is_touched(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     (tmp_path / ".env").write_text(
-        "".join(f"{key}={value}\n" for key, value in ALICE.items()), encoding="utf-8"
+        "".join(
+            f"{key}={value}\n" for key, value in KEYS.items() if "_BOB_" not in key
+        ),
+        encoding="utf-8",
     )
     monkeypatch.setattr(reset_dev, "DEPLOY", tmp_path)
     ran: list[list[str]] = []
