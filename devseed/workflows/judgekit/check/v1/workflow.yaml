@@ -1,0 +1,33 @@
+# judgekit/check@v1: judge one output with a checker the task brings, a
+# Python folder whose check.py reads `input`, `output` and `answer` from
+# its working directory and reports as program.yaml beside this file says.
+description: >-
+  Judges one output with a checker the task brings: a Python folder
+  whose check.py reads the input, the output and the answer, and writes
+  the score.
+inputs:
+  checker: {type: folder, title: Checker}
+  input: {type: file, title: Input}
+  output: {type: file, title: Output}
+  answer: {type: file, title: Answer}
+
+steps:
+  - id: build
+    use: judgekit/build@v2
+    with:
+      code: ${{ inputs.checker }}
+      language: python
+  - id: judge
+    use: unicon/exec@v1
+    with:
+      program: ${{ steps.build.program }}
+      manifest: ${{ workflow.program.yaml }}
+      time_limit: 5
+      memory_limit: 256
+      files:
+        input: ${{ inputs.input }}
+        output: ${{ inputs.output }}
+        answer: ${{ inputs.answer }}
+
+outputs:
+  score: ${{ steps.judge.score }}

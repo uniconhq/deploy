@@ -1,0 +1,20 @@
+# judgekit/build@v2: compile a solution once, for workflows that run it
+# themselves. Its program and its compile log are its outputs. New in v2:
+# Java.
+description: >-
+  Compiles a solution once and gives back the program and its compile
+  log, for workflows that run the program themselves. New in v2: Java.
+inputs:
+  code: {type: folder, title: Solution}
+  language: {type: enum, options: [c, cpp, java, python], title: Language}
+
+steps:
+  - id: compile
+    use: unicon/compile@v3
+    with:
+      source: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+
+outputs:
+  program: ${{ steps.compile.program }}
+  log: {from: "${{ steps.compile.log }}", title: Compile log}

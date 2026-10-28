@@ -1,0 +1,33 @@
+name: Making Change
+workflow: riverside/coins@v1
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: {entrant: {options: [python, cpp, java], default: python}}
+  time_limit: 2
+  memory_limit: 256
+repeat:
+  - inputs: [input]
+    tuples:
+      - {input: samples/1.in, title: Sample}
+      - tests/1.in
+      - tests/2.in
+      - tests/3.in
+      - tests/4.in
+      - {input: tests/5.in, title: A million}
+scoring:
+  groups:
+    sample: {input: [samples/1.in]}
+  values:
+    points:
+      block: mul
+      of:
+        - 100
+        - block: div
+          of:
+            - {block: sum, over: {runs: all}, of: {run: [all, score]}}
+            - 6
+    solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
+  show:
+    now: [points, sample, samples/, log]
+    after_close: [solved, all, tests/]
+submissions: {rate: {count: 10, per: 60}}

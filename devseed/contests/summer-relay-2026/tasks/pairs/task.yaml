@@ -1,0 +1,24 @@
+name: Pairs
+workflow: judgekit/special@v1
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: {entrant: {options: [python, cpp], default: python}}
+  checker: checker/
+  time_limit: 1
+  memory_limit: 256
+repeat:
+  - inputs: [input, answer]
+    tuples:
+      - {input: samples/1.in, answer: samples/1.ans, title: Sample}
+      - {input: tests/1.in, answer: tests/1.ans, title: Equal halves}
+      - [tests/2.in, tests/2.ans]
+      - {input: tests/3.in, answer: tests/3.ans, title: No pair}
+      - {input: tests/4.in, answer: tests/4.ans, title: Twenty thousand}
+scoring:
+  groups:
+    sample: {input: [samples/1.in]}
+  values:
+    solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
+  show:
+    now: [solved, all, samples/, log]
+submissions: {rate: {count: 10, per: 60}}
