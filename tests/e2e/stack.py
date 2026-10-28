@@ -255,12 +255,20 @@ def submission_rate(page: Page, count: int, per: int) -> None:
 def upload_run_file(page: Page, row: int, field: str, content: bytes) -> None:
     """Give one cell of the Runs card `content`. `row` is the row's place on
     the page, starting at 1, and the editor stores the file at
-    `runs/0/<row - 1>/<field>`."""
+    `runs/0/<row - 1>/<field>`. A cell that already holds a file, as a new
+    task's first row does, takes a new one through its Replace."""
     held = Path(f"/tmp/unicon-e2e-{row}-{field}")
     held.write_bytes(content)
-    page.get_by_role("region", name="Runs").get_by_label(
-        f"File for row {row} {field}"
-    ).set_input_files(str(held))
+    runs = page.get_by_role("region", name="Runs")
+    label = f"File for row {row} {field}"
+    actions = runs.get_by_role("button", name=f"Actions for row {row} {field}")
+    expect(actions).to_be_visible()
+    drop = runs.get_by_label(label, exact=True)
+    if drop.count() == 0:
+        actions.click()
+        page.get_by_role("menuitem", name="Replace").click()
+        drop = page.get_by_role("dialog", name=label).locator("input[type=file]")
+    drop.set_input_files(str(held))
 
 
 def contest_settings(page: Page, org: str, contest: str, **fields: str) -> None:
@@ -293,7 +301,8 @@ def task_timeline(
 ) -> None:
     """A task's timeline from the line on its row on the contest's page,
     which opens the task's place in the contest: each of `opens`, `due` and
-    `closes` given set at that time.
+    `closes` given set at that time. While the contest runs, a change that
+    moves what entrants see asks first, and this says yes.
     """
     open_page(page, f"{APP}/orgs/{org}/contests/{contest}")
     page.get_by_role("button", name=f"Change {row} in this contest").click()
@@ -304,11 +313,13 @@ def task_timeline(
             "radio", name="At a time"
         ).check()
         dialog.get_by_label(f"{word} at", exact=True).fill(local(moment))
+    saved = dialog.get_by_role("status").filter(has_text="Saved")
+    confirm = page.get_by_role("button", name="Save the change", exact=True)
     save_until(
-        page,
-        dialog.get_by_role("button", name="Save", exact=True),
-        dialog.get_by_role("status").filter(has_text="Saved"),
+        page, dialog.get_by_role("button", name="Save", exact=True), saved.or_(confirm)
     )
+    if confirm.is_visible():
+        save_until(page, confirm, saved)
     dialog.get_by_role("button", name="Close", exact=True).click()
     expect(dialog).to_be_hidden()
 

@@ -95,7 +95,14 @@ def add_value(page: Page, scoring: Locator, text: str, name: str, when: str) -> 
     named = scoring.get_by_role("textbox", name="Name").last
     named.fill(name)
     named.press("Tab")
-    scoring.get_by_label(f"When {name} is shown").select_option(label=when)
+    shown(scoring, name, when)
+
+
+def shown(scoring: Locator, name: str, when: str) -> None:
+    """When the value `name` is shown to entrants, set on its own card."""
+    scoring.get_by_role("group", name=f"Value {name}").get_by_role(
+        "combobox", name="Shown to entrants"
+    ).select_option(label=when)
 
 
 def add_group(
@@ -106,7 +113,7 @@ def add_group(
     box.fill(name)
     page.keyboard.press("Tab")
     for row in rows:
-        scoring.get_by_role("button", name=f"{row} in {name}").click()
+        scoring.get_by_role("checkbox", name=f"{row} in {name}").check()
     scoring.get_by_label(f"When {name} is shown").select_option(label=when)
 
 
@@ -131,9 +138,9 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     task_page = organiser.url
 
     runs = organiser.get_by_role("region", name="Runs")
-    runs.get_by_role("textbox", name="Title of row 1").fill("Main")
+    runs.get_by_role("textbox", name="Name of row 1").fill("Main")
     runs.get_by_role("button", name="Add a row").click()
-    runs.get_by_role("textbox", name="Title of row 2").fill("Final")
+    runs.get_by_role("textbox", name="Name of row 2").fill("Final")
     upload_run_file(organiser, 2, "input", b"5 7\n")
     upload_run_file(organiser, 2, "answer", b"12\n")
 
@@ -151,24 +158,23 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     add_value(
         organiser, scoring, "main_points + final_points", "total", "After the close"
     )
-    scoring.get_by_role("row", name=re.compile(r"^score A value")).get_by_label(
-        "When score is shown"
-    ).select_option(label="Never")
+    shown(scoring, "score", "Not shown")
     submission_rate(organiser, 10, 60)
     save_task(organiser)
     write_statement(organiser, task_page, STATEMENT)
 
     open_page(organiser, f"{APP}/orgs/{org}/contests/spring/leaderboards")
     organiser.get_by_role("button", name="Add a leaderboard").click()
-    board = organiser.get_by_role("region", name="Leaderboard board")
-    board.get_by_role("textbox", name="Key").fill("ioi")
-    board = organiser.get_by_role("region", name="Leaderboard ioi")
-    board.get_by_role("textbox", name="Title").fill("IOI")
-    board.get_by_role("radio", name="Everyone").check()
-    named = board.get_by_role("textbox", name="Name")
-    named.fill("points")
-    named.press("Tab")
-    formula(organiser, board.get_by_role("textbox", name="points"), "latest(sum).total")
+    organiser.get_by_role(
+        "region", name="Leaderboard leaderboard", exact=True
+    ).get_by_role("textbox", name="Name", exact=True).first.fill("IOI")
+    board = organiser.get_by_role("region", name="Leaderboard ioi", exact=True)
+    board.get_by_role("radio", name="Anyone").check()
+    formula(
+        organiser,
+        board.get_by_role("group", name="points").get_by_role("textbox", name="points"),
+        "latest(sum).total",
+    )
     save_until(
         organiser,
         organiser.get_by_role("button", name="Save", exact=True),
