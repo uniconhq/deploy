@@ -1,0 +1,26 @@
+# bob/practice@v1: unicon/classic@v3 with the limits I practise under,
+# one second and 64 MB, so a slow solution fails here before a contest.
+description: >-
+  Judges a solution by its answer, as unicon/classic does, under my
+  practice limits of one second and 64 MB, so a slow solution fails here
+  before a contest.
+inputs:
+  code: {type: file, title: Solution}
+  language: {type: enum, options: [cpp, python], title: Language}
+  input: {type: file, title: Input}
+  answer: {type: file, title: Answer}
+
+steps:
+  - id: judge
+    use: unicon/classic@v3
+    with:
+      code: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+      input: ${{ inputs.input }}
+      answer: ${{ inputs.answer }}
+      time_limit: 1
+      memory_limit: 64
+
+outputs:
+  score: ${{ steps.judge.score }}
+  time_ms: ${{ steps.judge.time_ms }}

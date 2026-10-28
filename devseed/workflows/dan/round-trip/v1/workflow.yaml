@@ -1,0 +1,42 @@
+# dan/round-trip@v1: a solution run both ways on one test, each way a run
+# of unicon/classic@v3: there, a word to encode, and back, a code to
+# decode. A test passes when both ways are right; each way's score is an
+# output too.
+description: >-
+  Runs a solution both ways on one test: it encodes the word, then
+  decodes the code back. The test passes only when both ways are right,
+  and each way's score is an output too.
+inputs:
+  code: {type: file, title: Solution}
+  language: {type: enum, options: [c, cpp, java, python], title: Language}
+  there: {type: file, title: Word to encode}
+  there_answer: {type: file, title: Its code}
+  back: {type: file, title: Code to decode}
+  back_answer: {type: file, title: Its word}
+  time_limit: {type: number, title: Time limit, unit: seconds}
+  memory_limit: {type: number, title: Memory limit, unit: MB}
+
+steps:
+  - id: there
+    use: unicon/classic@v3
+    with:
+      code: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+      input: ${{ inputs.there }}
+      answer: ${{ inputs.there_answer }}
+      time_limit: ${{ inputs.time_limit }}
+      memory_limit: ${{ inputs.memory_limit }}
+  - id: back
+    use: unicon/classic@v3
+    with:
+      code: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+      input: ${{ inputs.back }}
+      answer: ${{ inputs.back_answer }}
+      time_limit: ${{ inputs.time_limit }}
+      memory_limit: ${{ inputs.memory_limit }}
+
+outputs:
+  there_score: {from: "${{ steps.there.score }}", title: Encoded}
+  back_score: {from: "${{ steps.back.score }}", title: Decoded}
+  log: ${{ steps.there.log }}

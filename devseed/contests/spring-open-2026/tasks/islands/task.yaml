@@ -1,0 +1,31 @@
+name: Grid Islands
+workflow: riverside/standard@v1
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: {entrant: {options: [python, cpp], default: python}}
+repeat:
+  - inputs: [input, answer]
+    tuples:
+      - {input: samples/1.in, answer: samples/1.ans, title: Sample}
+      - {input: tests/1.in, answer: tests/1.ans, title: Small}
+      - {input: tests/2.in, answer: tests/2.ans, title: Medium}
+      - {input: tests/3.in, answer: tests/3.ans, title: One long island}
+      - {input: tests/4.in, answer: tests/4.ans, title: Large}
+scoring:
+  groups:
+    sample: {input: [samples/1.in]}
+    small: {input: [samples/1.in, tests/1.in, tests/2.in]}
+    large: {input: [tests/3.in, tests/4.in]}
+  values:
+    small_ok: {block: min, over: {runs: small}, of: {run: [small, score]}}
+    large_ok: {block: min, over: {runs: large}, of: {run: [large, score]}}
+    points:
+      block: add
+      of:
+        - {block: mul, of: [40, {value: small_ok}]}
+        - {block: mul, of: [60, {value: large_ok}]}
+    solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
+  show:
+    now: [sample, samples/, log]
+    on_release: [small_ok, large_ok, points, solved, all, tests/]
+submissions: {rate: {count: 10, per: 60}}

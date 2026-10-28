@@ -1,0 +1,40 @@
+# judgekit/special@v1: one run of a solution on one input, judged by the
+# task's own checker through judgekit/check@v1, for tasks with more than
+# one right answer.
+description: >-
+  Runs a solution on one input and judges it with the task's own
+  checker, for tasks with more than one right answer.
+inputs:
+  code: {type: file, title: Solution}
+  language: {type: enum, options: [c, cpp, python], title: Language}
+  input: {type: file, title: Input}
+  answer: {type: file, title: Answer}
+  checker: {type: folder, title: Checker, help: A Python folder with check.py at its top.}
+  time_limit: {type: number, title: Time limit, unit: seconds}
+  memory_limit: {type: number, title: Memory limit, unit: MB}
+
+steps:
+  - id: build
+    use: judgekit/build@v1
+    with:
+      code: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+  - id: solution
+    use: unicon/exec@v1
+    with:
+      program: ${{ steps.build.program }}
+      stdin: ${{ inputs.input }}
+      time_limit: ${{ inputs.time_limit }}
+      memory_limit: ${{ inputs.memory_limit }}
+  - id: check
+    use: judgekit/check@v1
+    with:
+      checker: ${{ inputs.checker }}
+      input: ${{ inputs.input }}
+      output: ${{ steps.solution.output }}
+      answer: ${{ inputs.answer }}
+
+outputs:
+  score: ${{ steps.check.score }}
+  time_ms: {from: "${{ steps.solution.time_ms }}", title: Run time, unit: ms}
+  log: ${{ steps.build.log }}
