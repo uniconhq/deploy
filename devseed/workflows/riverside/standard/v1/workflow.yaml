@@ -1,0 +1,28 @@
+# riverside/standard@v1: the club's house workflow for a task judged by
+# its answers: unicon/classic@v3 as one step, under the club's limits of
+# 2 seconds and 256 MB, so a task on it sets neither.
+description: >-
+  The club's workflow for a task judged by its answers: it compiles the
+  solution, runs it on the test's input and compares the output with the
+  answer, under the club's limits of 2 seconds and 256 MB.
+inputs:
+  code: {type: file, title: Solution}
+  language: {type: enum, options: [c, cpp, java, python], title: Language}
+  input: {type: file, title: Input}
+  answer: {type: file, title: Answer}
+
+steps:
+  - id: judge
+    use: unicon/classic@v3
+    with:
+      code: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+      input: ${{ inputs.input }}
+      answer: ${{ inputs.answer }}
+      time_limit: 2
+      memory_limit: 256
+
+outputs:
+  score: ${{ steps.judge.score }}
+  time_ms: {from: "${{ steps.judge.time_ms }}", title: Run time, unit: ms}
+  log: {from: "${{ steps.judge.log }}", title: Compile log}

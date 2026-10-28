@@ -85,7 +85,7 @@ def save_task(organiser: Caller, task: str, files: dict[str, str]) -> None:
     saved = organiser.send(
         "POST", f"{task}/save", {"changes": changes, "confirm": True, "message": "Task"}
     )
-    assert saved["number"] == 1, saved
+    assert saved.get("number") == 1, saved
 
 
 def open_once_published(organiser: Caller, contest: str, text: str) -> None:
@@ -106,24 +106,47 @@ def open_once_published(organiser: Caller, contest: str, text: str) -> None:
         time.sleep(3)
 
 
-def let_in(organiser: Caller, entrant: Caller, contest: str) -> None:
-    """The entrant registers and the organiser approves whoever waits."""
-    entrant.send("POST", f"{contest}/entrants", {})
+def entrant_rows(organiser: Caller, contest: str) -> list[dict[str, Any]]:
+    """The contest's entrants as its organisers' list gives them."""
     listed = organiser.get(f"{contest}/organise/entrants")
     rows = (
         listed
         if isinstance(listed, list)
         else listed.get("entrants", listed.get("items", []))
     )
-    for row in rows:
+    return list(rows)
+
+
+def let_in(organiser: Caller, entrant: Caller, contest: str) -> None:
+    """The entrant registers and the organiser approves whoever waits."""
+    entrant.send("POST", f"{contest}/entrants", {})
+    for row in entrant_rows(organiser, contest):
         if row.get("status") == "pending":
             organiser.send(
                 "POST", f"{contest}/organise/entrants/{row['id']}/approve", {}
             )
 
 
-def submit(entrant: Caller, task: str, name: str, content: bytes) -> int:
-    """Submit the one file `name` as the task's `code` folder; its number."""
+def put_upload(caller: Caller, slot: dict[str, Any], content: bytes) -> None:
+    """Send an upload's bytes to the address its slot gives, unless the
+    store already holds them."""
+    if slot["ready"]:
+        return
+    url = APP + slot["url"] if slot["url"].startswith("/") else slot["url"]
+    headers = {**ORIGIN, "Content-Type": "application/octet-stream"}
+    sent = caller.request.fetch(url, method="PUT", data=content, headers=headers)
+    assert sent.ok, (sent.status, sent.text())
+
+
+def submit(
+    entrant: Caller,
+    task: str,
+    name: str,
+    content: bytes,
+    values: dict[str, str] | None = None,
+) -> int:
+    """Submit the one file `name` as the task's `code` folder, and `values`
+    for the task's other entrant inputs; its number."""
     slot = entrant.send(
         "POST",
         f"{task}/uploads",
@@ -134,18 +157,17 @@ def submit(entrant: Caller, task: str, name: str, content: bytes) -> int:
             "sha256": hashlib.sha256(content).hexdigest(),
         },
     )
-    if not slot["ready"]:
-        url = APP + slot["url"] if slot["url"].startswith("/") else slot["url"]
-        headers = {**ORIGIN, "Content-Type": "application/octet-stream"}
-        sent = entrant.request.fetch(url, method="PUT", data=content, headers=headers)
-        assert sent.ok, (sent.status, sent.text())
+    put_upload(entrant, slot, content)
     entrant.send("POST", f"{task}/uploads/{slot['id']}/complete", {})
     made = entrant.send(
         "POST",
         f"{task}/submissions",
         {
             "idempotency_key": uuid.uuid4().hex,
-            "inputs": {"code": {"uploads": [slot["id"]]}},
+            "inputs": {
+                "code": {"uploads": [slot["id"]]},
+                **{key: {"value": value} for key, value in (values or {}).items()},
+            },
         },
     )
     return int(made["number"])
