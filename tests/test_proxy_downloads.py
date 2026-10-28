@@ -7,10 +7,15 @@ tuple under `<part>/`, its tuple's position from 1. The forge names each at
 the submission's commit, so both patterns take every such path and nothing
 else. A task's own files are asked for at
 `versions/<commit>/<path>`, any file of the task at any depth, and the forge
-names each in the task's own repository at that commit. Neither kind's
-patterns take the other's addresses. Everything else the two locations do
-is written once, in `download.conf`, which compose mounts where they
-include it.
+names each in the task's own repository at that commit. A workflow
+version's files are asked for at
+`workflows/<owner>/<name>/versions/<version>/<path>`, the version's own name,
+and the forge names each in the workflow's repository at the commit that
+name stands at, and a workflow draft's at
+`workflows/<owner>/<name>/draft/<path>`, at the draft's head. No kind's
+patterns take another's addresses. Everything else
+the locations do is written once, in `download.conf`, which compose mounts
+where they include it.
 """
 
 from __future__ import annotations
@@ -36,7 +41,9 @@ def _location() -> re.Pattern[str]:
     found = [
         pattern
         for pattern in _locations()
-        if "/versions/" not in pattern and "/entrants/" not in pattern
+        if "/versions/" not in pattern
+        and "/entrants/" not in pattern
+        and "/workflows/" not in pattern
     ]
     assert len(found) == 1, found
     return re.compile(found[0])
@@ -50,7 +57,27 @@ def _staff_location() -> re.Pattern[str]:
 
 
 def _task_location() -> re.Pattern[str]:
-    found = [pattern for pattern in _locations() if "/versions/" in pattern]
+    found = [
+        pattern
+        for pattern in _locations()
+        if "/versions/" in pattern and "/workflows/" not in pattern
+    ]
+    assert len(found) == 1, found
+    return re.compile(found[0])
+
+
+def _workflow_location() -> re.Pattern[str]:
+    found = [
+        pattern
+        for pattern in _locations()
+        if "/workflows/" in pattern and "/versions/" in pattern
+    ]
+    assert len(found) == 1, found
+    return re.compile(found[0])
+
+
+def _draft_location() -> re.Pattern[str]:
+    found = [pattern for pattern in _locations() if "/draft" in pattern]
     assert len(found) == 1, found
     return re.compile(found[0])
 
@@ -68,6 +95,10 @@ def _map() -> re.Pattern[str]:
 
 def _task_map() -> re.Pattern[str]:
     return _map_of("task_file_path")
+
+
+def _workflow_map() -> re.Pattern[str]:
+    return _map_of("workflow_file_path")
 
 
 SHA = "0123456789abcdef0123456789abcdef01234567"
@@ -192,6 +223,97 @@ def test_nothing_but_a_file_at_a_commit_is_asked_at_the_tasks_door(asked: str) -
     assert not _task_location().match(asked), asked
 
 
+@pytest.mark.parametrize(
+    "path",
+    ["workflow.yaml", "scorer/main.py", "tests/a%20b.in", "data/x/y/weights.bin"],
+)
+def test_every_file_a_workflow_version_holds_is_a_download(path: str) -> None:
+    for version in ("v1", "v12"):
+        asked = f"/-/downloads/workflows/bob/tuned/versions/{version}/{path}"
+        assert _workflow_location().match(asked), asked
+    for commit in (SHA, SHA + "0" * 24):
+        door = f"/api/v1/repos/bob/tuned.workflow/media/{path}?ref={commit}"
+        assert _workflow_map().match(door), door
+
+
+@pytest.mark.parametrize(
+    "door",
+    [
+        f"/api/v1/repos/bob/tuned.workflow/raw/workflow.yaml?ref={SHA}",
+        "/api/v1/repos/bob/tuned.workflow/media/workflow.yaml?ref=main",
+        "/api/v1/repos/bob/tuned.workflow/media/workflow.yaml?ref=v1",
+        f"/api/v1/repos/bob/tuned.workflow/media/a/../workflow.yaml?ref={SHA}",
+        f"/api/v1/repos/bob/tuned.workflow/media?ref={SHA}",
+        f"/api/v1/repos/k1/spring.sum.task/media/task.yaml?ref={SHA}",
+        f"/api/v1/repos/k1/k2.sub/media/files/a/b?ref={SHA}",
+    ],
+    ids=[
+        "raw",
+        "a branch",
+        "a version's name",
+        "up",
+        "no file",
+        "a task",
+        "a submission",
+    ],
+)
+def test_nothing_but_a_workflows_file_at_a_commit_passes_its_map(door: str) -> None:
+    assert not _workflow_map().match(door), door
+
+
+@pytest.mark.parametrize(
+    "asked",
+    [
+        "/-/downloads/workflows/bob/tuned/versions/v1",
+        "/-/downloads/workflows/bob/tuned/versions/v1/",
+        "/-/downloads/workflows/bob/tuned/versions/v0/workflow.yaml",
+        "/-/downloads/workflows/bob/tuned/versions/v01/workflow.yaml",
+        "/-/downloads/workflows/bob/tuned/versions/main/workflow.yaml",
+        f"/-/downloads/workflows/bob/tuned/versions/{SHA}/workflow.yaml",
+        "/-/downloads/workflow/bob/tuned/versions/v1/workflow.yaml",
+        "/-/downloads/workflows/bob/versions/v1/workflow.yaml",
+    ],
+    ids=[
+        "no path",
+        "an empty path",
+        "v0",
+        "a leading zero",
+        "a branch",
+        "a commit",
+        "not the word",
+        "no name",
+    ],
+)
+def test_nothing_but_a_file_of_a_named_version_is_asked_at_the_workflows_door(
+    asked: str,
+) -> None:
+    assert not _workflow_location().match(asked), asked
+
+
+@pytest.mark.parametrize(
+    "path",
+    ["scorer/main.py", "tests/a%20b.in", "data/x/y/weights.bin", "draft"],
+)
+def test_every_file_a_workflow_draft_holds_is_a_download(path: str) -> None:
+    asked = f"/-/downloads/workflows/bob/tuned/draft/{path}"
+    assert _draft_location().match(asked), asked
+
+
+@pytest.mark.parametrize(
+    "asked",
+    [
+        "/-/downloads/workflows/bob/tuned/draft",
+        "/-/downloads/workflows/bob/tuned/draft/",
+        "/-/downloads/workflows/bob/tuned/drafts/main.py",
+        "/-/downloads/workflows/bob/draft/main.py",
+        "/-/downloads/workflow/bob/tuned/draft/main.py",
+    ],
+    ids=["no path", "an empty path", "not the word", "no name", "not workflows"],
+)
+def test_nothing_but_a_file_of_a_draft_is_asked_at_the_drafts_door(asked: str) -> None:
+    assert not _draft_location().match(asked), asked
+
+
 def test_neither_kind_of_address_is_taken_by_the_others_location() -> None:
     submitted = [
         "/-/downloads/acme/spring/sum/3/files/submission/main.py",
@@ -219,6 +341,39 @@ def test_neither_kind_of_address_is_taken_by_the_others_location() -> None:
     assert not _staff_location().match(submitted[0])
     assert not _staff_location().match(task_files[0])
 
+    workflow_files = [
+        "/-/downloads/workflows/bob/tuned/versions/v1/workflow.yaml",
+        "/-/downloads/workflows/bob/tuned/versions/v3/scorer/main.py",
+    ]
+    # An org may be called `workflows`: its task's files are at a commit.
+    org_task = f"/-/downloads/workflows/spring/sum/versions/{SHA}/task.yaml"
+    assert all(_workflow_location().match(asked) for asked in workflow_files)
+    assert not any(
+        location.match(asked)
+        for location in (_location(), _staff_location(), _task_location())
+        for asked in workflow_files
+    )
+    assert _task_location().match(org_task)
+    assert not _workflow_location().match(org_task)
+    assert not any(
+        _workflow_location().match(asked) for asked in [*submitted, *task_files, staff]
+    )
+
+    draft = "/-/downloads/workflows/bob/tuned/draft/scorer/main.py"
+    assert not any(
+        location.match(draft)
+        for location in (
+            _location(),
+            _staff_location(),
+            _task_location(),
+            _workflow_location(),
+        )
+    )
+    assert not any(
+        _draft_location().match(asked)
+        for asked in [*submitted, *task_files, staff, *workflow_files, org_task]
+    )
+
 
 def _location_body(pattern: str) -> str:
     start = CONFIG.index(f'location ~ "{pattern}" {{')
@@ -237,9 +392,11 @@ def _directives(text: str) -> set[str]:
 
 
 @pytest.mark.parametrize(
-    "pattern", _locations(), ids=["submission", "staff file", "task file"]
+    "pattern",
+    _locations(),
+    ids=["submission", "staff file", "task file", "workflow file", "draft file"],
 )
-def test_both_download_locations_share_one_file_of_directives(pattern: str) -> None:
+def test_every_download_location_shares_one_file_of_directives(pattern: str) -> None:
     body = _location_body(pattern)
     own = _directives(body)
 
