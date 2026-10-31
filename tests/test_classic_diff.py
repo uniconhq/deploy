@@ -1,4 +1,4 @@
-"""The diff script unicon/classic@v3 ships, workflows/classic/v3/diff/:
+"""The diff script unicon/classic@v4 ships, workflows/classic/v4/diff/:
 words compared as testlib's wcmp compares them, every case of
 unicon/diff-check@v2's tests judged by that rule, the report it writes
 for exec, and the workflow beside it that runs it on the solution's output.
@@ -21,7 +21,7 @@ import pytest
 
 from bootstrap import core_yaml
 
-DIFF = Path(__file__).resolve().parent.parent / "workflows/classic/v3/diff"
+DIFF = Path(__file__).resolve().parent.parent / "workflows/classic/v4/diff"
 
 
 def load_diff() -> ModuleType:
@@ -266,11 +266,16 @@ def test_the_workflow_runs_the_solution_then_the_diff_script_on_its_output() -> 
     workflow = core_yaml.load((DIFF.parent / "workflow.yaml").read_bytes())
     assert "test" not in workflow
     steps = {step["id"]: step for step in workflow["steps"]}
-    assert list(steps) == ["compile", "solution", "diff", "compare"]
-    assert steps["diff"]["with"]["source"] == "${{ workflow.diff/ }}"
+    assert list(steps) == ["solution", "compare"]
+    assert {step["use"] for step in steps.values()} == {"unicon/exec@v2"}
+    assert steps["solution"]["with"]["source"] == "${{ inputs.code }}"
+    assert steps["solution"]["with"]["language"] == "${{ inputs.language }}"
     compare = steps["compare"]["with"]
+    assert compare["source"] == "${{ workflow.diff/ }}"
+    assert compare["language"] == "python"
     assert compare["manifest"] == "${{ workflow.diff/program.yaml }}"
     assert (compare["time_limit"], compare["memory_limit"]) == (3, 256)
     assert set(compare["files"]) == {"output", "answer"}
     assert "self_reported" not in compare
     assert workflow["outputs"]["score"] == "${{ steps.compare.score }}"
+    assert workflow["outputs"]["log"]["from"] == "${{ steps.solution.log }}"

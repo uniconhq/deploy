@@ -13,32 +13,29 @@ Five people:
 
 The workflows use each other's versions as steps:
 
-- `judgekit/build` v1 and v2 (v2 adds Java), each a box of Unicon's
-  compile;
-- `judgekit/check@v1`, a checker the task brings, built by
-  `judgekit/build@v2`;
-- `judgekit/special@v1`, a run judged by a checker: `judgekit/build@v1`,
-  so its box says v2 is out, and `judgekit/check@v1`, which is a box in a
-  box;
-- `riverside/standard@v1`, private to the club: `unicon/classic@v3`
+- `judgekit/check@v1`, a checker the task brings, compiled and run by
+  `unicon/exec@v2`;
+- `judgekit/special@v1`, a run judged by a checker: the solution run by
+  `unicon/exec@v2`, and `judgekit/check@v1` as a box;
+- `riverside/standard@v1`, private to the club: `unicon/classic@v4`
   under the club's limits;
-- `riverside/coins@v1`, private to the club: `judgekit/build@v2`, and
-  `judgekit/check@v1`, a box in a box, with a checker of its own given a
-  2 MB table, `data/fewest.bin`, uploaded into the draft, as its answer;
-  its draft is ahead of v1 by a changed checker;
-- `dan/round-trip@v1`: `unicon/classic@v3` twice, once each way;
-- `bob/practice@v1`: `unicon/classic@v3` under bob's own limits, used by
+- `riverside/coins@v1`, private to the club: the solution run by
+  `unicon/exec@v2`, and `judgekit/check@v1` as a box, with a checker of
+  its own given a 2 MB table, `data/fewest.bin`, uploaded into the draft,
+  as its answer; its draft is ahead of v1 by a changed checker;
+- `dan/round-trip@v1`: `unicon/classic@v4` twice, once each way;
+- `bob/practice@v1`: `unicon/classic@v4` under bob's own limits, used by
   no task.
 
 Three contests, all riverside's:
 
 - Spring Open 2026, which started three hours before the seed and is
-  closed by it, with results released: Sum of Two on unicon/classic@v3,
+  closed by it, with results released: Sum of Two on unicon/classic@v4,
   Grid Islands on riverside/standard@v1 with two subtasks and its points
   on release,
   Making Change on riverside/coins@v1, due once bob's submission is in,
   so carol's and erin's a minute later are late, and Guess the Number on
-  unicon/interactive@v1. Two
+  unicon/interactive@v2. Two
   leaderboards: ICPC standings and points. A question bob asked, answered
   in public, and an announcement.
 - Summer Relay 2026, running: Pairs on judgekit/special@v1 with its
@@ -106,7 +103,6 @@ def fewest_coins() -> bytes:
 
 
 WORKFLOWS = (
-    Workflow("dan", KIT, "build", versions=("v1", "v2"), visibility="public"),
     Workflow("dan", KIT, "check", visibility="public"),
     Workflow("dan", KIT, "special", visibility="public"),
     Workflow("alice", CLUB, "standard"),
@@ -226,7 +222,7 @@ def make_orgs(alice: api.Caller, dan: api.Caller) -> None:
         f"/orgs/{KIT}",
         {
             "display_name": "Judge Kit",
-            "description": "Judging workflows to build on: builds, checkers, judges.",
+            "description": "Judging workflows to build on: checkers and judges.",
         },
     )
     alice.send("POST", f"/orgs/{CLUB}/roles", {"username": "dan", "role": "manager"})

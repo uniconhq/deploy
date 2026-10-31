@@ -39,7 +39,7 @@ def test_the_release_manifest_in_this_repo_loads() -> None:
 
     assert manifest.plugin_git.startswith("docker.io/woodpeckerci/plugin-git@sha256:")
     assert set(manifest.images) == {"worker", "plugin-git"}
-    assert manifest.primitive_names == ["compile", "exec"]
+    assert manifest.primitive_names == ["exec"]
     for release in manifest.primitives:
         assert isinstance(release.source, GitHubSource)
         assert release.image.startswith(
@@ -56,24 +56,24 @@ def test_both_kinds_of_primitive_source_are_read(tmp_path: Path) -> None:
             "images": _runner("localhost:5000/uniconhq"),
             "primitives": {
                 "exec": {
-                    "v1": {
+                    "v3": {
+                        "image": f"localhost:5000/uniconhq/primitive-exec{DIGEST}",
+                        "source": {"path": "../primitive-exec"},
+                    },
+                    "v2": {
                         "image": f"ghcr.io/uniconhq/primitive-exec{DIGEST}",
                         "source": {
                             "github": "uniconhq/primitive-exec",
-                            "tag": "v1.0.0",
+                            "tag": "v2.0.0",
                         },
                     },
                 },
-                "compile": {
-                    "v2": {
-                        "image": f"localhost:5000/uniconhq/primitive-compile{DIGEST}",
-                        "source": {"path": "../primitive-compile"},
-                    },
+                "check": {
                     "v1": {
-                        "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
+                        "image": f"ghcr.io/uniconhq/primitive-check{DIGEST}",
                         "source": {
-                            "github": "uniconhq/primitive-compile",
-                            "tag": "v1.1.1",
+                            "github": "uniconhq/primitive-check",
+                            "tag": "v1.0.0",
                         },
                     },
                 },
@@ -84,18 +84,16 @@ def test_both_kinds_of_primitive_source_are_read(tmp_path: Path) -> None:
     manifest = images.load(path)
 
     assert [(release.name, release.version) for release in manifest.primitives] == [
-        ("compile", "v1"),
-        ("compile", "v2"),
-        ("exec", "v1"),
+        ("check", "v1"),
+        ("exec", "v2"),
+        ("exec", "v3"),
     ]
-    compile_v1, compile_v2, exec_v1 = manifest.primitives
-    assert compile_v1.source == GitHubSource("uniconhq/primitive-compile", "v1.1.1")
-    assert compile_v2.source == LocalSource(
-        (tmp_path.parent / "primitive-compile").resolve()
-    )
-    assert exec_v1.source == GitHubSource("uniconhq/primitive-exec", "v1.0.0")
-    assert manifest.primitive_names == ["compile", "exec"]
-    assert manifest.versions_of("compile") == [compile_v1, compile_v2]
+    check_v1, exec_v2, exec_v3 = manifest.primitives
+    assert check_v1.source == GitHubSource("uniconhq/primitive-check", "v1.0.0")
+    assert exec_v2.source == GitHubSource("uniconhq/primitive-exec", "v2.0.0")
+    assert exec_v3.source == LocalSource((tmp_path.parent / "primitive-exec").resolve())
+    assert manifest.primitive_names == ["check", "exec"]
+    assert manifest.versions_of("exec") == [exec_v2, exec_v3]
 
 
 def test_versions_are_in_number_order(tmp_path: Path) -> None:
@@ -104,10 +102,10 @@ def test_versions_are_in_number_order(tmp_path: Path) -> None:
         {
             "images": _runner(),
             "primitives": {
-                "compile": {
+                "exec": {
                     version: {
-                        "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
-                        "source": {"path": f"../compile-{version}"},
+                        "image": f"ghcr.io/uniconhq/primitive-exec{DIGEST}",
+                        "source": {"path": f"../exec-{version}"},
                     }
                     for version in ("v10", "v2", "v1")
                 }
@@ -122,21 +120,19 @@ def test_versions_are_in_number_order(tmp_path: Path) -> None:
     ]
 
 
-def _compile_versions(versions: Any) -> dict[str, Any]:
-    return {"images": _runner(), "primitives": {"compile": versions}}
+def _exec_versions(versions: Any) -> dict[str, Any]:
+    return {"images": _runner(), "primitives": {"exec": versions}}
 
 
 def _released(tag: str) -> dict[str, Any]:
     return {
-        "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
-        "source": {"github": "uniconhq/primitive-compile", "tag": tag},
+        "image": f"ghcr.io/uniconhq/primitive-exec{DIGEST}",
+        "source": {"github": "uniconhq/primitive-exec", "tag": tag},
     }
 
 
 def test_a_release_under_another_major_is_refused(tmp_path: Path) -> None:
-    path = _write(
-        tmp_path / "images.json", _compile_versions({"v1": _released("v2.0.0")})
-    )
+    path = _write(tmp_path / "images.json", _exec_versions({"v1": _released("v2.0.0")}))
 
     with pytest.raises(ManifestError, match=r"v2\.0\.0, whose major is 2") as refused:
         images.load(path)
@@ -145,9 +141,7 @@ def test_a_release_under_another_major_is_refused(tmp_path: Path) -> None:
 
 
 def test_a_tag_that_is_not_a_release_is_refused(tmp_path: Path) -> None:
-    path = _write(
-        tmp_path / "images.json", _compile_versions({"v1": _released("latest")})
-    )
+    path = _write(tmp_path / "images.json", _exec_versions({"v1": _released("latest")}))
 
     with pytest.raises(ManifestError, match="is not a release tag"):
         images.load(path)
@@ -165,14 +159,14 @@ def test_a_tag_that_is_not_a_release_is_refused(tmp_path: Path) -> None:
 def test_entries_not_keyed_by_version_are_refused(
     tmp_path: Path, versions: Any
 ) -> None:
-    path = _write(tmp_path / "images.json", _compile_versions(versions))
+    path = _write(tmp_path / "images.json", _exec_versions(versions))
 
     with pytest.raises(ManifestError, match="is not a version"):
         images.load(path)
 
 
 def test_a_primitive_with_no_version_is_refused(tmp_path: Path) -> None:
-    path = _write(tmp_path / "images.json", _compile_versions({}))
+    path = _write(tmp_path / "images.json", _exec_versions({}))
 
     with pytest.raises(ManifestError, match="not an object of versions"):
         images.load(path)
@@ -215,10 +209,10 @@ def test_a_primitive_source_of_another_shape_is_refused(tmp_path: Path) -> None:
         {
             "images": _runner(),
             "primitives": {
-                "compile": {
+                "exec": {
                     "v1": {
-                        "image": f"ghcr.io/uniconhq/primitive-compile{DIGEST}",
-                        "source": {"github": "uniconhq/primitive-compile"},
+                        "image": f"ghcr.io/uniconhq/primitive-exec{DIGEST}",
+                        "source": {"github": "uniconhq/primitive-exec"},
                     }
                 }
             },

@@ -1,5 +1,5 @@
 # dan/round-trip@v1: a solution run both ways on one test, each way a run
-# of unicon/classic@v3: there, a word to encode, and back, a code to
+# of unicon/classic@v4: there, a word to encode, and back, a code to
 # decode. A test passes when both ways are right; each way's score is an
 # output too.
 description: >-
@@ -18,7 +18,7 @@ inputs:
 
 steps:
   - id: there
-    use: unicon/classic@v3
+    use: unicon/classic@v4
     with:
       code: ${{ inputs.code }}
       language: ${{ inputs.language }}
@@ -27,7 +27,7 @@ steps:
       time_limit: ${{ inputs.time_limit }}
       memory_limit: ${{ inputs.memory_limit }}
   - id: back
-    use: unicon/classic@v3
+    use: unicon/classic@v4
     with:
       code: ${{ inputs.code }}
       language: ${{ inputs.language }}
