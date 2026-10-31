@@ -183,7 +183,7 @@ docker compose -f compose.yaml -f compose.dev.yaml --profile agent up -d
 ```
 
 The first line builds every image a grading runs from the sibling checkouts
-(`runner`, `primitive-compile` and `primitive-exec`, beside this repo),
+(`runner` and `primitive-exec`, beside this repo),
 pushes them to a registry on
 `localhost:5000` and writes `images.local.json`, which bootstrap then reads
 instead of `images.json`; see [The image manifest](#the-image-manifest). The
@@ -320,14 +320,14 @@ machine. `devseed/__init__.py` says what it leaves in full:
 
 - alice's org `riverside`, the Riverside Coding Club, with dan a manager,
   and dan's org `judgekit`, which publishes judging workflows;
-- workflows that use each other's versions as steps: judgekit's `build`
-  (v1 and v2), `check` and `special`, the club's `standard` and its
+- workflows that use each other's versions as steps: judgekit's `check`
+  and `special`, the club's `standard` and its
   `coins` with an uploaded table and a draft ahead of its version, dan's
   `round-trip` shared with
   alice alone, and bob's `practice`;
 - Spring Open 2026, closed with its results released: four tasks on
-  `unicon/classic@v3`, `riverside/standard@v1`, `riverside/coins@v1` and
-  `unicon/interactive@v1`, ICPC standings and a points board, a task due
+  `unicon/classic@v4`, `riverside/standard@v1`, `riverside/coins@v1` and
+  `unicon/interactive@v2`, ICPC standings and a points board, a task due
   before the close with two late submissions, a question answered in
   public and an announcement;
 - Summer Relay 2026, running in teams of up to two, bob and carol one
@@ -383,7 +383,7 @@ nothing can be published.
 
 Each primitive the image manifest pins is mirrored from its own repository
 into the public repository `unicon/<name>.primitive` with the topic
-`unicon-primitive`: `compile` and `exec`. A primitive's
+`unicon-primitive`: `exec`. A primitive's
 version at the forge is its port set, the major of its release tag: the
 release `v1.1.1` is `v1`, and `v2.0.0`, which changes the ports, is `v2`. The
 manifest lists each version a deployment carries, and each is mirrored to its
@@ -418,10 +418,10 @@ nothing.
 Each built-in workflow is a folder under `workflows/`, and each is the
 public repository `unicon/<name>.workflow` with the topic
 `unicon-workflow`. Each of a workflow's versions is a folder in its own,
-`workflows/classic/v3/` and `workflows/interactive/v1/`, holding
+`workflows/classic/v4/` and `workflows/interactive/v2/`, holding
 every file the version's tag holds: its `workflow.yaml` and `README.md`,
 and the files its steps read from the workflow itself, such as
-`classic@v3`'s diff script under `diff/` and `interactive@v1`'s verdict
+`classic@v4`'s diff script under `diff/` and `interactive@v2`'s verdict
 script under `verdict/`. Python's caches are left out, and a link is
 refused. Bootstrap publishes each to its own tag by the same rule: a tag
 that is not there is made, and one that is there and holds the same files
@@ -436,13 +436,14 @@ definitions are compared as the forge reads them: an input written as a
 bare type, `time_limit: number`, is `{type: number}`, an output written as
 a bare reference is one given `from` alone, and a flag set `false` is one
 left out.
-`unicon/classic@v3` is one run of the entrant's program, in the format of
-`SIMPLER-CORE.md` 7: compiled with `compile@v3`, run with `exec@v1` and
-compared word by word by its diff script; a task repeats it over its tests.
-It gives the run's time and memory, which pages name "Run time", in ms, and
-"Memory used", in KB, and the compiler's "Compile log". `unicon/interactive@v1` runs the
-entrant's program against the task's judge with `exec@v1`'s programs form, and its
-verdict script decides the run. A definition changed in how it grades is a
+`unicon/classic@v4` is one run of the entrant's program, in the format of
+`SIMPLER-CORE.md` 7: compiled and run with `exec@v2`, and compared word by
+word by its diff script, which `exec@v2` compiles and runs too; a task
+repeats it over its tests. It gives the run's time and memory, which pages
+name "Run time", in ms, and "Memory used", in KB, and the compiler's
+"Compile log". `unicon/interactive@v2` runs the entrant's program against
+the task's judge with `exec@v2`'s programs form, which compiles both, and
+its verdict script decides the run. A definition changed in how it grades is a
 new folder. Every primitive version a
 definition `use:`s has to be one the manifest pins: bootstrap refuses one
 that is not before it writes anything, since the forge would refuse every
@@ -510,20 +511,10 @@ digest, and the release of each primitive's repository that bootstrap mirrors.
     "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:<64 hex>"
   },
   "primitives": {
-    "compile": {
-      "v1": {
-        "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
-        "source": {"github": "uniconhq/primitive-compile", "tag": "v1.1.1"}
-      },
-      "v3": {
-        "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
-        "source": {"github": "uniconhq/primitive-compile", "tag": "v3.0.0"}
-      }
-    },
     "exec": {
-      "v1": {
+      "v2": {
         "image": "ghcr.io/uniconhq/primitive-exec@sha256:<64 hex>",
-        "source": {"github": "uniconhq/primitive-exec", "tag": "v1.0.1"}
+        "source": {"github": "uniconhq/primitive-exec", "tag": "v2.0.0"}
       }
     }
   }
@@ -549,8 +540,10 @@ that holds that version, a new image under the same declaration moves the
 version to it, and any other change to the declaration stops bootstrap,
 since a version's ports never change.
 
-Today it pins runner `v0.10.0`, `compile`'s `v1` at `v1.1.1` and its `v3`
-at `v3.0.0`, and `exec`'s `v1` at `v1.0.1`.
+Today it pins runner `v0.10.0` and no primitive: `exec`'s `v2`, which the
+built-in workflows use, is not released yet, so a stack grades only from a
+local build. `compile` and `exec`'s `v1` are retired, and the forge refuses
+a workflow that names either.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
@@ -562,11 +555,12 @@ its images in the volume `unicon-registry`, pushes each image there to learn
 its digest, and writes `images.local.json` in the same shape. Each
 primitive's checkout fills the version that is the major of the version in
 its `pyproject.toml`, with its source the checkout,
-`{"path": "../primitive-compile"}`; every other version of the primitive is
+`{"path": "../primitive-exec"}`; every other version of the primitive is
 copied from `images.json` as released, so a stack built this way seeds
-`compile`'s `v1` with the released image from ghcr.io and its `v3` with
-the checkout's. That file is git-ignored. Bootstrap reads it whenever it
-is there and `images.json` otherwise; `--images <file>` names one. Docker
+`exec`'s `v2` with the checkout's image, and any other version
+`images.json` pins with the released image from ghcr.io. That file is
+git-ignored. Bootstrap reads it whenever it is there and `images.json`
+otherwise; `--images <file>` names one. Docker
 pulls from a registry on localhost over plain HTTP without being told to,
 by digest, the same way it pulls from ghcr.io, so the agent needs nothing
 different.
@@ -598,8 +592,8 @@ The machine is cut into slots, each of one size of `machine/slots.json`,
 the one table of slot sizes, which bootstrap also writes into `.env` as
 `UNICON_SLOT_SIZES` for the forge to plan each run task pipeline into
 (keep the table beside the script on the machine). A `small` slot is one
-core and 2 GB, which holds a compile, an `exec` step of a 1 GB run or
-of two 512 MB programs; a `big` slot is two cores and
+core and 2 GB, which holds an `exec` step of a 1 GB run or of two
+512 MB programs, its compile included; a `big` slot is two cores and
 8 GB. Setup keeps a core and 1.5 GB for the system, the agents and the
 daemon, so the smallest machine it takes has 2 cores and 3584 MB of
 memory as the kernel reports it (`MemTotal`), as a 4 GB machine does,
@@ -776,7 +770,10 @@ proxy's download door, an uploaded one and a typed one, as the organiser,
 checking the bytes and the door's headers, and finds that an entrant and
 someone signed out get no such file. `test_forge_pages.py` follows "Back
 to Unicon" from Forgejo's consent page to the app's home.
-`test_memory.py` and `test_escape.py` grade a task on `unicon/classic@v3`,
+`test_compile_error.py` sends a C++ solution that does not compile to a
+task on `unicon/classic@v4` and finds every run `compile_error`, the
+submission's row "Did not compile" and the compiler's log on its page.
+`test_memory.py` and `test_escape.py` grade a task on `unicon/classic@v4`,
 and the runner's escape fixtures, through the API; they need a grading
 machine with `exec`'s shape, so they are skipped unless `UNICON_E2E_ESCAPE`
 is set.
@@ -800,8 +797,8 @@ its `main`:
   `Dockerfile` with the `forge` stage;
 - `frontend`: the submit panel and the submissions list;
 - `runner`: `primitive-base` and the worker;
-- `primitive-compile` and `primitive-exec`: each with a `Dockerfile` at
-  the root, built on `primitive-base`.
+- `primitive-exec`: its `Dockerfile` at the root, built on
+  `primitive-base`.
 
 ## Checks
 
@@ -820,8 +817,8 @@ docker compose --env-file .env.check -f compose.yaml -f compose.dev.yaml config 
 ```
 
 CI runs exactly these, and then boots the whole stack: it checks out
-`forge`, `backend`, `frontend`, `runner`, `primitive-compile` and
-`primitive-exec` beside this repo, builds the grading images with `scripts/build-images.py`, runs
+`forge`, `backend`, `frontend`, `runner` and `primitive-exec` beside
+this repo, builds the grading images with `scripts/build-images.py`, runs
 bootstrap against `compose.yaml` and `compose.dev.yaml`, starts the `app`
 profile, and checks that `/readyz` answers ready and the frontend serves its
 page through the proxy on one origin. It then tries the proxy from outside:
@@ -834,9 +831,10 @@ listener passes a checkout's reads of the forge's host and answers 404 to a
 push, the forge's API, a path that only becomes a checkout path once
 resolved, and every other host. It checks that sign-up is open on both
 sides, Forgejo's form and the backend's Create account link. It then runs bootstrap a second time and fails if `.env`
-changed or the run made anything, and checks that `compile` at `v1` and
-`v3`, `exec` at `v1`, `classic` at `v3` and `interactive` at `v1` are at
-the forge, each as this run would write it. Between the two it starts the `agent`
+changed or the run made anything, and checks that `exec` at `v2`,
+`classic` at `v4` and `interactive` at `v2` are at the forge, each as this
+run would write it, and no `compile`, `exec` at `v1`, earlier `classic` or
+`interactive` at `v1`. Between the two it starts the `agent`
 profile, waits for the dev agent to connect, runs the browser tests above,
 and runs `scripts/check-lfs.py --exact` for one 500 MB file. Last, it sends a burst of sign-in posts and expects some through and
 some refused with 429, then sets `SIGN_UP_OPEN=false`, runs bootstrap again

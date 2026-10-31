@@ -1,10 +1,10 @@
 # riverside/coins@v1: one run of a Making Change solution on one amount.
-# The solution is built by judgekit/build@v2 and run here, and judged by
-# judgekit/check@v1 with the checker beside this file, given as its answer
-# data/fewest.bin, the fewest coins for every amount up to 1,000,000, so a
-# test needs no answer file.
+# The solution is compiled and run here, and judged by judgekit/check@v1
+# with the checker beside this file, given as its answer data/fewest.bin,
+# the fewest coins for every amount up to 1,000,000, so a test needs no
+# answer file.
 description: >-
-  Judges a Making Change solution on one amount. It builds and runs the
+  Judges a Making Change solution on one amount. It compiles and runs the
   solution, then the checker beside this file checks the coins add up
   and are as few as can be, using data/fewest.bin, the fewest coins for
   every amount up to 1,000,000. So a test is only an amount, with no
@@ -17,15 +17,11 @@ inputs:
   memory_limit: {type: number, title: Memory limit, unit: MB}
 
 steps:
-  - id: build
-    use: judgekit/build@v2
-    with:
-      code: ${{ inputs.code }}
-      language: ${{ inputs.language }}
   - id: solution
-    use: unicon/exec@v1
+    use: unicon/exec@v2
     with:
-      program: ${{ steps.build.program }}
+      source: ${{ inputs.code }}
+      language: ${{ inputs.language }}
       stdin: ${{ inputs.input }}
       time_limit: ${{ inputs.time_limit }}
       memory_limit: ${{ inputs.memory_limit }}
@@ -40,4 +36,4 @@ steps:
 outputs:
   score: ${{ steps.check.score }}
   time_ms: {from: "${{ steps.solution.time_ms }}", title: Run time, unit: ms}
-  log: ${{ steps.build.log }}
+  log: ${{ steps.solution.log }}

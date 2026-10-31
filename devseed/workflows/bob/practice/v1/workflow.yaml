@@ -1,4 +1,4 @@
-# bob/practice@v1: unicon/classic@v3 with the limits I practise under,
+# bob/practice@v1: unicon/classic@v4 with the limits I practise under,
 # one second and 64 MB, so a slow solution fails here before a contest.
 description: >-
   Judges a solution by its answer, as unicon/classic does, under my
@@ -12,7 +12,7 @@ inputs:
 
 steps:
   - id: judge
-    use: unicon/classic@v3
+    use: unicon/classic@v4
     with:
       code: ${{ inputs.code }}
       language: ${{ inputs.language }}

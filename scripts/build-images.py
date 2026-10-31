@@ -23,9 +23,10 @@ primitive's checkout fills the version at the forge that is the major of
 the version in its pyproject.toml, `v2` for 2.0.0, with its source the
 sibling checkout; every other version of it is copied from images.json as
 released, the image by its digest at ghcr.io and the source its tag on
-GitHub. So a stack built this way seeds compile's v1 from its release and
-its v3 from the checkout. images.local.json is git-ignored, and bootstrap
-reads it instead of images.json whenever it is there. Run it from the deploy directory:
+GitHub. So a stack built this way seeds exec's v2 from the checkout, and
+any other version images.json pins from its release. images.local.json is
+git-ignored, and bootstrap reads it instead of images.json whenever it is
+there. Run it from the deploy directory:
 
     uv run scripts/build-images.py
     uv run bootstrap
@@ -72,7 +73,7 @@ import httpx
 from bootstrap import images
 
 RUNNER_IMAGES = ("worker",)
-PRIMITIVES = ("compile", "exec")
+PRIMITIVES = ("exec",)
 """The primitives, each built on the runner's `images.PRIMITIVE_BASE`, which
 is built first.
 """
