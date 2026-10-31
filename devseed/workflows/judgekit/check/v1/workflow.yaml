@@ -12,15 +12,11 @@ inputs:
   answer: {type: file, title: Answer}
 
 steps:
-  - id: build
-    use: judgekit/build@v2
-    with:
-      code: ${{ inputs.checker }}
-      language: python
   - id: judge
-    use: unicon/exec@v1
+    use: unicon/exec@v2
     with:
-      program: ${{ steps.build.program }}
+      source: ${{ inputs.checker }}
+      language: python
       manifest: ${{ workflow.program.yaml }}
       time_limit: 5
       memory_limit: 256

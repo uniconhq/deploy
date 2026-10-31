@@ -1,4 +1,4 @@
-"""The three primitives the forge is seeded with, mirrored from their repos.
+"""The primitives the forge is seeded with, mirrored from their repos.
 
 A primitive is one grading step: a program in an image, and a declaration,
 `primitive.yaml`, of its inputs, outputs and limits. Each is developed in its

@@ -1,5 +1,5 @@
 name: Guess the Number
-workflow: unicon/interactive@v1
+workflow: unicon/interactive@v2
 inputs:
   code: {entrant: {label: Your solution, max_size: 1MB}}
   language: {entrant: {options: [python, cpp], default: python}}

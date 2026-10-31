@@ -1,12 +1,13 @@
-# unicon/interactive@v1
+# unicon/interactive@v2
 
 One run of an entrant's program against the task's judge. `workflow.yaml`
-compiles both, runs them side by side with `unicon/exec@v1`'s programs
+compiles both and runs them side by side with `unicon/exec@v2`'s programs
 form, the entrant's output the judge's input and the judge's the
-entrant's, and then runs `verdict/verdict.py` with `unicon/exec@v1`'s one
-form, given `verdict/program.yaml` as its manifest and the game's `facts`
-as a named file. Its verdict is the
-run's.
+entrant's, and then compiles and runs `verdict/verdict.py` with
+`unicon/exec@v2`'s one form, given `verdict/program.yaml` as its manifest
+and the game's `facts` as a named file. Its verdict is the run's. Each
+step compiles its sources once, before any run, from the machine's cache
+when it can; the save checks that the judge and `verdict/` compile.
 
 **The judge** is the task's program, with its `program.yaml` as
 `judge_manifest` and the test's input placed in its working directory as
@@ -73,9 +74,12 @@ else:
 3. Otherwise a limit the entrant broke, or its crash.
 4. Otherwise the judge's `0`: `accepted`.
 
+Code that does not compile ends every run `compile_error`, and neither
+program runs.
+
 The judge's texts are passed on with every verdict, and its reports are
 shown with the run as extras, never columns. The run reports the entrant's
-time and memory and the compile log.
+time and memory and the entrant's compile log, the same for every run.
 
 The rules are tested in `tests/test_interactive_verdict.py` on hand-written
 facts, and through both forms of exec on its image in

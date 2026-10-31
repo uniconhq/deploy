@@ -1,4 +1,4 @@
-# unicon/interactive@v1, workflow.yaml: one run of an entrant's program
+# unicon/interactive@v2, workflow.yaml: one run of an entrant's program
 # against the task's judge, linked both ways, and the verdict the verdict
 # script gives from how each ended. The format is SIMPLER-CORE.md 7.
 inputs:
@@ -37,26 +37,18 @@ inputs:
   judge_memory_limit: {type: number, title: Judge's memory limit, unit: MB}
 
 steps:
-  - id: compile
-    use: unicon/compile@v3
-    with:
-      source: ${{ inputs.code }}
-      language: ${{ inputs.language }}
-  - id: judge
-    use: unicon/compile@v3
-    with:
-      source: ${{ inputs.judge }}
-      language: ${{ inputs.judge_language }}
   - id: game
-    use: unicon/exec@v1
+    use: unicon/exec@v2
     with:
       programs:
         entrant:
-          program: ${{ steps.compile.program }}
+          source: ${{ inputs.code }}
+          language: ${{ inputs.language }}
           time_limit: ${{ inputs.time_limit }}
           memory_limit: ${{ inputs.memory_limit }}
         judge:
-          program: ${{ steps.judge.program }}
+          source: ${{ inputs.judge }}
+          language: ${{ inputs.judge_language }}
           manifest: ${{ inputs.judge_manifest }}
           files:
             input: ${{ inputs.input }}
@@ -65,15 +57,11 @@ steps:
       links:
         - entrant -> judge
         - judge -> entrant
-  - id: verdict
-    use: unicon/compile@v3
+  - id: decide
+    use: unicon/exec@v2
     with:
       source: ${{ workflow.verdict/ }}
       language: python
-  - id: decide
-    use: unicon/exec@v1
-    with:
-      program: ${{ steps.verdict.program }}
       manifest: ${{ workflow.verdict/program.yaml }}
       time_limit: 5
       memory_limit: 64
@@ -89,4 +77,4 @@ outputs:
     from: "${{ steps.game.entrant.memory_kb }}"
     title: Memory used
     unit: KB
-  log: {from: "${{ steps.compile.log }}", title: Compile log}
+  log: {from: "${{ steps.game.entrant.log }}", title: Compile log}

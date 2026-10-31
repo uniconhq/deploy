@@ -12,12 +12,12 @@ that release, since bootstrap mirrors that repository into the forge
         "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:<64 hex>"
       },
       "primitives": {
-        "compile": {
-          "v1": {
-            "image": "ghcr.io/uniconhq/primitive-compile@sha256:<64 hex>",
-            "source": {"github": "uniconhq/primitive-compile", "tag": "v1.1.1"}
+        "exec": {
+          "v2": {
+            "image": "ghcr.io/uniconhq/primitive-exec@sha256:<64 hex>",
+            "source": {"github": "uniconhq/primitive-exec", "tag": "v2.0.0"}
           },
-          "v2": {...}
+          "v3": {...}
         }
       }
     }
@@ -31,7 +31,7 @@ major of the key it is under, or the manifest is refused.
 A development machine builds every image from the sibling checkouts instead,
 pushes them to a registry on localhost to learn their digests, and writes
 `images.local.json` in the same shape (scripts/build-images.py). There a
-primitive's source can be `{"path": "../primitive-compile"}`, a checkout
+primitive's source can be `{"path": "../primitive-exec"}`, a checkout
 relative to the deploy directory. Bootstrap reads the local manifest when it
 is there and the release manifest otherwise, unless told which with --images.
 
