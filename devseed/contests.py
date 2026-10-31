@@ -109,7 +109,7 @@ def relay(state: str, start: datetime, end: datetime) -> str:
                     "audience": {"who": "everyone"},
                     **points(
                         {
-                            "pairs_points": hundred_if_solved("pairs"),
+                            "pairs_points": best("pairs", "points"),
                             "trip_points": best("round-trip", "points"),
                         }
                     ),

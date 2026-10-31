@@ -9,4 +9,5 @@ for i, x in enumerate(numbers, 1):
         print(i, place[k - x])
         break
 else:
-    print(-1)
+    largest = sorted(range(1, n + 1), key=lambda i: numbers[i - 1])[-2:]
+    print(*largest)

@@ -1,20 +1,26 @@
-# judgekit/special@v1: one run of a solution on one input, judged by the
-# task's own checker through judgekit/check@v1, for tasks with more than
-# one right answer.
+# judgekit/special@v1: one run of a solution on one input, scored by the
+# task's own checker through judgekit/check@v1, for tasks where more than
+# one output is right or an output can be partly right.
 description: >-
-  Runs a solution on one input and judges it with the task's own
-  checker, for tasks with more than one right answer.
+  Grades one test with the task's own checker, for tasks where more than
+  one output is right, or an output can be partly right. The entrant's
+  solution runs on the test's input under the task's limits; then the
+  checker, a shared workflow of its own, reads the input, the solution's
+  output and the task's answer file, and scores the output from 0 to 1.
 inputs:
-  code: {type: file, title: Solution}
+  code: {type: file, title: Solution, help: The entrant's source file.}
   language: {type: enum, options: [c, cpp, python], title: Language}
-  input: {type: file, title: Input}
-  answer: {type: file, title: Answer}
+  input: {type: file, title: Test input, help: What the solution reads.}
+  answer:
+    type: file
+    title: Answer file
+    help: What the checker needs to know about the right answer, such as the best result possible.
   checker: {type: folder, title: Checker, help: A Python folder with check.py at its top.}
   time_limit: {type: number, title: Time limit, unit: seconds}
   memory_limit: {type: number, title: Memory limit, unit: MB}
 
 steps:
-  - id: solution
+  - id: run-solution
     use: unicon/exec@v2
     with:
       source: ${{ inputs.code }}
@@ -22,15 +28,15 @@ steps:
       stdin: ${{ inputs.input }}
       time_limit: ${{ inputs.time_limit }}
       memory_limit: ${{ inputs.memory_limit }}
-  - id: check
+  - id: score-output
     use: judgekit/check@v1
     with:
       checker: ${{ inputs.checker }}
       input: ${{ inputs.input }}
-      output: ${{ steps.solution.output }}
+      output: ${{ steps.run-solution.output }}
       answer: ${{ inputs.answer }}
 
 outputs:
-  score: ${{ steps.check.score }}
-  time_ms: {from: "${{ steps.solution.time_ms }}", title: Run time, unit: ms}
-  log: ${{ steps.solution.log }}
+  score: {from: "${{ steps.score-output.score }}", title: Score}
+  time_ms: {from: "${{ steps.run-solution.time_ms }}", title: Run time, unit: ms}
+  log: {from: "${{ steps.run-solution.log }}", title: Solution's log}
