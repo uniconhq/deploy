@@ -38,8 +38,9 @@ Three contests, all riverside's:
   unicon/interactive@v2. Two
   leaderboards: ICPC standings and points. A question bob asked, answered
   in public, and an announcement.
-- Summer Relay 2026, running: Pairs on judgekit/special@v1 with its
-  checker, and Round Trip on dan/round-trip@v1, a relay points board,
+- Summer Relay 2026, running: Closest Pair on judgekit/special@v1, whose
+  checker gives part of a test's points to a pair that is close but not
+  closest, and Round Trip on dan/round-trip@v1, a relay points board,
   two more days on Round Trip for erin, and a question from her not yet
   answered.
 - Autumn Open 2026, a draft with one task not written yet.
@@ -334,7 +335,7 @@ def approve_everyone(organiser: api.Caller, contest: str) -> None:
 
 def threads(callers: dict[str, api.Caller]) -> None:
     """Bob's question on Grid Islands, answered for everyone; an
-    announcement; and erin's question on Pairs, waiting."""
+    announcement; and erin's question on Closest Pair, waiting."""
     spring, relay = contest_path(contests.SPRING), contest_path(contests.RELAY)
     asked = callers["bob"].send(
         "POST",

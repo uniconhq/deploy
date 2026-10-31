@@ -2,17 +2,19 @@
 # Python folder whose check.py reads `input`, `output` and `answer` from
 # its working directory and reports as program.yaml beside this file says.
 description: >-
-  Judges one output with a checker the task brings: a Python folder
-  whose check.py reads the input, the output and the answer, and writes
-  the score.
+  Scores one output with a checker the task brings. The checker is a
+  Python folder whose check.py finds the test's input, the entrant's
+  output and the task's answer file beside it, then says whether it
+  takes the output and scores it from 0 to 1. It runs under its own
+  fixed limits, 5 seconds and 256 MB, apart from the entrant's.
 inputs:
-  checker: {type: folder, title: Checker}
-  input: {type: file, title: Input}
-  output: {type: file, title: Output}
-  answer: {type: file, title: Answer}
+  checker: {type: folder, title: Checker, help: A Python folder with check.py at its top.}
+  input: {type: file, title: Test input}
+  output: {type: file, title: Entrant's output}
+  answer: {type: file, title: Answer file}
 
 steps:
-  - id: judge
+  - id: run-checker
     use: unicon/exec@v2
     with:
       source: ${{ inputs.checker }}
@@ -26,4 +28,4 @@ steps:
         answer: ${{ inputs.answer }}
 
 outputs:
-  score: ${{ steps.judge.score }}
+  score: {from: "${{ steps.run-checker.score }}", title: Score}
