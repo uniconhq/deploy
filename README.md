@@ -540,10 +540,10 @@ that holds that version, a new image under the same declaration moves the
 version to it, and any other change to the declaration stops bootstrap,
 since a version's ports never change.
 
-Today it pins runner `v0.10.0` and no primitive: `exec`'s `v2`, which the
-built-in workflows use, is not released yet, so a stack grades only from a
-local build. `compile` and `exec`'s `v1` are retired, and the forge refuses
-a workflow that names either.
+Today it pins runner `v0.11.0` and one primitive, `exec`'s `v2` at
+release `v2.0.0`, which the built-in workflows use, so a stack bootstraps
+from `images.json` alone again. `compile` and `exec`'s `v1` are retired,
+and the forge refuses a workflow that names either.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's

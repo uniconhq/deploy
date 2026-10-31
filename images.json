@@ -1,7 +1,17 @@
 {
   "images": {
-    "worker": "ghcr.io/uniconhq/worker@sha256:e3d76108fd02e51749e5018a267249e35c4bab408b5faa64f8e5eee0834ab98b",
+    "worker": "ghcr.io/uniconhq/worker@sha256:b1664470e63c0afb2442e3f87847aca07c9c32ed035460a9d21d5adabe67d41c",
     "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:550075c844fcec0af41d9d28f9860aa5d8c43e1e9419be4b9266dc02c2f29804"
   },
-  "primitives": {}
+  "primitives": {
+    "exec": {
+      "v2": {
+        "image": "ghcr.io/uniconhq/primitive-exec@sha256:5d8394b80edc522ac8253b81d112eb138188d2e0c7dde1555c4ca5eac7bdc582",
+        "source": {
+          "github": "uniconhq/primitive-exec",
+          "tag": "v2.0.0"
+        }
+      }
+    }
+  }
 }
