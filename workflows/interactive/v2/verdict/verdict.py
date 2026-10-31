@@ -1,4 +1,4 @@
-"""The verdict script of unicon/interactive@v1: whose run was it?
+"""The verdict script of unicon/interactive@v2: whose run was it?
 
 exec's programs form runs the entrant and the judge side by side and judges nothing; it
 writes how each ended as its `facts` file. exec runs this script with that

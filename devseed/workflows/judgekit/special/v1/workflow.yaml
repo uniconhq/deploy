@@ -14,15 +14,11 @@ inputs:
   memory_limit: {type: number, title: Memory limit, unit: MB}
 
 steps:
-  - id: build
-    use: judgekit/build@v1
-    with:
-      code: ${{ inputs.code }}
-      language: ${{ inputs.language }}
   - id: solution
-    use: unicon/exec@v1
+    use: unicon/exec@v2
     with:
-      program: ${{ steps.build.program }}
+      source: ${{ inputs.code }}
+      language: ${{ inputs.language }}
       stdin: ${{ inputs.input }}
       time_limit: ${{ inputs.time_limit }}
       memory_limit: ${{ inputs.memory_limit }}
@@ -37,4 +33,4 @@ steps:
 outputs:
   score: ${{ steps.check.score }}
   time_ms: {from: "${{ steps.solution.time_ms }}", title: Run time, unit: ms}
-  log: ${{ steps.build.log }}
+  log: ${{ steps.solution.log }}

@@ -1,5 +1,5 @@
-"""The verdict script unicon/interactive@v1 ships,
-workflows/interactive/v1/verdict/: every rule on hand-written facts, as
+"""The verdict script unicon/interactive@v2 ships,
+workflows/interactive/v2/verdict/: every rule on hand-written facts, as
 exec's programs form gives them, and the report it writes for exec's one
 form.
 
@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-WORKFLOW = Path(__file__).resolve().parent.parent / "workflows/interactive/v1"
+WORKFLOW = Path(__file__).resolve().parent.parent / "workflows/interactive/v2"
 VERDICT = WORKFLOW / "verdict"
 SIBLINGS = Path(__file__).resolve().parents[2]
 """Where the primitives' checkouts sit beside deploy's."""
@@ -327,7 +327,7 @@ def test_the_outcome_words_are_the_programs_forms_and_execs() -> None:
     """`WORDS` are the endings the programs form's `ended` names besides
     `finished`, and the verdict words exec takes from a manifest program,
     read from the sibling exec checkout."""
-    exec_source = SIBLINGS / "primitive-exec" / "src" / "exec.py"
+    exec_source = SIBLINGS / "primitive-exec" / "src" / "exec" / "report.py"
     exec_yaml = SIBLINGS / "primitive-exec" / "primitive.yaml"
     if not (exec_source.is_file() and exec_yaml.is_file()):
         pytest.skip("no primitive-exec checkout beside deploy")
@@ -353,22 +353,29 @@ def test_the_workflow_links_an_entrant_and_a_judge_and_hands_on_the_facts() -> N
     workflow = YAML(typ="safe").load(WORKFLOW / "workflow.yaml")
     assert "test" not in workflow
     steps = {step["id"]: step for step in workflow["steps"]}
-    assert list(steps) == ["compile", "judge", "game", "verdict", "decide"]
+    assert list(steps) == ["game", "decide"]
     game = steps["game"]
-    assert game["use"] == "unicon/exec@v1"
-    assert set(game["with"]["programs"]) == {"entrant", "judge"}
+    assert game["use"] == "unicon/exec@v2"
+    programs = game["with"]["programs"]
+    assert set(programs) == {"entrant", "judge"}
     assert game["with"]["links"] == ["entrant -> judge", "judge -> entrant"]
-    assert "manifest" not in game["with"]["programs"]["entrant"]
-    assert "manifest" in game["with"]["programs"]["judge"]
+    assert programs["entrant"]["source"] == "${{ inputs.code }}"
+    assert programs["entrant"]["language"] == "${{ inputs.language }}"
+    assert programs["judge"]["source"] == "${{ inputs.judge }}"
+    assert programs["judge"]["language"] == "${{ inputs.judge_language }}"
+    assert "manifest" not in programs["entrant"]
+    assert "manifest" in programs["judge"]
     decide = steps["decide"]
-    assert decide["use"] == "unicon/exec@v1"
+    assert decide["use"] == "unicon/exec@v2"
+    assert decide["with"]["source"] == "${{ workflow.verdict/ }}"
+    assert decide["with"]["language"] == "python"
     assert decide["with"]["manifest"] == "${{ workflow.verdict/program.yaml }}"
     assert decide["with"]["files"] == {"facts": "${{ steps.game.facts }}"}
     assert "self_reported" not in decide["with"]
-    assert steps["verdict"]["with"]["source"] == "${{ workflow.verdict/ }}"
     outputs = workflow["outputs"]
     assert outputs["time_ms"]["from"] == "${{ steps.game.entrant.time_ms }}"
     assert outputs["memory_kb"]["from"] == "${{ steps.game.entrant.memory_kb }}"
+    assert outputs["log"]["from"] == "${{ steps.game.entrant.log }}"
 
 
 def test_the_script_has_no_dependency() -> None:
