@@ -159,8 +159,11 @@ class FakeForgejo(Compose):
         if route == ("GET", ""):
             return 200, {"private": repo.private, "description": repo.description}
         if route == ("PATCH", ""):
-            repo.description = body["description"]
-            return 200, {"description": repo.description}
+            if "description" in body:
+                repo.description = body["description"]
+            if "private" in body:
+                repo.private = body["private"]
+            return 200, {"description": repo.description, "private": repo.private}
         if route == ("GET", "branches"):
             if repo.head is None or rest[1] != repo.default_branch:
                 return ABSENT

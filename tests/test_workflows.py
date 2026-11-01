@@ -177,7 +177,7 @@ def test_the_repository_is_public_on_main_with_no_commit_of_forgejos_own() -> No
     assert made == [
         {
             "name": name,
-            "private": False,
+            "private": name == "packages",
             "default_branch": "main",
             "auto_init": False,
         }
@@ -703,3 +703,11 @@ def test_the_newest_readme_describes_the_workflow_without_writes_on_a_rerun() ->
     before = forge.writes()
     main._seed_workflow(repos, "sample", versions, Summary(), False)
     assert forge.writes() == before
+
+
+def test_an_existing_public_package_store_is_made_private() -> None:
+    forge = FakeForgejo()
+    store = forge.seed("unicon/packages")
+    _seed(forge)
+    assert store.private is True
+    assert forge.body_of("PATCH", "/repos/unicon/packages") == {"private": True}

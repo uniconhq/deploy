@@ -705,7 +705,7 @@ def _seed_platform(
     summary.record(f"forgejo organisation {PLATFORM_ORG}", repos.ensure_platform_org())
     summary.record(
         "package store unicon/packages",
-        repos.ensure_repository(PLATFORM_ORG, "packages"),
+        repos.ensure_repository(PLATFORM_ORG, "packages", private=True),
     )
     for primitive in manifest.primitive_names:
         repo = primitives.repository(primitive)
