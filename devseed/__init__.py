@@ -14,28 +14,28 @@ Five people:
 The workflows use each other's versions as steps:
 
 - `judgekit/check@v1`, a checker the task brings, compiled and run by
-  `unicon/exec@v2`;
+  `unicon/exec@v3`;
 - `judgekit/special@v1`, a run judged by a checker: the solution run by
-  `unicon/exec@v2`, and `judgekit/check@v1` as a box;
-- `riverside/standard@v1`, private to the club: `unicon/classic@v4`
+  `unicon/exec@v3`, and `judgekit/check@v1` as a box;
+- `riverside/standard@v1`, private to the club: `unicon/classic@v5`
   under the club's limits;
 - `riverside/coins@v1`, private to the club: the solution run by
-  `unicon/exec@v2`, and `judgekit/check@v1` as a box, with a checker of
+  `unicon/exec@v3`, and `judgekit/check@v1` as a box, with a checker of
   its own given a 2 MB table, `data/fewest.bin`, uploaded into the draft,
   as its answer; its draft is ahead of v1 by a changed checker;
-- `dan/round-trip@v1`: `unicon/classic@v4` twice, once each way;
-- `bob/practice@v1`: `unicon/classic@v4` under bob's own limits, used by
+- `dan/round-trip@v1`: `unicon/classic@v5` twice, once each way;
+- `bob/practice@v1`: `unicon/classic@v5` under bob's own limits, used by
   no task.
 
 Three contests, all riverside's:
 
 - Spring Open 2026, which started three hours before the seed and is
-  closed by it, with results released: Sum of Two on unicon/classic@v4,
+  closed by it, with results released: Sum of Two on unicon/classic@v5,
   Grid Islands on riverside/standard@v1 with two subtasks and its points
   on release,
   Making Change on riverside/coins@v1, due once bob's submission is in,
   so carol's and erin's a minute later are late, and Guess the Number on
-  unicon/interactive@v2. Two
+  unicon/interactive@v3. Two
   leaderboards: ICPC standings and points. A question bob asked, answered
   in public, and an announcement.
 - Summer Relay 2026, running: Closest Pair on judgekit/special@v1, whose

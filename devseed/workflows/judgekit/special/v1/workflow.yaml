@@ -21,7 +21,7 @@ inputs:
 
 steps:
   - id: run-solution
-    use: unicon/exec@v2
+    use: unicon/exec@v3
     with:
       source: ${{ inputs.code }}
       language: ${{ inputs.language }}

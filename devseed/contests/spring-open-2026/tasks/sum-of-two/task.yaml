@@ -1,5 +1,5 @@
 name: Sum of Two
-workflow: unicon/classic@v4
+workflow: unicon/classic@v5
 inputs:
   code: {entrant: {label: Your solution, max_size: 1MB}}
   language: {entrant: {options: [python, cpp], default: python}}

@@ -20,10 +20,10 @@ images.local.json: the same shape as images.json, with every runner
 image a localhost:5000 reference by digest, and every other image there,
 Woodpecker's git plugin, copied from images.json as released. Each
 primitive's checkout fills the version at the forge that is the major of
-the version in its pyproject.toml, `v2` for 2.0.0, with its source the
+the version in its pyproject.toml, `v3` for 3.0.0, with its source the
 sibling checkout; every other version of it is copied from images.json as
 released, the image by its digest at ghcr.io and the source its tag on
-GitHub. So a stack built this way seeds exec's v2 from the checkout, and
+GitHub. So a stack built this way seeds exec's v3 from the checkout, and
 any other version images.json pins from its release. images.local.json is
 git-ignored, and bootstrap reads it instead of images.json whenever it is
 there. Run it from the deploy directory:
@@ -144,7 +144,11 @@ def main(argv: list[str] | None = None) -> int:
         for name in PRIMITIVES:
             checkout = siblings / f"primitive-{name}"
             version = _version_of(checkout)
-            versions = dict(released.get(name, {}))
+            versions = {
+                key: value
+                for key, value in released.get(name, {}).items()
+                if name != "exec" or key not in ("v1", "v2")
+            }
             versions[version] = {
                 "image": on_base.image(
                     f"primitive-{name}",
@@ -205,7 +209,7 @@ def _released_primitives(directory: Path) -> dict[str, dict[str, Any]]:
 
 def _version_of(checkout: Path) -> str:
     """The version at the forge a checkout fills: the major of the version
-    its pyproject.toml gives, `v2` for 2.0.0.
+    its pyproject.toml gives, `v3` for 3.0.0.
     """
     pyproject = checkout / "pyproject.toml"
     try:
