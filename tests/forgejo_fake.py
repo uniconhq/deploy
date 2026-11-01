@@ -38,6 +38,7 @@ def read_config(stdin: str) -> dict[str, list[str]]:
 @dataclass
 class FakeRepo:
     private: bool = False
+    description: str = ""
     default_branch: str = "main"
     commits: dict[str, dict[str, bytes]] = field(default_factory=dict)
     head: str | None = None
@@ -156,7 +157,10 @@ class FakeForgejo(Compose):
     ) -> tuple[int, Any]:
         route = (method, rest[0] if rest else "")
         if route == ("GET", ""):
-            return 200, {"private": repo.private}
+            return 200, {"private": repo.private, "description": repo.description}
+        if route == ("PATCH", ""):
+            repo.description = body["description"]
+            return 200, {"description": repo.description}
         if route == ("GET", "branches"):
             if repo.head is None or rest[1] != repo.default_branch:
                 return ABSENT

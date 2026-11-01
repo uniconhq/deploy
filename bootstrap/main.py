@@ -78,7 +78,15 @@ from urllib.parse import urlparse
 
 import httpx
 
-from bootstrap import envfile, images, postgres, primitives, secret_values, workflows
+from bootstrap import (
+    envfile,
+    images,
+    postgres,
+    primitives,
+    secret_values,
+    workflow_description,
+    workflows,
+)
 from bootstrap.compose import Compose, ComposeFailed
 from bootstrap.forgejo import Forgejo, ForgejoError, OAuthApplication
 from bootstrap.garage import Garage, GarageError
@@ -787,6 +795,15 @@ def _seed_workflow(
                 rewrite=rewrite,
             )
         _record_version(summary, f"workflow {workflow}", version, outcome)
+    latest = versions[next(reversed(versions))] if versions else {}
+    if workflows.README in latest:
+        repos.ensure_description(
+            PLATFORM_ORG,
+            workflow_repo,
+            workflow_description.description_of(
+                latest[workflows.README].decode("utf-8", errors="replace")
+            ),
+        )
     summary.record(
         f"workflow {workflow} mark {workflows.WORKFLOW_TOPIC}",
         repos.ensure_mark(PLATFORM_ORG, workflow_repo, workflows.WORKFLOW_TOPIC),

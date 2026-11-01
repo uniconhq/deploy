@@ -95,10 +95,12 @@ def test_a_fresh_forge_gets_each_workflow_at_each_version() -> None:
         ("POST", f"/orgs/{ORG}/repos"),
         ("POST", f"{REPO}/contents"),
         ("POST", f"{REPO}/tags"),
+        ("PATCH", REPO),
         ("PUT", f"{REPO}/topics/unicon-workflow"),
         ("POST", f"/orgs/{ORG}/repos"),
         ("POST", f"{INTERACTIVE_REPO}/contents"),
         ("POST", f"{INTERACTIVE_REPO}/tags"),
+        ("PATCH", INTERACTIVE_REPO),
         ("PUT", f"{INTERACTIVE_REPO}/topics/unicon-workflow"),
     ]
     repo = forge.repos[FULL]
@@ -667,3 +669,26 @@ def test_a_run_workflow_changed_only_in_an_outputs_words_moves_in_place() -> Non
     assert graded(definition.replace(b"steps.solution.time_ms", b"steps.x.y")) != (
         graded(v4["workflow.yaml"])
     )
+
+
+def test_the_newest_readme_describes_the_workflow_without_writes_on_a_rerun() -> None:
+    forge = FakeForgejo()
+    repos = PlatformRepos(Forgejo(forge, "forgejo"), TOKEN)
+    versions = {
+        "v1": {
+            "workflow.yaml": b"steps: []\n",
+            "README.md": b"# Title\n\nOld words.\n",
+        },
+        "v2": {
+            "workflow.yaml": b"steps: []\n",
+            "README.md": (
+                b"# Title\n\nA **new** [description](https://example.com)."
+                b"\n\nOther words.\n"
+            ),
+        },
+    }
+    main._seed_workflow(repos, "sample", versions, Summary(), False)
+    assert forge.repos["unicon/sample.workflow"].description == "A new description."
+    before = forge.writes()
+    main._seed_workflow(repos, "sample", versions, Summary(), False)
+    assert forge.writes() == before

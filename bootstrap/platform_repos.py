@@ -150,6 +150,17 @@ class PlatformRepos:
         _ok(self._call("PUT", f"/repos/{org}/{repo}/topics/{topic}"))
         return True
 
+    def ensure_description(self, org: str, repo: str, description: str) -> bool:
+        found = self._found("GET", f"/repos/{org}/{repo}")
+        if found is not None and (found.get("description") or "") == description:
+            return False
+        _ok(
+            self._call(
+                "PATCH", f"/repos/{org}/{repo}", body={"description": description}
+            )
+        )
+        return True
+
     def versions(self, org: str, repo: str) -> dict[str, str]:
         """Every version tag of the repository and the commit it points at,
         oldest version first. Tags that are not `vN` are left out, and a
