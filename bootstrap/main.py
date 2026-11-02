@@ -78,7 +78,15 @@ from urllib.parse import urlparse
 
 import httpx
 
-from bootstrap import envfile, images, postgres, primitives, secret_values, workflows
+from bootstrap import (
+    envfile,
+    images,
+    postgres,
+    primitives,
+    secret_values,
+    workflow_description,
+    workflows,
+)
 from bootstrap.compose import Compose, ComposeFailed
 from bootstrap.forgejo import Forgejo, ForgejoError, OAuthApplication
 from bootstrap.garage import Garage, GarageError
@@ -102,7 +110,8 @@ CI_ACCOUNT = "unicon-ci"
 FORGEJO_LFS_BUCKET = "forgejo-lfs"
 LFS_READ_KEY = "unicon-backend-lfs-read"
 RESULTS_BUCKET = "unicon-results"
-UNICON_BUCKETS = (RESULTS_BUCKET,)
+UPLOADS_BUCKET = "unicon-uploads"
+UNICON_BUCKETS = (RESULTS_BUCKET, UPLOADS_BUCKET)
 
 COMPOSE_PROJECT = "unicon"
 DEVELOPMENT_OVERLAY = "compose.dev.yaml"
@@ -553,6 +562,8 @@ def _start_storage(compose: Compose, values: dict[str, str], summary: Summary) -
         bucket_ids[name] = bucket_id
         summary.record(f"garage bucket {name}", created)
 
+    garage.expire_uploads(bucket_ids[UPLOADS_BUCKET])
+
     forgejo_key, created = garage.ensure_key("forgejo-lfs")
     summary.record("garage key forgejo-lfs", created)
     garage.allow_read_write(bucket_ids[FORGEJO_LFS_BUCKET], forgejo_key.access_key_id)
@@ -692,6 +703,10 @@ def _seed_platform(
         )
 
     summary.record(f"forgejo organisation {PLATFORM_ORG}", repos.ensure_platform_org())
+    summary.record(
+        "package store unicon/packages",
+        repos.ensure_repository(PLATFORM_ORG, "packages", private=True),
+    )
     for primitive in manifest.primitive_names:
         repo = primitives.repository(primitive)
         summary.record(
@@ -787,6 +802,15 @@ def _seed_workflow(
                 rewrite=rewrite,
             )
         _record_version(summary, f"workflow {workflow}", version, outcome)
+    latest = versions[next(reversed(versions))] if versions else {}
+    if workflows.README in latest:
+        repos.ensure_description(
+            PLATFORM_ORG,
+            workflow_repo,
+            workflow_description.description_of(
+                latest[workflows.README].decode("utf-8", errors="replace")
+            ),
+        )
     summary.record(
         f"workflow {workflow} mark {workflows.WORKFLOW_TOPIC}",
         repos.ensure_mark(PLATFORM_ORG, workflow_repo, workflows.WORKFLOW_TOPIC),

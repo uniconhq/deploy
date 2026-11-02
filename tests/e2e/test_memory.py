@@ -2,7 +2,7 @@
 the same exec step as runs that pass, through a pipeline the forge builds,
 on a grading machine.
 
-An organiser makes an org, a contest and a task on `unicon/classic@v4`
+An organiser makes an org, a contest and a task on `unicon/classic@v5`
 through the API: four runs of an entrant's C program, each reading two
 numbers to add and how many megabytes to hold first. Three hold nothing;
 one holds 512 MB under the task's 64 MB. The entrant submits the program.
@@ -84,7 +84,7 @@ times the task's memory limit."""
 
 TASK = """\
 name: Sum
-workflow: unicon/classic@v4
+workflow: unicon/classic@v5
 inputs:
   code: {entrant: {label: Your solution, max_size: 1MB}}
   language: c

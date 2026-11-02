@@ -181,7 +181,7 @@ def test_compose_names_what_bootstrap_makes() -> None:
     a grading machine's downloads."""
     text = (DEPLOY / "compose.yaml").read_text(encoding="utf-8")
 
-    assert "UNICON_S3_UPLOADS_BUCKET" not in text
+    assert f"UNICON_S3_UPLOADS_BUCKET: {main.UPLOADS_BUCKET}\n" in text
     assert f"UNICON_S3_RESULTS_BUCKET: {main.RESULTS_BUCKET}\n" in text
     assert f"UNICON_S3_LFS_BUCKET: {main.FORGEJO_LFS_BUCKET}\n" in text
     assert f"UNICON_FORGE_PLATFORM_ACCOUNT: {main.BACKEND_ACCOUNT}\n" in text

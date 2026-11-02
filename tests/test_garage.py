@@ -38,3 +38,31 @@ def test_a_read_only_key_may_read_the_bucket_and_nothing_more() -> None:
     assert {payload["accessKeyId"] for _, payload in compose.calls} == {"key"}
     assert _set(compose.calls, "AllowBucketKey") == {"read"}
     assert _set(compose.calls, "DenyBucketKey") == {"write", "owner"}
+
+
+def test_temporary_uploads_expire_and_unfinished_parts_are_aborted_after_one_day() -> (
+    None
+):
+    compose = Recording()
+    Garage(compose, "garage").expire_uploads("uploads")  # type: ignore[arg-type]
+    assert compose.calls == [
+        (
+            "UpdateBucket",
+            {
+                "id": "uploads",
+                "body": {
+                    "lifecycleRules": [
+                        {
+                            "ID": "abandoned-uploads",
+                            "Status": "Enabled",
+                            "Filter": {"Prefix": ""},
+                            "AbortIncompleteMultipartUpload": {
+                                "DaysAfterInitiation": 1
+                            },
+                            "Expiration": {"Days": 1},
+                        }
+                    ]
+                },
+            },
+        )
+    ]

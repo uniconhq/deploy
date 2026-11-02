@@ -103,6 +103,28 @@ class Garage:
         created = self._call("CreateBucket", {"globalAlias": alias})
         return str(created["id"]), True
 
+    def expire_uploads(self, bucket_id: str) -> None:
+        """Discard abandoned multipart and completed temporary uploads after a day."""
+        self._call(
+            "UpdateBucket",
+            {
+                "id": bucket_id,
+                "body": {
+                    "lifecycleRules": [
+                        {
+                            "ID": "abandoned-uploads",
+                            "Status": "Enabled",
+                            "Filter": {"Prefix": ""},
+                            "AbortIncompleteMultipartUpload": {
+                                "DaysAfterInitiation": 1
+                            },
+                            "Expiration": {"Days": 1},
+                        }
+                    ]
+                },
+            },
+        )
+
     def ensure_key(self, name: str) -> tuple[AccessKey, bool]:
         """Returns the key and whether this run created it.
 

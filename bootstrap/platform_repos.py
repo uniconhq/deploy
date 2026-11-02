@@ -121,12 +121,16 @@ class PlatformRepos:
         )
         return True
 
-    def ensure_repository(self, org: str, repo: str) -> bool:
-        """Returns True if this run created the repository: public, with the
-        default branch every write of the forge package goes to, and no
-        first commit of Forgejo's own so that the first commit is the files.
+    def ensure_repository(self, org: str, repo: str, *, private: bool = False) -> bool:
+        """Create the repository, or enforce privacy when requested.
+
+        Writes use the default branch, with no first commit of Forgejo's own.
         """
-        if self._found("GET", f"/repos/{org}/{repo}") is not None:
+        found = self._found("GET", f"/repos/{org}/{repo}")
+        if found is not None:
+            if private and not found.get("private"):
+                _ok(self._call("PATCH", f"/repos/{org}/{repo}", body={"private": True}))
+                return True
             return False
         _ok(
             self._call(
@@ -134,7 +138,7 @@ class PlatformRepos:
                 f"/orgs/{org}/repos",
                 body={
                     "name": repo,
-                    "private": False,
+                    "private": private,
                     "default_branch": DEFAULT_BRANCH,
                     "auto_init": False,
                 },
@@ -148,6 +152,17 @@ class PlatformRepos:
         if topic in (listed.get("topics") or []):
             return False
         _ok(self._call("PUT", f"/repos/{org}/{repo}/topics/{topic}"))
+        return True
+
+    def ensure_description(self, org: str, repo: str, description: str) -> bool:
+        found = self._found("GET", f"/repos/{org}/{repo}")
+        if found is not None and (found.get("description") or "") == description:
+            return False
+        _ok(
+            self._call(
+                "PATCH", f"/repos/{org}/{repo}", body={"description": description}
+            )
+        )
         return True
 
     def versions(self, org: str, repo: str) -> dict[str, str]:
