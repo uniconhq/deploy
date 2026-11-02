@@ -16,6 +16,7 @@ name: unicon
 # on every command and bootstrap has to start Postgres before these exist. The
 # backend checks them at boot and refuses to start on a missing one.
 x-backend-env: &backend-env
+  UNICON_RESOLVE_CACHE: /var/cache/unicon/resolve
   # The backend marks its cookies Secure exactly when this is https.
   UNICON_PUBLIC_URL: ${UNICON_PUBLIC_URL}
   UNICON_DATABASE_URL: &database-url postgresql+psycopg://unicon:${UNICON_DB_PASSWORD}@postgres:5432/unicon
@@ -65,6 +66,7 @@ x-backend-env: &backend-env
   UNICON_S3_ACCESS_KEY: ${UNICON_S3_ACCESS_KEY}
   UNICON_S3_SECRET_KEY: ${UNICON_S3_SECRET_KEY}
   UNICON_S3_RESULTS_BUCKET: unicon-results
+  UNICON_S3_UPLOADS_BUCKET: unicon-uploads
   UNICON_S3_LFS_ACCESS_KEY: ${UNICON_S3_LFS_ACCESS_KEY}
   UNICON_S3_LFS_SECRET_KEY: ${UNICON_S3_LFS_SECRET_KEY}
   UNICON_S3_LFS_BUCKET: forgejo-lfs
@@ -397,10 +399,12 @@ services:
         condition: service_healthy
       backend-migrate:
         condition: service_completed_successfully
-    environment: *backend-env
     # No healthcheck here: the backend image declares its own, against
     # 127.0.0.1:8000/healthz using the interpreter it already ships. Writing one
     # here would mean guessing which tools that image has.
+    environment: *backend-env
+    volumes:
+      - resolve-cache:/var/cache/unicon/resolve
 
   frontend:
     image: ghcr.io/uniconhq/frontend:main
@@ -417,6 +421,7 @@ services:
       start_period: 15s
 
 volumes:
+  resolve-cache:
   postgres-data:
   forgejo-data:
   woodpecker-data:

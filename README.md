@@ -326,8 +326,8 @@ machine. `devseed/__init__.py` says what it leaves in full:
   `round-trip` shared with
   alice alone, and bob's `practice`;
 - Spring Open 2026, closed with its results released: four tasks on
-  `unicon/classic@v4`, `riverside/standard@v1`, `riverside/coins@v1` and
-  `unicon/interactive@v2`, ICPC standings and a points board, a task due
+  `unicon/classic@v5`, `riverside/standard@v1`, `riverside/coins@v1` and
+  `unicon/interactive@v3`, ICPC standings and a points board, a task due
   before the close with two late submissions, a question answered in
   public and an announcement;
 - Summer Relay 2026, running in teams of up to two, bob and carol one
@@ -418,10 +418,10 @@ nothing.
 Each built-in workflow is a folder under `workflows/`, and each is the
 public repository `unicon/<name>.workflow` with the topic
 `unicon-workflow`. Each of a workflow's versions is a folder in its own,
-`workflows/classic/v4/` and `workflows/interactive/v2/`, holding
+`workflows/classic/v5/` and `workflows/interactive/v3/`, holding
 every file the version's tag holds: its `workflow.yaml` and `README.md`,
 and the files its steps read from the workflow itself, such as
-`classic@v4`'s diff script under `diff/` and `interactive@v2`'s verdict
+`classic@v5`'s diff script under `diff/` and `interactive@v3`'s verdict
 script under `verdict/`. Python's caches are left out, and a link is
 refused. Bootstrap publishes each to its own tag by the same rule: a tag
 that is not there is made, and one that is there and holds the same files
@@ -436,13 +436,13 @@ definitions are compared as the forge reads them: an input written as a
 bare type, `time_limit: number`, is `{type: number}`, an output written as
 a bare reference is one given `from` alone, and a flag set `false` is one
 left out.
-`unicon/classic@v4` is one run of the entrant's program, in the format of
-`SIMPLER-CORE.md` 7: compiled and run with `exec@v2`, and compared word by
-word by its diff script, which `exec@v2` compiles and runs too; a task
+`unicon/classic@v5` is one run of the entrant's program, in the format of
+`SIMPLER-CORE.md` 7: compiled and run with `exec@v3`, and compared word by
+word by its diff script, which `exec@v3` compiles and runs too; a task
 repeats it over its tests. It gives the run's time and memory, which pages
 name "Run time", in ms, and "Memory used", in KB, and the compiler's
-"Compile log". `unicon/interactive@v2` runs the entrant's program against
-the task's judge with `exec@v2`'s programs form, which compiles both, and
+"Compile log". `unicon/interactive@v3` runs the entrant's program against
+the task's judge with `exec@v3`'s programs form, which compiles both, and
 its verdict script decides the run. A definition changed in how it grades is a
 new folder. Every primitive version a
 definition `use:`s has to be one the manifest pins: bootstrap refuses one
@@ -540,10 +540,10 @@ that holds that version, a new image under the same declaration moves the
 version to it, and any other change to the declaration stops bootstrap,
 since a version's ports never change.
 
-Today it pins runner `v0.11.0` and one primitive, `exec`'s `v2` at
-release `v2.0.0`, which the built-in workflows use, so a stack bootstraps
-from `images.json` alone again. `compile` and `exec`'s `v1` are retired,
-and the forge refuses a workflow that names either.
+Today it pins runner `v0.12.0` and one primitive, `exec`'s `v3` at
+release `v3.0.0`, which the built-in workflows use, so a stack bootstraps
+from `images.json` alone again. `compile` and `exec`'s `v1` and `v2` are
+retired, and the forge refuses a workflow that names any of them.
 
 On a development machine and in CI, `uv run scripts/build-images.py` builds
 every one of these images from the sibling checkouts instead: the runner's
@@ -771,9 +771,9 @@ checking the bytes and the door's headers, and finds that an entrant and
 someone signed out get no such file. `test_forge_pages.py` follows "Back
 to Unicon" from Forgejo's consent page to the app's home.
 `test_compile_error.py` sends a C++ solution that does not compile to a
-task on `unicon/classic@v4` and finds every run `compile_error`, the
+task on `unicon/classic@v5` and finds every run `compile_error`, the
 submission's row "Did not compile" and the compiler's log on its page.
-`test_memory.py` and `test_escape.py` grade a task on `unicon/classic@v4`,
+`test_memory.py` and `test_escape.py` grade a task on `unicon/classic@v5`,
 and the runner's escape fixtures, through the API; they need a grading
 machine with `exec`'s shape, so they are skipped unless `UNICON_E2E_ESCAPE`
 is set.

@@ -32,6 +32,7 @@ import argparse
 import base64
 import hashlib
 import json
+import os
 import random
 import time
 from collections.abc import Iterator
@@ -72,7 +73,27 @@ def main(argv: list[str] | None = None) -> int:
         default="http://localhost:3300",
         help="Forgejo as seen from this machine: the loopback port of compose.dev.yaml",
     )
+    parser.add_argument(
+        "--verify-upload", help="a task API path whose uploaded file is already stored"
+    )
+    parser.add_argument("--path", default="statement.md", help="the file of that task")
+    parser.add_argument("--digest", help="the uploaded file's SHA-256")
+    parser.add_argument("--bytes", type=int, help="the uploaded file's byte length")
+    parser.add_argument(
+        "--person", default="alice", help="the local dev organiser to sign in as"
+    )
     options = parser.parse_args(argv)
+    if options.verify_upload:
+        if not options.digest or options.bytes is None:
+            parser.error("--verify-upload needs --digest and --bytes")
+        return verify_upload(
+            options.directory,
+            options.verify_upload,
+            options.path,
+            options.digest,
+            options.bytes,
+            options.person,
+        )
 
     values = envfile.load(options.directory / ".env")
     if not values.get("UNICON_FORGE_ADMIN_TOKEN"):
@@ -265,6 +286,58 @@ def expect(response: httpx.Response) -> None:
             f"{response.request.method} {response.request.url.path} -> "
             f"{response.status_code} {response.text[:300]}"
         )
+
+
+def verify_upload(
+    directory: Path, task: str, path: str, digest: str, size: int, person: str
+) -> int:
+    """Verify an existing organiser upload through a normal local sign-in.
+
+    The already-stored answer measures the object in Forgejo LFS. No
+    provisioning key or database session is used for this check.
+    """
+    os.environ.setdefault("UNICON_E2E_URL", "http://localhost:8080")
+    from playwright.sync_api import sync_playwright
+
+    from tests.e2e import api, stack
+
+    wanted = f"DEV_{person.upper()}_PASSWORD"
+    password = None
+    with (directory / ".env").open(encoding="utf-8") as source:
+        for line in source:
+            if line.startswith("DEV_"):
+                key, separator, value = line.rstrip("\n").partition("=")
+                if separator and key == wanted:
+                    password = value
+    if password is None:
+        print("No local sign-in credential for that person.")
+        return 1
+    with sync_playwright() as playwright:
+        browser = playwright.chromium.launch()
+        try:
+            page = browser.new_page()
+            try:
+                stack.sign_in(page, person, password)
+            except Exception:
+                print("The normal local sign-in failed.")
+                return 1
+            password = None
+            caller = api.Caller.of(page)
+            response = caller.request.post(
+                api.API + task.rstrip("/") + "/organise/part-uploads",
+                data={"path": path, "sha256": digest, "size": size},
+                headers=api.ORIGIN,
+            )
+            if response.status != 201 or response.json().get("status") != "stored":
+                print("Forgejo LFS does not hold the declared upload.")
+                return 1
+            print(
+                f"Forgejo LFS holds the verified object: {size} bytes, "
+                f"SHA-256 {digest}."
+            )
+            return 0
+        finally:
+            browser.close()
 
 
 if __name__ == "__main__":

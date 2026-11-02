@@ -43,7 +43,7 @@ batch: false
 inputs:
   source: {type: file}
 """
-# A v2 release's declaration names neither: the repository and tag do.
+# A v3 release's declaration names neither: the repository and tag do.
 UNNAMED = b"""# The exec primitive.
 batch: false
 inputs:
@@ -75,14 +75,14 @@ def _exec(tmp_path: Path, **extra: bytes) -> Path:
     )
 
 
-def _exec_v2(tmp_path: Path) -> Path:
-    """A checkout of the exec primitive at a v2 release."""
+def _exec_v3(tmp_path: Path) -> Path:
+    """A checkout of the exec primitive at a v3 release."""
     return _checkout(
-        tmp_path / "primitive-exec-v2",
+        tmp_path / "primitive-exec-v3",
         {
             "primitive.yaml": UNNAMED,
             "Dockerfile": b"FROM scratch\n",
-            "exec.py": b"print('exec v2')\n",
+            "exec.py": b"print('exec v3')\n",
         },
     )
 
@@ -116,10 +116,10 @@ def _named(forge: FakeForgejo) -> list[str]:
     return primitives.images_at_forge(repos, ["exec"])
 
 
-def test_a_fresh_forge_gets_v1_then_v2(tmp_path: Path) -> None:
+def test_a_fresh_forge_gets_v1_then_v3(tmp_path: Path) -> None:
     forge = FakeForgejo()
     manifest = _manifest(
-        ("v1", _exec(tmp_path), FIRST), ("v2", _exec_v2(tmp_path), SECOND)
+        ("v1", _exec(tmp_path), FIRST), ("v3", _exec_v3(tmp_path), SECOND)
     )
 
     summary, _ = _seed(forge, manifest)
@@ -127,8 +127,8 @@ def test_a_fresh_forge_gets_v1_then_v2(tmp_path: Path) -> None:
     repo = forge.repos[FULL]
     assert not repo.private
     assert repo.topics == ["unicon-primitive"]
-    assert list(repo.tags) == ["v1", "v2"]
-    assert forge.writes()[2:6] == [
+    assert list(repo.tags) == ["v1", "v3"]
+    assert forge.writes()[3:7] == [
         ("POST", f"/repos/{FULL}/contents"),
         ("POST", f"/repos/{FULL}/tags"),
         ("POST", f"/repos/{FULL}/contents"),
@@ -142,18 +142,18 @@ def test_a_fresh_forge_gets_v1_then_v2(tmp_path: Path) -> None:
         "version: v1",
         f"image: {FIRST}",
     ]
-    v2 = repo.files_at("v2")
-    assert v2["exec.py"] == b"print('exec v2')\n"
-    assert v2["primitive.yaml"] == f"image: {SECOND}\n".encode() + UNNAMED
+    v3 = repo.files_at("v3")
+    assert v3["exec.py"] == b"print('exec v3')\n"
+    assert v3["primitive.yaml"] == f"image: {SECOND}\n".encode() + UNNAMED
     assert "  created  primitive unicon/exec version v1" in summary.lines()
-    assert "  created  primitive unicon/exec version v2" in summary.lines()
+    assert "  created  primitive unicon/exec version v3" in summary.lines()
     assert _named(forge) == [FIRST, SECOND]
 
 
 def test_a_rerun_with_nothing_changed_makes_nothing(tmp_path: Path) -> None:
     forge = FakeForgejo()
     manifest = _manifest(
-        ("v1", _exec(tmp_path), FIRST), ("v2", _exec_v2(tmp_path), SECOND)
+        ("v1", _exec(tmp_path), FIRST), ("v3", _exec_v3(tmp_path), SECOND)
     )
     _seed(forge, manifest)
     forge.requests.clear()
@@ -163,7 +163,7 @@ def test_a_rerun_with_nothing_changed_makes_nothing(tmp_path: Path) -> None:
     assert forge.writes() == []
     assert summary.lines()[0].startswith("created: 0,")
     assert "  present  primitive unicon/exec version v1" in summary.lines()
-    assert "  present  primitive unicon/exec version v2" in summary.lines()
+    assert "  present  primitive unicon/exec version v3" in summary.lines()
     assert _named(forge) == [FIRST, SECOND]
 
 
@@ -212,7 +212,7 @@ def test_a_new_image_alone_moves_the_version_in_place(tmp_path: Path) -> None:
 
     summary, _ = _seed(
         forge,
-        _manifest(("v1", checkout, OTHER), ("v2", _exec_v2(tmp_path), SECOND)),
+        _manifest(("v1", checkout, OTHER), ("v3", _exec_v3(tmp_path), SECOND)),
     )
 
     assert repo.tags["v1"] != before
@@ -220,9 +220,9 @@ def test_a_new_image_alone_moves_the_version_in_place(tmp_path: Path) -> None:
     assert f"image: {OTHER}" in v1["primitive.yaml"].decode()
     assert f"image: {FIRST}" not in v1["primitive.yaml"].decode()
     assert v1["exec.py"] == b"print('fixed')\n"
-    assert set(repo.files_at("v2")) == {"primitive.yaml", "Dockerfile", "exec.py"}
+    assert set(repo.files_at("v3")) == {"primitive.yaml", "Dockerfile", "exec.py"}
     assert "  created  primitive unicon/exec version v1 (moved)" in (summary.lines())
-    assert "  created  primitive unicon/exec version v2" in summary.lines()
+    assert "  created  primitive unicon/exec version v3" in summary.lines()
     assert _named(forge) == [FIRST, OTHER, SECOND]
 
 
@@ -243,7 +243,7 @@ def test_a_moved_version_is_present_on_the_next_run(tmp_path: Path) -> None:
 def test_a_new_image_with_other_ports_stops_the_run_before_anything_is_seeded(
     tmp_path: Path,
 ) -> None:
-    """v2, new in the manifest, is not made either: the run stops before it
+    """v3, new in the manifest, is not made either: the run stops before it
     writes anything, naming the version that differs and what to do.
     """
     forge = FakeForgejo()
@@ -260,7 +260,7 @@ def test_a_new_image_with_other_ports_stops_the_run_before_anything_is_seeded(
     with pytest.raises(main.DifferingVersions) as refused:
         _seed(
             forge,
-            _manifest(("v1", checkout, OTHER), ("v2", _exec_v2(tmp_path), SECOND)),
+            _manifest(("v1", checkout, OTHER), ("v3", _exec_v3(tmp_path), SECOND)),
         )
 
     assert forge.writes() == []
@@ -269,7 +269,7 @@ def test_a_new_image_with_other_ports_stops_the_run_before_anything_is_seeded(
     assert f"image: {FIRST}" in repo.files_at("v1")["primitive.yaml"].decode()
     message = str(refused.value)
     assert "unicon/exec@v1, against what images.local.json pins for it" in (message)
-    assert "unicon/exec@v2" not in message
+    assert "unicon/exec@v3" not in message
     assert "new version in images.local.json" in message
     assert "--rewrite" in message
 
@@ -403,26 +403,26 @@ def test_an_older_format_under_a_released_version_stops_the_run(
     tmp_path: Path,
 ) -> None:
     """A stack that numbered each rebuilt image as the next version holds a
-    v2 in the format of v1; the v2 release is not mirrored over it.
+    v3 in the format of v1; the v3 release is not mirrored over it.
     """
     forge = FakeForgejo()
     forge.seed(
         FULL,
         {
             "primitive.yaml": (
-                b"name: unicon/exec\nversion: v2\n"
+                b"name: unicon/exec\nversion: v3\n"
                 + f"image: {FIRST}\n".encode()
                 + b"batch: false\n"
             ),
             "Dockerfile": b"FROM scratch\n",
         },
-        tags=("v1", "v2"),
+        tags=("v1", "v3"),
         topics=("unicon-primitive",),
     )
     forge.requests.clear()
 
-    with pytest.raises(main.DifferingVersions, match="unicon/exec@v2"):
-        _seed(forge, _manifest(("v2", _exec_v2(tmp_path), SECOND)))
+    with pytest.raises(main.DifferingVersions, match="unicon/exec@v3"):
+        _seed(forge, _manifest(("v3", _exec_v3(tmp_path), SECOND)))
 
     assert forge.writes() == []
 
@@ -452,36 +452,36 @@ def test_a_version_added_later_is_made_and_the_earlier_left(tmp_path: Path) -> N
     v1_files = repo.files_at("v1")
 
     summary, _ = _seed(
-        forge, _manifest(("v1", checkout, FIRST), ("v2", _exec_v2(tmp_path), SECOND))
+        forge, _manifest(("v1", checkout, FIRST), ("v3", _exec_v3(tmp_path), SECOND))
     )
 
     assert repo.tags["v1"] == first
     assert repo.files_at("v1") == v1_files
-    assert set(repo.files_at("v2")) == {"primitive.yaml", "Dockerfile", "exec.py"}
+    assert set(repo.files_at("v3")) == {"primitive.yaml", "Dockerfile", "exec.py"}
     assert "  present  primitive unicon/exec version v1" in summary.lines()
-    assert "  created  primitive unicon/exec version v2" in summary.lines()
+    assert "  created  primitive unicon/exec version v3" in summary.lines()
 
 
 def test_rewrite_on_a_development_stack_moves_the_version(tmp_path: Path) -> None:
     forge = FakeForgejo()
     checkout = _exec(tmp_path)
-    v2 = _exec_v2(tmp_path)
-    _seed(forge, _manifest(("v1", checkout, FIRST), ("v2", v2, SECOND)))
+    v3 = _exec_v3(tmp_path)
+    _seed(forge, _manifest(("v1", checkout, FIRST), ("v3", v3, SECOND)))
     repo = forge.repos[FULL]
     v1 = repo.tags["v1"]
 
-    (v2 / "primitive.yaml").write_bytes(UNNAMED + b"  language: {type: text}\n")
+    (v3 / "primitive.yaml").write_bytes(UNNAMED + b"  language: {type: text}\n")
 
     summary, _ = _seed(
-        forge, _manifest(("v1", checkout, FIRST), ("v2", v2, OTHER)), rewrite=True
+        forge, _manifest(("v1", checkout, FIRST), ("v3", v3, OTHER)), rewrite=True
     )
 
-    assert list(repo.tags) == ["v1", "v2"]
+    assert list(repo.tags) == ["v1", "v3"]
     assert repo.tags["v1"] == v1
-    written = repo.files_at("v2")["primitive.yaml"].decode()
+    written = repo.files_at("v3")["primitive.yaml"].decode()
     assert f"image: {OTHER}" in written
     assert "language: {type: text}" in written
-    assert "  created  primitive unicon/exec version v2 (rewritten)" in summary.lines()
+    assert "  created  primitive unicon/exec version v3 (rewritten)" in summary.lines()
 
 
 def test_a_named_declaration_gets_version_and_image_under_its_name() -> None:
@@ -642,7 +642,7 @@ def test_a_port_named_description_is_a_port_and_its_change_stops_the_run(
 
 def test_a_withdrawn_image_is_not_on_the_privileged_list(tmp_path: Path) -> None:
     manifest = _manifest(
-        ("v1", _exec(tmp_path), FIRST), ("v2", _exec_v2(tmp_path), SECOND)
+        ("v1", _exec(tmp_path), FIRST), ("v3", _exec_v3(tmp_path), SECOND)
     )
     values = {"UNICON_FORGE_ADMIN_TOKEN": TOKEN, "UNICON_WITHDRAWN_IMAGES": SECOND}
 
@@ -659,9 +659,9 @@ def test_a_withdrawn_image_is_matched_by_its_digest_and_one_matching_nothing_is_
     digest, withdraws the image by its digest; one no primitive runs is
     said to withdraw nothing."""
     manifest = _manifest(
-        ("v1", _exec(tmp_path), FIRST), ("v2", _exec_v2(tmp_path), SECOND)
+        ("v1", _exec(tmp_path), FIRST), ("v3", _exec_v3(tmp_path), SECOND)
     )
-    renamed = "mirror.example/exec:v2@" + SECOND.partition("@")[2]
+    renamed = "mirror.example/exec:v3@" + SECOND.partition("@")[2]
     nothing = "ghcr.io/uniconhq/primitive-exec@sha256:" + "9" * 64
     values = {
         "UNICON_FORGE_ADMIN_TOKEN": TOKEN,
@@ -706,7 +706,7 @@ def test_only_an_image_named_by_digest_may_run_privileged() -> None:
     forge = FakeForgejo()
     released = f"image: {exec_image}\nschema_version: 6\n"
     repo = forge.seed(
-        "unicon/exec.primitive", {"primitive.yaml": released.encode()}, tags=("v2",)
+        "unicon/exec.primitive", {"primitive.yaml": released.encode()}, tags=("v3",)
     )
     repo.tags["v3"] = repo.commit({"primitive.yaml": b"image: unicon-exec:lab\n"})
     repos = PlatformRepos(Forgejo(forge, "forgejo"), TOKEN)

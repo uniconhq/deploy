@@ -1,7 +1,7 @@
 """A C++ solution that does not compile, graded on the running compose
 stack through a pipeline the forge builds, on the dev agent.
 
-An organiser makes an org, a contest and a task on `unicon/classic@v4`
+An organiser makes an org, a contest and a task on `unicon/classic@v5`
 through the API: two runs, every run and the compile log shown at once.
 An entrant submits C++ that names a variable it never declares. exec
 compiles it once for the step, in a box of its own, and runs nothing: every
@@ -51,7 +51,7 @@ int main() {
 
 TASK = """\
 name: Sum
-workflow: unicon/classic@v4
+workflow: unicon/classic@v5
 inputs:
   code: {entrant: {label: Your solution, max_size: 1MB}}
   language: cpp

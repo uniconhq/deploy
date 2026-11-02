@@ -15,7 +15,7 @@ inputs:
 
 steps:
   - id: run-checker
-    use: unicon/exec@v2
+    use: unicon/exec@v3
     with:
       source: ${{ inputs.checker }}
       language: python

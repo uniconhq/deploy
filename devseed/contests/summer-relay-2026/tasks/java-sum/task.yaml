@@ -1,0 +1,19 @@
+name: Java Sum
+workflow: unicon/classic@v5
+environment:
+  java: {version: "21"}
+inputs:
+  code: entrant
+  language: {entrant: {options: [java], default: java}}
+  time_limit: 2
+  memory_limit: 256
+repeat:
+  - inputs: [input, answer]
+    tuples:
+      - [tests/1.in, tests/1.ans]
+scoring:
+  values:
+    points: {block: mul, of: [100, {block: sum, over: {runs: all}, of: {run: [all, score]}}]}
+  show:
+    now: [points, all, log]
+submissions: {rate: {count: 10, per: 60}}
