@@ -85,6 +85,18 @@ def save_task(organiser: Caller, task: str, files: dict[str, str]) -> None:
     saved = organiser.send(
         "POST", f"{task}/save", {"changes": changes, "confirm": True, "message": "Task"}
     )
+    if saved.get("status") == "preparing":
+        deadline = time.monotonic() + 16 * 60
+        while True:
+            state = organiser.get(f"{task}/preparation")
+            assert state["status"] not in ("refused", "replaced"), state.get("reason")
+            if state["status"] == "ready":
+                saved = state["result"]
+                break
+            assert time.monotonic() < deadline, (
+                "the task's packages were not prepared in time"
+            )
+            time.sleep(1)
     assert saved.get("number") == 1, saved
 
 

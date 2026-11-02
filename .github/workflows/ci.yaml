@@ -447,8 +447,8 @@ jobs:
         run: uv run scripts/check-lfs.py --exact
 
       # Nothing is made the second time: no secret, no version, no agent.
-      # Its summary lists what was already there, unicon/exec at v2,
-      # unicon/classic at v4 and unicon/interactive at v2 among them, and no
+      # Its summary lists what was already there, unicon/exec at v3,
+      # unicon/classic at v5 and unicon/interactive at v3 among them, and no
       # unicon/compile, unicon/exec at v1, unicon/classic at v1 to v3 or
       # unicon/interactive at v1.
       - name: a second bootstrap changes nothing
@@ -458,9 +458,9 @@ jobs:
           uv run bootstrap | tee second-run.txt
           diff .env.first .env
           grep -q '^created: 0,' second-run.txt
-          grep -q "present  primitive unicon/exec version v2\$" second-run.txt
-          grep -q "present  workflow unicon/classic version v4\$" second-run.txt
-          grep -q "present  workflow unicon/interactive version v2\$" second-run.txt
+          grep -q "present  primitive unicon/exec version v3\$" second-run.txt
+          grep -q "present  workflow unicon/classic version v5\$" second-run.txt
+          grep -q "present  workflow unicon/interactive version v3\$" second-run.txt
           if grep -q "primitive unicon/compile" second-run.txt; then exit 1; fi
           if grep -q "primitive unicon/exec version v1" second-run.txt; then exit 1; fi
           if grep -Eq "workflow unicon/classic version v(1|2|3)" second-run.txt; then exit 1; fi
@@ -473,22 +473,22 @@ jobs:
       - name: a changed version stops bootstrap
         working-directory: deploy
         run: |
-          cp workflows/classic/v4/workflow.yaml workflow.saved
-          sed -i '0,/time_limit: 3$/s//time_limit: 4/' workflows/classic/v4/workflow.yaml
+          cp workflows/classic/v5/workflow.yaml workflow.saved
+          sed -i '0,/time_limit: 3$/s//time_limit: 4/' workflows/classic/v5/workflow.yaml
           if uv run bootstrap > changed-run.txt; then
             cat changed-run.txt
             echo "bootstrap seeded over a version that differs"
             exit 1
           fi
-          cp workflow.saved workflows/classic/v4/workflow.yaml
+          cp workflow.saved workflows/classic/v5/workflow.yaml
           cat changed-run.txt
-          grep -q 'unicon/classic@v4, against workflows/classic/v4/' changed-run.txt
-          cp workflows/classic/v4/README.md readme.saved
-          echo "Reworded." >> workflows/classic/v4/README.md
+          grep -q 'unicon/classic@v5, against workflows/classic/v5/' changed-run.txt
+          cp workflows/classic/v5/README.md readme.saved
+          echo "Reworded." >> workflows/classic/v5/README.md
           uv run bootstrap > reworded-run.txt
           cat reworded-run.txt
-          grep -q 'workflow unicon/classic version v4.*moved' reworded-run.txt
-          cp readme.saved workflows/classic/v4/README.md
+          grep -q 'workflow unicon/classic version v5.*moved' reworded-run.txt
+          cp readme.saved workflows/classic/v5/README.md
 
       # After the browser test, which signs in from this machine too. A burst
       # of 300 sign-in posts from one address: 240 over the rate pass at once,

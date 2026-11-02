@@ -1,4 +1,4 @@
-# unicon/interactive@v2, workflow.yaml: one run of an entrant's program
+# unicon/interactive@v3, workflow.yaml: one run of an entrant's program
 # against the task's judge, linked both ways, and the verdict the verdict
 # script gives from how each ended. The format is SIMPLER-CORE.md 7.
 inputs:
@@ -38,7 +38,7 @@ inputs:
 
 steps:
   - id: game
-    use: unicon/exec@v2
+    use: unicon/exec@v3
     with:
       programs:
         entrant:
@@ -58,7 +58,7 @@ steps:
         - entrant -> judge
         - judge -> entrant
   - id: decide
-    use: unicon/exec@v2
+    use: unicon/exec@v3
     with:
       source: ${{ workflow.verdict/ }}
       language: python

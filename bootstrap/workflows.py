@@ -9,14 +9,14 @@ any task can be published. Each is a public repository
 `unicon-workflow`, with a tag per version (platform_repos.py).
 
 Each workflow is a folder under workflows/ in this repo, and each version a
-folder in it, workflows/classic/v4/ and on, holding every file the
+folder in it, workflows/classic/v5/ and on, holding every file the
 version's tag holds: workflow.yaml and its README.md, and the files its
-steps read from the workflow itself, such as classic@v4's diff script under
-diff/ and interactive@v2's verdict script under verdict/. So the definition
+steps read from the workflow itself, such as classic@v5's diff script under
+diff/ and interactive@v3's verdict script under verdict/. So the definition
 is a file a person can read and yamllint checks, not a string in this
 module. Python's caches are left out, and so, in a git checkout, is every
 file git does not track, such as a `.DS_Store`; a link is refused, since
-the forge stages a folder given whole with everything in it. classic@v4 is
+the forge stages a folder given whole with everything in it. classic@v5 is
 one run of the entrant's program, compiled and run with exec, and compared
 by its diff script, which exec compiles and runs too. Every primitive
 version a definition `use:`s has to

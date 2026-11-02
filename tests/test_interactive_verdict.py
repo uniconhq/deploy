@@ -1,5 +1,5 @@
-"""The verdict script unicon/interactive@v2 ships,
-workflows/interactive/v2/verdict/: every rule on hand-written facts, as
+"""The verdict script unicon/interactive@v3 ships,
+workflows/interactive/v3/verdict/: every rule on hand-written facts, as
 exec's programs form gives them, and the report it writes for exec's one
 form.
 
@@ -20,7 +20,7 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-WORKFLOW = Path(__file__).resolve().parent.parent / "workflows/interactive/v2"
+WORKFLOW = Path(__file__).resolve().parent.parent / "workflows/interactive/v3"
 VERDICT = WORKFLOW / "verdict"
 SIBLINGS = Path(__file__).resolve().parents[2]
 """Where the primitives' checkouts sit beside deploy's."""
@@ -355,7 +355,7 @@ def test_the_workflow_links_an_entrant_and_a_judge_and_hands_on_the_facts() -> N
     steps = {step["id"]: step for step in workflow["steps"]}
     assert list(steps) == ["game", "decide"]
     game = steps["game"]
-    assert game["use"] == "unicon/exec@v2"
+    assert game["use"] == "unicon/exec@v3"
     programs = game["with"]["programs"]
     assert set(programs) == {"entrant", "judge"}
     assert game["with"]["links"] == ["entrant -> judge", "judge -> entrant"]
@@ -366,7 +366,7 @@ def test_the_workflow_links_an_entrant_and_a_judge_and_hands_on_the_facts() -> N
     assert "manifest" not in programs["entrant"]
     assert "manifest" in programs["judge"]
     decide = steps["decide"]
-    assert decide["use"] == "unicon/exec@v2"
+    assert decide["use"] == "unicon/exec@v3"
     assert decide["with"]["source"] == "${{ workflow.verdict/ }}"
     assert decide["with"]["language"] == "python"
     assert decide["with"]["manifest"] == "${{ workflow.verdict/program.yaml }}"

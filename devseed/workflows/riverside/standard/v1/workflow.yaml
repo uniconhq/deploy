@@ -1,5 +1,5 @@
 # riverside/standard@v1: the club's house workflow for a task judged by
-# its answers: unicon/classic@v4 as one step, under the club's limits of
+# its answers: unicon/classic@v5 as one step, under the club's limits of
 # 2 seconds and 256 MB, so a task on it sets neither.
 description: >-
   The club's workflow for a task judged by its answers: it compiles the
@@ -13,7 +13,7 @@ inputs:
 
 steps:
   - id: judge
-    use: unicon/classic@v4
+    use: unicon/classic@v5
     with:
       code: ${{ inputs.code }}
       language: ${{ inputs.language }}
