@@ -1,7 +1,7 @@
 name: Sum of Two
-workflow: unicon/classic@v5
+workflow: unicon/classic@v6
 environment:
-  cpp: {version: "14"}
+  cpp: {version: "16"}
 inputs:
   code: {entrant: {label: Your solution, max_size: 1MB}}
   language: {entrant: {options: [python, cpp], default: python}}

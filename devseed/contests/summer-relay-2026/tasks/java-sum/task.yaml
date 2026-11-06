@@ -1,7 +1,7 @@
 name: Java Sum
-workflow: unicon/classic@v5
+workflow: unicon/classic@v6
 environment:
-  java: {version: "21"}
+  java: {version: "25"}
 inputs:
   code: entrant
   language: {entrant: {options: [java], default: java}}
