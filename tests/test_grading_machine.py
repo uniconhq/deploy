@@ -324,11 +324,11 @@ def test_a_machine_runs_only_the_slots_whose_disks_fit_on_its_disk(
         match=re.escape(
             "no slot fits; this machine gives slots 3 cores, 7168 MB and 19.0 GiB "
             "of disk beside the cache's. The smallest machine a small slot fits on "
-            "has 2 cores, 3328 MB of memory (MemTotal) and 40 GiB free on its disk"
+            "has 2 cores, 3328 MB of memory (MemTotal) and 50 GiB free on its disk"
         ),
     ):
         slots_of(machine, 4, 8, 39)
-    with pytest.raises(machine.MachineError, match="and 50 GiB free on its disk"):
+    with pytest.raises(machine.MachineError, match="and 60 GiB free on its disk"):
         slots_of(machine, 4, 8, 39, cache_gb=30)
 
 
@@ -1244,11 +1244,25 @@ def test_the_room_for_the_disks_counts_those_made_before_as_given_back(
     for made in ("cache.img", "slots/small-1.img", "slots/small-2.img.new"):
         (disks / made).write_bytes(b"x" * 2**16)
     (disks / "slots" / "small-1").mkdir()
+    kept = machine.SYSTEM_DISK_GB * 2**30
     monkeypatch.setattr(
-        machine.shutil, "disk_usage", lambda _: SimpleNamespace(free=2**30)
+        machine.shutil, "disk_usage", lambda _: SimpleNamespace(free=kept + 2**30)
     )
 
     assert machine.disks_room() == 2**30 + 3 * machine.allocated(disks / "cache.img")
+
+
+def test_the_disks_leave_the_system_its_share_of_the_machines_disk(
+    machine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    disks = tmp_path / "unicon"
+    monkeypatch.setattr(machine, "DISKS", disks)
+    monkeypatch.setattr(machine, "SLOT_DISKS", disks / "slots")
+    monkeypatch.setattr(
+        machine.shutil, "disk_usage", lambda _: SimpleNamespace(free=5 * 2**30)
+    )
+
+    assert machine.disks_room() == 0
 
 
 def test_the_disks_are_every_slots_and_the_caches(machine: ModuleType) -> None:

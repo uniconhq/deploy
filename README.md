@@ -633,10 +633,12 @@ core and 2 GB, which holds an `exec` step of a 1 GB run or of two
 8 GB. Setup keeps a core and 1 GB for the system and the agents, and
 256 MB beside each slot for its daemon, and fits the slots' disks
 beside the cache's in what the machine's disk has free under
-`/var/lib/unicon`, counting the disks it made before. So the smallest
+`/var/lib/unicon`, counting the disks it made before and keeping
+10 GiB free for the system. So the smallest
 machine it takes has 2 cores and 3328 MB of memory as the kernel reports
-it (`MemTotal`), as a 4 GB machine does, and 40 GiB free there (a small
-slot's 20 and the cache's `cache_gb`), and runs one small slot; setup
+it (`MemTotal`), as a 4 GB machine does, and 50 GiB free there (a small
+slot's 20, the cache's `cache_gb` and the system's 10), and runs one
+small slot; setup
 refuses a smaller one, before it changes anything, and says so. It
 gives a big slot only while at least two small ones still fit beside it,
 then as many small ones as fit: with the disk for them, a 4-core 8 GB
