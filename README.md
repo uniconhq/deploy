@@ -579,13 +579,36 @@ python3 grading-machine.py setup /etc/unicon/machine.json
 python3 grading-machine.py self-test /etc/unicon/machine.json
 ```
 
+A machine set up before each slot had a daemon and a disk of its own is
+set up fresh, on a new machine or a reinstalled one: setup run over the
+one daemon it left stops there, and nothing moves that layout over.
+
 It builds the one shape stage 4 picked: rootless Docker under a throwaway
-user, `unicon-grader`, with its data root on a filesystem of its own, and
-an nftables table on that user's uid that lets its traffic reach only the
-addresses the settings allow, IPv4 and IPv6 alike. The daemon tells
-containers to ask `192.0.2.1` for names, which answers nothing; every step
-gets `/etc/unicon/hosts` as its `/etc/hosts` and `/etc/unicon/cache-cap`,
-and the names the daemon and the agent use are pinned in the machine's own.
+user, `unicon-grader`, and an nftables table on that user's uid that lets
+its traffic reach only the addresses the settings allow, IPv4 and IPv6
+alike. Each slot runs a rootless daemon of its own,
+`unicon-docker@<slot>.service`, a user unit of the throwaway user's, whose
+data root is the slot's own disk: a file of the size `slots.json` gives
+the slot's size (`disk_gb`), made once under `/var/lib/unicon/slots/`,
+formatted ext4 and loop-mounted at every boot before the daemons start.
+So everything a grading writes, its images' layers, its containers' own
+and its workspace, stops at the disk's size with `ENOSPC`, and no other
+slot's disk is touched. The machine's cache is a disk of its own, of
+`cache_gb` (20 GiB unless the settings say), mounted at
+`/var/lib/unicon/cache` and shared by every slot: the forge mounts the
+grading's org's folder on it, `/var/lib/unicon/cache/<org>`, at each
+step's `/cache`, and Docker makes that folder the first time the org
+grades. Each disk is a fixed-size file reserved whole on the machine's
+disk, and Ubuntu's weekly `fstrim` skips it, so the machine's disk cannot
+fill first. Run
+again, setup keeps each disk and what is on it, unless its size changed,
+and removes the disks of slots gone. A daemon, and its agent, starts only
+while its disk and the cache's are mounted. Each daemon pulls the images
+the settings name, one copy per slot. The daemons tell containers to ask
+`192.0.2.1` for names, which answers nothing; every step gets
+`/etc/unicon/hosts` as its `/etc/hosts` and `/etc/unicon/cache-cap`, 90 %
+of the cache's disk unless `cache_cap` says, and the names the daemons and
+the agents use are pinned in the machine's own.
 The root Docker is disabled, and the cgroup hierarchy counts each cgroup's
 memory kills alone, so a box killed for its memory does not fail its step.
 The machine is cut into slots, each of one size of `machine/slots.json`,
@@ -594,32 +617,55 @@ the one table of slot sizes, which bootstrap also writes into `.env` as
 (keep the table beside the script on the machine). A `small` slot is one
 core and 2 GB, which holds an `exec` step of a 1 GB run or of two
 512 MB programs, its compile included; a `big` slot is two cores and
-8 GB. Setup keeps a core and 1.5 GB for the system, the agents and the
-daemon, so the smallest machine it takes has 2 cores and 3584 MB of
-memory as the kernel reports it (`MemTotal`), as a 4 GB machine does,
-and runs one small slot; setup refuses a smaller one and says so. It
+8 GB. Setup keeps a core and 1 GB for the system and the agents, and
+256 MB beside each slot for its daemon, and fits the slots' disks
+beside the cache's in what the machine's disk has free under
+`/var/lib/unicon`, counting the disks it made before. So the smallest
+machine it takes has 2 cores and 3328 MB of memory as the kernel reports
+it (`MemTotal`), as a 4 GB machine does, and 40 GiB free there (a small
+slot's 20 and the cache's `cache_gb`), and runs one small slot; setup
+refuses a smaller one, before it changes anything, and says so. It
 gives a big slot only while at least two small ones still fit beside it,
-then as many small ones as fit: a 4-core 8 GB machine runs three small
-slots, an 8-core 16 GB one a big and three small, a 16-core 64 GB one a
-big and thirteen small. `slots` in the settings gives the counts instead.
+then as many small ones as fit: with the disk for them, a 4-core 8 GB
+machine runs three small slots (80 GiB), an 8-core 16 GB one a big and
+three small (120 GiB), a 16-core 64 GB one a big and thirteen small
+(320 GiB); the 4-core machine with 50 GiB free runs one small slot. `slots` in the settings gives the counts instead.
 Every slot takes any grading, first come, first served; settings that
-still name `early_share` are refused as unknown. Each slot has an
-agent of its own, `unicon-agent@<slot>.service`, which takes one workflow at a
+still name `early_share` or `data_root` are refused as unknown. Each slot
+has an agent of its own, `unicon-agent@<slot>.service`, on its slot's
+daemon, which takes one workflow at a
 time, pins every container of it to the slot's cores and caps it at the
 slot's memory with no swap, and has the labels
 `pool=platform,shape=rootless,size=<size>`; a big slot has `size=*`, so
 small work overflows into it, though Woodpecker gives a pipeline to the
 agent its labels match most exactly first. The throwaway user's
-slice, which holds every container, is capped at the machine's memory
-less 1 GB.
+slice, which holds every daemon and every container, is capped at the
+machine's memory less 1 GB.
+A slot nearly full, with less than a tenth of its disk or 2 GiB free,
+stops taking gradings until it has room: a timer runs a copy of the
+script every minute (`unicon-slot-room.timer`), which stops the slot's
+agent once its daemon has no workflow's container or network, which
+lives from the workflow's start to its end (one older than the CI's
+longest pipeline, an hour, an agent stopped mid-workflow left behind),
+removes the daemon's stopped
+containers, unused volumes and networks and dangling images, and starts
+the agent again once the disk is back above the mark. The pool's other
+slots take the gradings meanwhile. Root only stops and starts the agent:
+the daemon is driven as the throwaway user, whose it is.
 The slots are fixed until setup runs again. Every agent runs as a user of
 its own, `unicon-agent`, from a binary checked against
 `agent_binary_sha256`, and starts only while the wall is loaded. `setup`
 checks every setting and works the slots out before it changes anything,
 disables every agent first, kills the throwaway user's containers and
-stops its daemon before it takes the wall down, and enables the agents
+stops its daemons before it takes the wall down, and enables the agents
 only when every check of the self-test passes, each slot's limits among
-them; a check that could not be tried says "not tested". It prints `network wall: on`
+them, and for each slot that a write past its disk gets `ENOSPC` while
+the other slots' disks stay as they were, and that what one slot writes
+to the cache another reads; a check that could not be tried says "not
+tested", as filling the disks does while any agent runs, when the
+self-test is run by hand on a machine that grades. `test_image` is
+pinned by an image index's digest, or one of an image for the machine's
+architecture: the self-test runs it there. It prints `network wall: on`
 or `off`. Run again, it takes new settings and new pinned addresses. A
 restart or reload of `nftables.service`, whose rules file flushes every
 table, loads the wall again after it.
