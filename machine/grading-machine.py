@@ -11,85 +11,112 @@ It builds one shape, provisionally: rootless Docker under a throwaway
 user, and nothing else takes a step. Ubuntu 24.04 is the one system it was
 run on; another is allowed, with a warning, when the self-test passes
 there. Every setting is checked, this machine's architecture found in
-`agent_binary_sha256`, and its slots worked out (`plan_slots`), before
-anything on the machine is changed. A slot is a share of the machine of
-one size of `slots.json`, kept beside this script, the one table of sizes
-the forge plans each pipeline into too: cores of its own and a memory cap,
-run by an agent of its own that takes one workflow at a time. The slots
-are fixed until setup runs again. Then, in order, `setup`:
+`agent_binary_sha256`, its slots worked out (`plan_slots`), and the room
+for their disks found on the machine's own disk, before anything on the
+machine is changed. A slot is a share of the machine of one size of
+`slots.json`, kept beside this script, the one table of sizes the forge
+plans each pipeline into too: cores of its own, a memory cap and a disk of
+its own, run by a rootless daemon of its own and an agent of its own that
+takes one workflow at a time. Everything a grading writes, its images'
+layers, its containers' own and its workspace, is on its slot's disk, so
+the kernel stops it at the disk's size. The machine's cache is on a disk
+of its own, shared by every slot. The slots are fixed until setup runs
+again. Then, in order, `setup`:
 
-1. disables every agent, so nothing new is graded while the machine is
-   set up;
-2. makes the throwaway user, which owns the rootless daemon, lingering on
-   so its daemon runs without a login, with cpu, cpuset, io, memory and
-   pids delegated to every user's systemd, and the agent's own user, a
-   member of the throwaway user's group so it reaches the daemon's socket
-   and nothing of the throwaway user's traffic is its own;
-3. kills every container of the throwaway user's daemon and stops the
-   daemon, since a step's container outlives its agent, and stops there,
-   the wall still up, if the daemon still answers; only then takes the
-   wall down; and disables the machine's root Docker, whose `docker`
-   group is root on the machine and whose containers no wall holds;
+1. disables the low-disk check and every agent, so nothing new is graded
+   while the machine is set up;
+2. makes the throwaway user, which owns every slot's rootless daemon,
+   lingering on so its daemons run without a login, with cpu, cpuset, io,
+   memory and pids delegated to every user's systemd, and the agent's own
+   user, a member of the throwaway user's group so it reaches the
+   daemons' sockets and nothing of the throwaway user's traffic is its
+   own;
+3. kills every container of every daemon of the throwaway user's and
+   stops the daemons, since a step's container outlives its agent, and
+   stops there, the wall still up, if a daemon still answers; only then
+   takes the wall down; and disables the machine's root Docker, whose
+   `docker` group is root on the machine and whose containers no wall
+   holds;
 4. allows `rootlesskit` its user namespace where AppArmor restricts them,
    as Ubuntu 24.04 does;
-5. checks that Docker's data root is a filesystem of its own, so a full
-   disk of images and caches stops at its size;
+5. makes each slot's disk and the cache's, once, and mounts them at every
+   boot before the throwaway user's systemd starts (`make_disks`), and
+   removes the disks of slots gone;
 6. counts out-of-memory kills in each cgroup alone (`memory_localevents`),
    at every boot before the throwaway user's systemd starts, so a box's
    kill does not mark the step container killed, which Woodpecker would
    fail the step for;
 7. writes `/etc/unicon/hosts`, the names a step sees: the forge's and
-   Garage's addresses and no other, and pins every name the daemon and
-   the agent use in `/etc/hosts`, since under the wall no lookup of the
+   Garage's addresses and no other, and pins every name the daemons and
+   the agents use in `/etc/hosts`, since under the wall no lookup of the
    throwaway user's is answered; and `/etc/unicon/cache-cap`, the most the
    step cache may hold;
-8. gives the rootless daemon its daemon.json, written as the throwaway
-   user, whose folder it is: `"dns"` at an address that answers nothing,
-   so a container's lookup goes nowhere, the data root, the socket the
-   agent reaches, and any registry it may pull from over plain HTTP;
-9. installs and starts the rootless daemon, pulls the images named in the
-   settings while the machine can still reach them, and installs the
+8. gives each slot's daemon its own daemon.json, and every daemon the one
+   unit (`daemon_unit`), written as the throwaway user, whose folder it
+   is: `"dns"` at an address that answers nothing, so a container's
+   lookup goes nowhere, the data root on its slot's disk, a runtime
+   folder and the socket the slot's agent reaches, and any registry it
+   may pull from over plain HTTP;
+9. starts every slot's daemon, since rootlesskit copies `/etc` as each
+   starts, pulls the images named in the settings into each while the
+   machine can still reach them, one copy per slot, and installs the
    agent's binary from its pinned image once its SHA-256 is the one the
    settings give;
 10. puts the wall up: an nftables `inet` table on the throwaway user's
-    uid, which holds for IPv4 and IPv6 alike, letting its traffic reach
-    only the addresses the settings allow, loaded at every boot before
-    the user's systemd starts, and again whenever `nftables.service`,
-    whose rules file flushes every table, is restarted or reloaded;
+    uid, which holds for IPv4 and IPv6 alike and for every daemon,
+    letting its traffic reach only the addresses the settings allow,
+    loaded at every boot before the user's systemd starts, and again
+    whenever `nftables.service`, whose rules file flushes every table, is
+    restarted or reloaded;
 11. writes each slot's agent's environment, removing those of slots gone,
-    and caps the throwaway user's slice, which holds every container, at
-    the machine's memory less what the system and the agents keep
-    (`slice_drop_in`);
+    caps the throwaway user's slice, which holds every daemon and every
+    container, at the machine's memory less what the system and the
+    agents keep (`slice_drop_in`), and installs the low-disk check
+    (`check_room`), a copy of this script that a timer runs every minute;
 12. runs the self-test, and only when it passes enables every slot's
-    agent: as its own user, against the rootless socket, starting only
-    while the wall is loaded, with `/etc/unicon/hosts` as every step's
-    `/etc/hosts`, the cache's cap, its slot's cores and memory on every
-    container, and its pool, shape and size labels.
+    agent: as its own user, against its slot's daemon, starting only
+    while the wall is loaded and its slot's disk and the cache's are
+    mounted, with `/etc/unicon/hosts` as every step's `/etc/hosts`, the
+    cache's cap, its slot's cores and memory on every container, and its
+    pool, shape and size labels; and enables the low-disk check.
 
 Run again, it does the same, so it is how a machine takes new settings,
-and how the pinned addresses follow the registry's when they change.
+and how the pinned addresses follow the registry's when they change. A
+disk it made before is kept as it is, its data with it, unless its size
+changed, when it is made again empty.
 
-`self-test` checks, from a container of the rootless daemon on a network
-made as Woodpecker makes one per pipeline: that it reaches the first
-address the wall allows; that it reaches none of the outside addresses in
-the settings, over IPv4 or IPv6, and none of the machine's own; and that a
-lookup gets no answer. Then, as the throwaway user in the machine's own
-network namespace, where the daemon's pulls leave: the outside addresses,
-the machine's resolver at 127.0.0.53, and its loopback ports. Each target
-is tried from root first, which the wall does not hold: one root does not
+`self-test` checks that every slot's daemon answers, rootless on cgroup v2
+under systemd, with its data root on its slot's disk; then, from a
+container of the first slot's daemon on a network made as Woodpecker
+makes one per pipeline: that it reaches the first address the wall
+allows; that it reaches none of the outside addresses in the settings,
+over IPv4 or IPv6, and none of the machine's own; and that a lookup gets
+no answer. Then, as the throwaway user in the machine's own network
+namespace, where the daemons' pulls leave: the outside addresses, the
+machine's resolver at 127.0.0.53, and its loopback ports. Each target is
+tried from root first, which the wall does not hold: one root does not
 reach either is "not tested", not passed, and so is one a step has no
 route to, since then no wall refused it; at least one outside address must
 be tested. Then that a container's memory and process limits bite, which a
 box's limits need; that the cgroup hierarchy kept every option it was
 remounted with; that a container over its own memory is marked
 killed and one whose child cgroup was killed is not; that a privileged
-container, as an exec step is, can open no block device; that the daemon
-is rootless on cgroup v2 with the controllers delegated; that the root
-Docker is stopped; the kernel settings a box's syscall filter leaves
-to the machine; that a container made with each slot's limits has its
-cores alone, its memory and no swap; and that the slice is capped. It
-prints "network wall: on" or "network wall: off", and exits 1 when any
-check fails.
+container, as an exec step is, can open no block device; that the
+controllers are delegated; that the root Docker is stopped; the kernel
+settings a box's syscall filter leaves to the machine; and that the slice
+is capped. The daemons are made alike, by the same functions, so those
+are tried on the first slot's alone. For each slot, on its own daemon:
+that a container made with its limits has its cores alone, its memory and
+no swap; that its disk is fully allocated on the machine's disk; and that
+a container writing past the disk gets `ENOSPC` while the other slots'
+disks stay as they were, "not tested" while any agent runs, as on a
+machine that grades. And that a folder of the cache's disk is made on
+first use, and that what one slot writes to it, another reads. It prints
+"network wall: on" or "network wall: off", and exits 1 when any check
+fails.
+
+`room`, which the timer runs as root with the throwaway user's name and
+the slots', is the low-disk check (`check_room`).
 
 Run on a real Ubuntu 24.04 (arm64, in a VM) and on a stand-in, an Ubuntu
 24.04 container booting systemd over Docker Desktop's kernel. The
@@ -116,6 +143,7 @@ import threading
 import time
 from collections.abc import Iterator, Sequence
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 SHAPES = ("rootless",)
@@ -123,7 +151,39 @@ DELEGATED = ("cpu", "cpuset", "io", "memory", "pids")
 WALL_TABLE = "unicon-wall"
 NOWHERE = "192.0.2.1"
 SOCKET_DIRECTORY = Path("/run/unicon-docker")
+"""Every slot's daemon's socket the agents reach, `<slot>.sock`."""
 SOCKET_TMPFILES = Path("/etc/tmpfiles.d/unicon-docker.conf")
+DISKS = Path("/var/lib/unicon")
+"""Where setup keeps the disks it makes, each a file of a fixed size on
+the machine's own disk, mounted beside it."""
+SLOT_DISKS = DISKS / "slots"
+"""Each slot's disk, `<slot>.img`, mounted at `<slot>`, its daemon's data
+root."""
+CACHE_DISK = DISKS / "cache"
+"""The cache's disk, `cache.img`, mounted here. The forge mounts the
+folder of the grading's org on it, `<org>`, at every step's `/cache`."""
+CACHE_FOLDER_TEST = CACHE_DISK / ".self-test"
+"""The self-test's folder on the cache's disk, a name no org can have."""
+FSTAB = Path("/etc/fstab")
+FSTAB_BEGIN = "# unicon disks: begin"
+FSTAB_END = "# unicon disks: end"
+DAEMON_UNIT = "unicon-docker@.service"
+"""Every slot's daemon, a user unit of the throwaway user's, an instance
+by the slot's name."""
+ROOM_UNIT = "unicon-slot-room.service"
+ROOM_TIMER = "unicon-slot-room.timer"
+ROOM_SCRIPT = Path("/usr/local/lib/unicon/grading-machine.py")
+"""The copy of this script the low-disk check runs, installed by setup."""
+ROOM_STATE = Path("/run/unicon/slot-room")
+"""`<slot>.stopped` while the low-disk check holds that slot's agent
+stopped."""
+ROOM_LEAST = 2 * 2**30
+"""The least free space, in bytes, of a slot not nearly full."""
+WORKFLOW_LONGEST = 60 * 60
+"""The longest a workflow runs, in seconds: the CI server's
+`WOODPECKER_MAX_PIPELINE_TIMEOUT` (`compose.yaml`), 60 minutes, which
+no pipeline's own timeout passes. A workflow's network older than this
+is one its agent, stopped, could not remove."""
 UNICON = Path("/etc/unicon")
 STEP_HOSTS = UNICON / "hosts"
 CACHE_CAP = UNICON / "cache-cap"
@@ -144,9 +204,10 @@ too (`UNICON_SLOT_SIZES`, written by bootstrap): kept beside this script."""
 SYSTEM_MB = 1024
 """What a machine keeps of its memory, in MB, outside the throwaway user's
 slice, which every container is in: the system and the agents."""
-DAEMON_MB = 512
-"""What the slice keeps beside its slots, in MB: the rootless daemon,
-containerd and the network helper."""
+DAEMON_MB = 256
+"""What the slice keeps beside each slot, in MB, for the slot's own
+daemon: dockerd, containerd and rootlesskit with its network helper, about
+215 MB on Ubuntu 24.04."""
 SYSTEM_CORES = 1
 """The machine's first cores, kept out of every slot for the system, the
 agents and the daemon."""
@@ -181,7 +242,10 @@ REQUIRED_TOOLS = (
     "runuser",
     "newuidmap",
     "dockerd-rootless-setuptool.sh",
+    "dockerd-rootless.sh",
     "docker",
+    "fallocate",
+    "mkfs.ext4",
 )
 # A host name as /etc/hosts takes one: labels of letters, digits and
 # hyphens, dot separated.
@@ -263,12 +327,27 @@ class Target:
 @dataclass(frozen=True)
 class Size:
     """A slot size of `SLOT_TABLE`: its name, the cores a slot of it is
-    pinned to and the memory every container of its workflow is capped
-    at, in MB."""
+    pinned to, the memory every container of its workflow is capped at,
+    in MB, and the size of its disk, in GiB."""
 
     name: str
     cores: int
     memory_mb: int
+    disk_gb: int
+
+
+@dataclass(frozen=True)
+class Disk:
+    """A disk setup makes: a file of `size` bytes on the machine's own disk,
+    `image`, formatted ext4 and loop-mounted beside it at every boot."""
+
+    image: Path
+    size: int
+
+    @property
+    def mount(self) -> Path:
+        """Where it is mounted: beside its file, by its name."""
+        return self.image.with_suffix("")
 
 
 @dataclass(frozen=True)
@@ -290,6 +369,11 @@ class Slot:
         """Its memory in bytes."""
         return self.size.memory_mb * 2**20
 
+    @property
+    def disk(self) -> Disk:
+        """Its disk, its daemon's data root."""
+        return Disk(SLOT_DISKS / f"{self.name}.img", self.size.disk_gb * 2**30)
+
     def labels(self, settings: Settings) -> str:
         """Its agent's labels. The forge labels a pipeline with the size it
         fits. A slot of the largest size takes a pipeline of any size, `*`,
@@ -301,8 +385,8 @@ class Slot:
 
 
 def read_sizes(text: str) -> tuple[Size, ...]:
-    """The sizes of `SLOT_TABLE`, `{name: {cores, memory_mb}}`, smallest
-    first."""
+    """The sizes of `SLOT_TABLE`, `{name: {cores, memory_mb, disk_gb}}`,
+    smallest first."""
     try:
         table = json.loads(text)
     except json.JSONDecodeError as error:
@@ -314,13 +398,14 @@ def read_sizes(text: str) -> tuple[Size, ...]:
         if (
             not LABEL.fullmatch(name)
             or not isinstance(size, dict)
-            or set(size) != {"cores", "memory_mb"}
+            or set(size) != {"cores", "memory_mb", "disk_gb"}
             or not all(whole(value) and value >= 1 for value in size.values())
         ):
             raise MachineError(
-                f"{SLOT_TABLE} gives {name!r} no whole cores and memory_mb, at least 1"
+                f"{SLOT_TABLE} gives {name!r} no whole cores, memory_mb and "
+                "disk_gb, at least 1"
             )
-        sizes.append(Size(name, size["cores"], size["memory_mb"]))
+        sizes.append(Size(name, size["cores"], size["memory_mb"], size["disk_gb"]))
     return tuple(sorted(sizes, key=lambda size: size.memory_mb))
 
 
@@ -347,10 +432,17 @@ def cpu_list(cpus: Sequence[int]) -> str:
 
 
 def plan_slots(
-    sizes: Sequence[Size], settings: Settings, cpus: Sequence[int], memory_mb: int
+    sizes: Sequence[Size],
+    settings: Settings,
+    cpus: Sequence[int],
+    memory_mb: int,
+    disk_bytes: int,
 ) -> tuple[Slot, ...]:
     """The machine's slots, fixed until setup runs again, from its `cpus`
-    and `memory_mb`, less `SYSTEM_CORES`, `SYSTEM_MB` and `DAEMON_MB`.
+    and `memory_mb`, less `SYSTEM_CORES` and `SYSTEM_MB`, each slot
+    holding its memory and `DAEMON_MB` for its daemon, and from the
+    `disk_bytes` its disk has for the disks setup makes (`disks_room`),
+    less the cache's.
     `settings.slots` gives how many of each size; otherwise, of each size
     above the smallest, the largest first, one while at least two of the
     smallest still fit beside it, and then as many of the smallest as fit,
@@ -360,7 +452,8 @@ def plan_slots(
     smallest machine one slot fits on.
     """
     free_cpus = sorted(cpus)[SYSTEM_CORES:]
-    free_mb = memory_mb - SYSTEM_MB - DAEMON_MB
+    free_mb = memory_mb - SYSTEM_MB
+    free_disk = disk_bytes - settings.cache_gb * 2**30
     by_name = {size.name: size for size in sizes}
     unknown = sorted(set(settings.slots) - set(by_name))
     if unknown:
@@ -370,38 +463,55 @@ def plan_slots(
         )
     smallest = sizes[0]
 
-    def fitting(size: Size, cores: int, held: int) -> int:
+    def holds(size: Size) -> int:
+        return size.memory_mb + DAEMON_MB
+
+    def fills(size: Size) -> int:
+        return size.disk_gb * 2**30
+
+    def fitting(size: Size, cores: int, held: int, filled: int) -> int:
         return max(
             0,
             min(
                 (len(free_cpus) - cores) // size.cores,
-                (free_mb - held) // size.memory_mb,
+                (free_mb - held) // holds(size),
+                (free_disk - filled) // fills(size),
             ),
         )
 
     counts = {size.name: settings.slots.get(size.name, 0) for size in sizes}
     if not settings.slots:
-        cores, held = 0, 0
+        cores, held, filled = 0, 0, 0
         for size in reversed(sizes[1:]):
-            if fitting(smallest, cores + size.cores, held + size.memory_mb) >= 2:
+            more = (cores + size.cores, held + holds(size), filled + fills(size))
+            if fitting(smallest, *more) >= 2:
                 counts[size.name] = 1
-                cores += size.cores
-                held += size.memory_mb
-        counts[smallest.name] = fitting(smallest, cores, held)
+                cores, held, filled = more
+        counts[smallest.name] = fitting(smallest, cores, held, filled)
     cores = sum(by_name[name].cores * count for name, count in counts.items())
-    held = sum(by_name[name].memory_mb * count for name, count in counts.items())
-    if not any(counts.values()) or cores > len(free_cpus) or held > free_mb:
+    held = sum(holds(by_name[name]) * count for name, count in counts.items())
+    filled = sum(fills(by_name[name]) * count for name, count in counts.items())
+    if (
+        not any(counts.values())
+        or cores > len(free_cpus)
+        or held > free_mb
+        or filled > free_disk
+    ):
         asked = ", ".join(f"{n} {name}" for name, n in counts.items())
         raise MachineError(
             (
-                f"the slots ({asked}) need {cores} cores and {held} MB"
+                f"the slots ({asked}) need {cores} cores, {held} MB and "
+                f"{filled // 2**30} GiB of disk"
                 if any(counts.values())
                 else "no slot fits"
             )
-            + f"; this machine gives slots {len(free_cpus)} cores and {free_mb} MB. "
+            + f"; this machine gives slots {len(free_cpus)} cores, {free_mb} MB "
+            f"and {max(0, free_disk) / 2**30:.1f} GiB of disk beside the cache's. "
             f"The smallest machine a {smallest.name} slot fits on has "
-            f"{SYSTEM_CORES + smallest.cores} cores and "
-            f"{SYSTEM_MB + DAEMON_MB + smallest.memory_mb} MB of memory (MemTotal)"
+            f"{SYSTEM_CORES + smallest.cores} cores, "
+            f"{SYSTEM_MB + holds(smallest)} MB of memory (MemTotal) and "
+            f"{smallest.disk_gb + settings.cache_gb} GiB free on its disk under "
+            f"{DISKS}, for the slot's disk and the cache's (cache_gb)"
         )
     slots: list[Slot] = []
     for size in sizes:
@@ -422,17 +532,19 @@ def plan_slots(
 @dataclass(frozen=True)
 class Settings:
     """What the machine is told at enrolment. `server`, `agent_secret_file`,
-    `agent_image`, `agent_binary_sha256`, `data_root`, `step_hosts`,
-    `wall_allow` and `test_image` have no default.
+    `agent_image`, `agent_binary_sha256`, `step_hosts`, `wall_allow` and
+    `test_image` have no default.
 
     `agent_binary_sha256` is the SHA-256 of `/bin/woodpecker-agent` in
     `agent_image`, by the machine's architecture as `uname -m` names it,
     `x86_64` or `aarch64`: the binary is copied out of an image the
     throwaway user's daemon holds, so it runs only as pinned. `test_image`,
     which the self-test runs privileged, is pinned by its digest, as
-    `agent_image` is. `grader_user` and `agent_user` differ, and each is a
-    user setup makes, or made before (`taken`): not root, a user who can
-    log in, or a system user of another's. `pool` is a label's value: letters,
+    `agent_image` is: an image index's digest, or one of an image for the
+    machine's architecture, since the self-test runs it there.
+    `grader_user` and `agent_user` differ, and each is a user setup makes,
+    or made before (`taken`): not root, a user who can log in, or a system
+    user of another's. `pool` is a label's value: letters,
     digits, `.`, `_` and `-`.
     `step_hosts` is every step's `/etc/hosts`: the forge's and Garage's
     names and addresses. `machine_hosts` is pinned in the machine's own
@@ -443,8 +555,11 @@ class Settings:
     expects a step not to get, and the machine itself to reach. `pull` is
     pulled at setup, before the wall goes up: the test image, and whatever
     a pipeline runs that the wall keeps the daemon from pulling later.
-    `cache_cap` is the most the step cache may hold, in bytes; a quarter
-    of the data root's size when not given. `slots` gives how many slots
+    `cache_gb` is the size of the cache's disk, in GiB, which every slot
+    shares. `cache_cap` is the most the step cache may hold, in bytes, no
+    more than the disk's filesystem (`cache_cap`), a little less than
+    `cache_gb`; 90 % of that filesystem when not given.
+    `slots` gives how many slots
     of each size of `SLOT_TABLE` the machine runs (`plan_slots`);
     the sizes themselves are the table's alone, which the forge plans
     with.
@@ -456,7 +571,6 @@ class Settings:
     agent_secret_file: Path
     agent_image: str
     agent_binary_sha256: dict[str, str]
-    data_root: Path
     step_hosts: dict[str, str]
     wall_allow: tuple[Target, ...]
     test_image: str
@@ -471,6 +585,7 @@ class Settings:
     )
     pull: tuple[str, ...] = ()
     insecure_registries: tuple[str, ...] = ()
+    cache_gb: int = 20
     cache_cap: int | None = None
     slots: dict[str, int] = field(default_factory=dict)
     agent_environment: dict[str, str] = field(default_factory=dict)
@@ -498,7 +613,6 @@ class Settings:
                 "agent_secret_file",
                 "agent_image",
                 "agent_binary_sha256",
-                "data_root",
                 "step_hosts",
                 "wall_allow",
                 "test_image",
@@ -508,10 +622,9 @@ class Settings:
         if missing:
             raise MachineError(f"missing settings: {', '.join(missing)}")
         values = dict(raw)
-        for name in ("agent_secret_file", "data_root"):
-            if not isinstance(values[name], str):
-                raise MachineError(f"{name} is a path, as a text")
-            values[name] = Path(str(values[name]))
+        if not isinstance(values["agent_secret_file"], str):
+            raise MachineError("agent_secret_file is a path, as a text")
+        values["agent_secret_file"] = Path(values["agent_secret_file"])
         for name in ("wall_allow", "outside"):
             if name in values:
                 values[name] = tuple(Target.parse(t) for t in _texts(values, name))
@@ -595,10 +708,17 @@ class Settings:
             for name, count in self.slots.items()
         ):
             raise MachineError("slots gives each size a whole number of slots")
+        if not whole(self.cache_gb) or self.cache_gb < 1:
+            raise MachineError("cache_gb is a whole number of GiB, at least 1")
         if self.cache_cap is not None and (
             not whole(self.cache_cap) or self.cache_cap < 2**30
         ):
             raise MachineError("cache_cap is a number of bytes, at least 1 GiB")
+        if self.cache_cap is not None and self.cache_cap > self.cache_gb * 2**30:
+            raise MachineError(
+                f"cache_cap is more than the cache's disk of {self.cache_gb} GiB "
+                "(cache_gb)"
+            )
         for name in self.agent_environment:
             if not ENVIRONMENT_NAME.fullmatch(name):
                 raise MachineError(f"agent_environment names {name!r}")
@@ -703,31 +823,69 @@ def step_hosts(names: dict[str, str]) -> str:
     return "\n".join(lines) + "\n"
 
 
-def pinned_hosts(current: str, names: dict[str, str]) -> str:
-    """The machine's `/etc/hosts` with our block replaced by these names, the
-    rest left as it was.
-    """
+def with_block(current: str, begin: str, end: str, lines: Sequence[str]) -> str:
+    """`current` with our block, from `begin` to `end`, replaced by
+    `lines`, the rest left as it was."""
     kept: list[str] = []
     inside = False
     for line in current.splitlines():
-        if line == HOSTS_BEGIN:
+        if line == begin:
             inside = True
-        elif line == HOSTS_END:
+        elif line == end:
             inside = False
         elif not inside:
             kept.append(line)
     while kept and not kept[-1].strip():
         kept.pop()
-    block = [HOSTS_BEGIN]
-    block += [f"{address} {name}" for name, address in sorted(names.items())]
-    block.append(HOSTS_END)
-    return "\n".join([*kept, "", *block]) + "\n"
+    return "\n".join([*kept, "", begin, *lines, end]) + "\n"
 
 
-def daemon_json(settings: Settings, uid: int) -> str:
+def pinned_hosts(current: str, names: dict[str, str]) -> str:
+    """The machine's `/etc/hosts` with our block replaced by these names, the
+    rest left as it was.
+    """
+    lines = [f"{address} {name}" for name, address in sorted(names.items())]
+    return with_block(current, HOSTS_BEGIN, HOSTS_END, lines)
+
+
+def fstab(current: str, disks: Sequence[Disk], uid: int) -> str:
+    """The machine's `/etc/fstab` with our block replaced by these disks,
+    the rest left as it was. Each is mounted before the throwaway user's
+    systemd starts, which starts the daemons, and the boot goes on without
+    one that fails, whose daemon then does not start (`daemon_unit`).
+    `fstrim`, which Ubuntu runs every week, skips them: through the loop
+    device it would give the freed blocks of the file back to the
+    machine's disk, which could then fill first, and a step would get I/O
+    errors rather than `ENOSPC`."""
+    lines = [
+        f"{disk.image} {disk.mount} ext4 "
+        f"loop,nofail,X-fstrim.notrim,x-systemd.before=user@{uid}.service 0 2"
+        for disk in disks
+    ]
+    return with_block(current, FSTAB_BEGIN, FSTAB_END, lines)
+
+
+def runtime_folder(uid: int, slot: str) -> str:
+    """The slot's daemon's own folder in the throwaway user's runtime
+    folder, which every daemon would otherwise share: rootlesskit's state,
+    the exec root, the pidfile and the default socket."""
+    return f"/run/user/{uid}/unicon-docker-{slot}"
+
+
+def daemon_socket(slot: str) -> Path:
+    """The socket of the slot's daemon that its agent reaches."""
+    return SOCKET_DIRECTORY / f"{slot}.sock"
+
+
+def daemon_json(settings: Settings, uid: int, slot: str) -> str:
+    """The daemon.json of the slot named `slot`: its data root on its disk,
+    and its exec root, pidfile and sockets its own."""
+    runtime = runtime_folder(uid, slot)
     document: dict[str, object] = {
         "dns": [NOWHERE],
-        "data-root": str(settings.data_root),
+        "data-root": str(SLOT_DISKS / slot),
+        "exec-root": f"{runtime}/exec",
+        "pidfile": f"{runtime}/docker.pid",
         # The sockets' group. The daemon's default is `docker`, whose id
         # inside its user namespace lands on a subordinate id outside, so
         # the agent could not reach the socket. Group 0 inside is the
@@ -735,8 +893,8 @@ def daemon_json(settings: Settings, uid: int) -> str:
         # is a member.
         "group": "root",
         "hosts": [
-            f"unix:///run/user/{uid}/docker.sock",
-            f"unix://{SOCKET_DIRECTORY}/docker.sock",
+            f"unix://{runtime}/docker.sock",
+            f"unix://{daemon_socket(slot)}",
         ],
     }
     if settings.insecure_registries:
@@ -744,11 +902,52 @@ def daemon_json(settings: Settings, uid: int) -> str:
     return json.dumps(document, indent=2) + "\n"
 
 
+def daemon_unit() -> str:
+    """Every slot's daemon, a user unit of the throwaway user's, an
+    instance by the slot's name: the unit `dockerd-rootless-setuptool.sh`
+    writes, run with the slot's daemon.json and rootlesskit's state in the
+    slot's runtime folder. It starts only while its slot's disk and the
+    cache's are mounted, so it never writes onto the machine's disk under
+    a bare mount point, nor a step's cache.
+    """
+    tool = shutil.which("dockerd-rootless.sh") or "/usr/bin/dockerd-rootless.sh"
+    runtime = "%t/unicon-docker-%i"
+    return (
+        "[Unit]\n"
+        "Description=Unicon rootless Docker of slot %i\n"
+        "Requires=dbus.socket\n"
+        f"ConditionPathIsMountPoint={SLOT_DISKS}/%i\n"
+        f"ConditionPathIsMountPoint={CACHE_DISK}\n\n"
+        "[Service]\n"
+        f"Environment=PATH={Path(tool).parent}:/sbin:/usr/sbin:/bin\n"
+        f"Environment=DOCKERD_ROOTLESS_ROOTLESSKIT_STATE_DIR={runtime}/rootlesskit\n"
+        f"ExecStartPre=/usr/bin/mkdir -p -m 0700 {runtime}\n"
+        f"ExecStart={tool} --config-file %h/.config/docker/daemon-%i.json\n"
+        "ExecReload=/bin/kill -s HUP $MAINPID\n"
+        "TimeoutSec=0\n"
+        "RestartSec=2\n"
+        "Restart=always\n"
+        "StartLimitBurst=3\n"
+        "StartLimitInterval=60s\n"
+        "LimitNOFILE=infinity\n"
+        "LimitNPROC=infinity\n"
+        "LimitCORE=infinity\n"
+        "TasksMax=infinity\n"
+        "Delegate=yes\n"
+        "Type=notify\n"
+        "NotifyAccess=all\n"
+        "KillMode=mixed\n\n"
+        "[Install]\n"
+        "WantedBy=default.target\n"
+    )
+
+
 def agent_environment(settings: Settings, secret: str, slot: Slot) -> str:
     """A slot's agent's environment file. Woodpecker reads the token from
     it, so it is written readable by root alone. The agent takes one
-    workflow at a time, under its slot's labels, a name and a state folder
-    of its own; every container of it is pinned to the slot's cores and
+    workflow at a time from its slot's daemon, under its slot's labels, a
+    name and a state folder of its own; every container of it is pinned to
+    the slot's cores and
     capped at its memory, with no swap (Woodpecker 3.18's docker backend,
     `LIMIT_CPU_SET`, `LIMIT_MEM` and `LIMIT_MEM_SWAP`, on each container).
     Every step gets the machine's hosts file and the cache's cap,
@@ -764,7 +963,7 @@ def agent_environment(settings: Settings, secret: str, slot: Slot) -> str:
         "WOODPECKER_MAX_WORKFLOWS": "1",
         "WOODPECKER_HEALTHCHECK_ADDR": f"127.0.0.1:{slot.port}",
         "WOODPECKER_BACKEND": "docker",
-        "DOCKER_HOST": f"unix://{SOCKET_DIRECTORY}/docker.sock",
+        "DOCKER_HOST": f"unix://{daemon_socket(slot.name)}",
         "WOODPECKER_BACKEND_DOCKER_VOLUMES": ",".join(volumes),
         "WOODPECKER_BACKEND_DOCKER_LIMIT_CPU_SET": slot.cpus,
         "WOODPECKER_BACKEND_DOCKER_LIMIT_MEM": str(slot.memory),
@@ -777,10 +976,17 @@ def agent_environment(settings: Settings, secret: str, slot: Slot) -> str:
     return "".join(f"{name}={value}\n" for name, value in values.items())
 
 
-def cache_cap(settings: Settings, data_root_size: int) -> int:
-    """The cache's cap: the setting, or a quarter of the data root, which
-    the images and every step's own files share with it."""
-    return settings.cache_cap or data_root_size // 4
+def cache_cap(settings: Settings, cache_size: int) -> int:
+    """The cache's cap: the setting, or 90 % of the cache's disk, its
+    filesystem's `cache_size` bytes, which holds nothing else. Refused
+    when the setting is more than the filesystem, a little less than
+    `cache_gb`, which the settings' own check counts with."""
+    if settings.cache_cap is not None and settings.cache_cap > cache_size:
+        raise MachineError(
+            f"cache_cap is more than the {cache_size} bytes of the cache's disk's "
+            "filesystem"
+        )
+    return settings.cache_cap or cache_size * 9 // 10
 
 
 def rootlesskit_profile() -> str:
@@ -887,8 +1093,9 @@ def agent_environment_file(slot: str) -> Path:
 
 def agent_unit(settings: Settings, uid: int) -> str:
     """Every slot's agent, an instance by the slot's name, as its own user,
-    starting only while the wall's table is loaded and once the cgroup
-    option is set, each with its own environment and state folder.
+    starting only while the wall's table is loaded, once the cgroup option
+    is set, and while its slot's disk and the cache's are mounted, as its
+    daemon does, each with its own environment and state folder.
     """
     return (
         "[Unit]\n"
@@ -896,7 +1103,9 @@ def agent_unit(settings: Settings, uid: int) -> str:
         f"After=network-online.target unicon-wall.service unicon-cgroup.service "
         f"user@{uid}.service\n"
         "Requires=unicon-wall.service unicon-cgroup.service\n"
-        "Wants=network-online.target\n\n"
+        "Wants=network-online.target\n"
+        f"ConditionPathIsMountPoint={SLOT_DISKS}/%i\n"
+        f"ConditionPathIsMountPoint={CACHE_DISK}\n\n"
         "[Service]\n"
         f"User={settings.agent_user}\n"
         f"Group={settings.agent_user}\n"
@@ -916,11 +1125,76 @@ def agent_unit(settings: Settings, uid: int) -> str:
     )
 
 
+def room_unit(grader_user: str, slots: Sequence[Slot]) -> str:
+    """The low-disk check over every slot, from the copy of this script
+    setup installs: as root, which stops and starts the agents, driving
+    each daemon as `grader_user`, whose it is."""
+    names = " ".join(slot.name for slot in slots)
+    return (
+        "[Unit]\n"
+        "Description=Unicon: stop a nearly full slot's agent until its disk "
+        "has room\n\n"
+        "[Service]\n"
+        "Type=oneshot\n"
+        f"ExecStart=/usr/bin/python3 -I {ROOM_SCRIPT} room --grader {grader_user} "
+        f"{names}\n"
+    )
+
+
+def room_timer() -> str:
+    """The low-disk check every minute."""
+    return (
+        "[Unit]\n"
+        "Description=Unicon: check every slot's disk every minute\n\n"
+        "[Timer]\n"
+        "OnCalendar=minutely\n"
+        "AccuracySec=5s\n\n"
+        "[Install]\n"
+        "WantedBy=timers.target\n"
+    )
+
+
+def room_mark(size: int) -> int:
+    """The free bytes below which a slot's disk of `size` bytes is nearly
+    full: a tenth of it, or `ROOM_LEAST`, whichever is larger."""
+    return max(size // 10, ROOM_LEAST)
+
+
+def workflow_running(
+    containers: str, networks: Sequence[dict[str, str]], now: float
+) -> bool:
+    """Whether a daemon runs a workflow: `containers`, the names of its
+    running containers, one a line, has a workflow's (`wp_`), or
+    `networks`, its networks as `docker network inspect` gives them, has
+    a workflow's younger than `WORKFLOW_LONGEST` at `now`, as a workflow
+    has between its steps and while it pulls its next step's image, when
+    it runs no container. The names are matched here as well as by the
+    daemon's filter, whose pattern is a regular expression."""
+    if any(name.startswith("wp_") for name in containers.split()):
+        return True
+    return any(
+        network["Name"].startswith("wp_")
+        and now - created_at(network["Created"]) < WORKFLOW_LONGEST
+        for network in networks
+    )
+
+
+def created_at(text: str) -> float:
+    """The seconds since the epoch of a time Docker writes, RFC 3339 with
+    up to nanoseconds, which Python reads only to microseconds."""
+    try:
+        return datetime.fromisoformat(
+            re.sub(r"(\.\d{6})\d+", r"\1", text).replace("Z", "+00:00")
+        ).timestamp()
+    except ValueError as error:
+        raise MachineError(f"the daemon gives a network's time as {text!r}") from error
+
+
 def slice_memory(memory_mb: int) -> int:
     """The throwaway user's slice's cap, in bytes: the machine's memory less
-    `SYSTEM_MB`. Every container of every slot is in it, with the daemon,
-    so all of them together leave the system and the agents their room
-    whatever a step does."""
+    `SYSTEM_MB`. Every container of every slot is in it, with every slot's
+    daemon, so all of them together leave the system and the agents their
+    room whatever a step does."""
     return (memory_mb - SYSTEM_MB) * 2**20
 
 
@@ -971,13 +1245,15 @@ def run(
     return done
 
 
-def as_user(user: str, uid: int, *command: str, **options: object) -> str:
+def as_user_done(
+    user: str, uid: int, *command: str, **options: object
+) -> subprocess.CompletedProcess[str]:
     environment = (
         f"XDG_RUNTIME_DIR=/run/user/{uid}",
         f"DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/{uid}/bus",
         "PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
     )
-    done = run(
+    return run(
         "runuser",
         "-u",
         user,
@@ -988,17 +1264,21 @@ def as_user(user: str, uid: int, *command: str, **options: object) -> str:
         capture=True,
         **options,  # type: ignore[arg-type]
     )
-    return done.stdout
+
+
+def as_user(user: str, uid: int, *command: str, **options: object) -> str:
+    return as_user_done(user, uid, *command, **options).stdout
 
 
 def docker_done(
-    *arguments: str, check: bool = True, timeout: float = 300
+    slot: str, *arguments: str, check: bool = True, timeout: float = 300
 ) -> subprocess.CompletedProcess[str]:
-    """The rootless daemon, through the agent's socket, as root."""
+    """The rootless daemon of the slot named `slot`, through its agent's
+    socket, as root."""
     return run(
         "docker",
         "-H",
-        f"unix://{SOCKET_DIRECTORY}/docker.sock",
+        f"unix://{daemon_socket(slot)}",
         *arguments,
         check=check,
         capture=True,
@@ -1006,8 +1286,26 @@ def docker_done(
     )
 
 
-def docker(*arguments: str, check: bool = True, timeout: float = 300) -> str:
-    return docker_done(*arguments, check=check, timeout=timeout).stdout
+def docker(slot: str, *arguments: str, check: bool = True, timeout: float = 300) -> str:
+    return docker_done(slot, *arguments, check=check, timeout=timeout).stdout
+
+
+def docker_as(
+    grader: pwd.struct_passwd, slot: str, *arguments: str, timeout: float = 300
+) -> subprocess.CompletedProcess[str]:
+    """The rootless daemon of the slot named `slot`, through its agent's
+    socket, as the throwaway user `grader`, whose daemon and socket they
+    are: for what runs while gradings run, which root does not."""
+    return as_user_done(
+        grader.pw_name,
+        grader.pw_uid,
+        "docker",
+        "-H",
+        f"unix://{daemon_socket(slot)}",
+        *arguments,
+        check=False,
+        timeout=timeout,
+    )
 
 
 def write(path: Path, text: str, mode: int = 0o644) -> None:
@@ -1037,7 +1335,8 @@ def setup(settings: Settings) -> int:
     if missing:
         raise MachineError(
             f"not installed: {', '.join(missing)}. Install docker-ce, "
-            "docker-ce-rootless-extras, uidmap, nftables and systemd"
+            "docker-ce-rootless-extras, uidmap, nftables, util-linux, e2fsprogs "
+            "and systemd"
         )
     secret = settings.agent_secret_file.read_text().strip()
     if not secret:
@@ -1048,6 +1347,7 @@ def setup(settings: Settings) -> int:
         )
     memory_mb = memory_total() // 2**20
     slots = machine_slots(settings)
+    disks = machine_disks(settings, slots)
     with contextlib.suppress(OSError):
         warning = system_warning(Path("/etc/os-release").read_text())
         if warning:
@@ -1062,15 +1362,17 @@ def setup(settings: Settings) -> int:
     uid = grader.pw_uid
     write(UNITS / "unicon-wall.service", wall_unit(uid))
     run("systemctl", "daemon-reload")
-    stop_daemon(settings, uid)
+    stop_daemons(settings, uid)
     run("systemctl", "stop", "unicon-wall.service", check=False, capture=True)
     disable_root_docker()
     allow_rootlesskit()
-    size = check_data_root(settings.data_root, grader)
+    cache_size = make_disks(disks, grader)
     count_kills_locally(uid)
 
     write(STEP_HOSTS, step_hosts(settings.step_hosts))
-    write(CACHE_CAP, f"{cache_cap(settings, size)}\n")
+    # Every daemon, as the throwaway user, reaches the hosts file to bind it.
+    STEP_HOSTS.parent.chmod(0o755)
+    write(CACHE_CAP, f"{cache_cap(settings, cache_size)}\n")
     # In place, not renamed over: in a container, as the stand-in is,
     # /etc/hosts is a mount, which a rename cannot replace.
     HOSTS.write_text(pinned_hosts(HOSTS.read_text(), settings.machine_hosts))
@@ -1079,24 +1381,13 @@ def setup(settings: Settings) -> int:
         f"d {SOCKET_DIRECTORY} 0750 {settings.grader_user} {settings.grader_user} -\n",
     )
     run("systemd-tmpfiles", "--create", str(SOCKET_TMPFILES))
-    # As the throwaway user, whose folder it is: root writing there would
-    # follow whatever links that user left in it.
-    as_user(
-        settings.grader_user,
-        uid,
-        "sh",
-        "-c",
-        'umask 077 && mkdir -p "$1" && cat > "$1/daemon.json.new" '
-        '&& mv -f "$1/daemon.json.new" "$1/daemon.json"',
-        "sh",
-        str(Path(grader.pw_dir) / ".config/docker"),
-        stdin=daemon_json(settings, uid),
-    )
+    write_daemons(settings, grader, slots)
 
-    start_daemon(settings, grader)
-    for image in (settings.test_image, *settings.pull):
-        pull(image)
-    install_agent(settings)
+    start_daemons(settings, grader, slots)
+    for slot in slots:
+        for image in (settings.test_image, *settings.pull):
+            pull(slot.name, image)
+    install_agent(settings, slots[0].name)
 
     write(WALL_FILE, wall_table(uid, settings.wall_allow))
     run("systemctl", "enable", "unicon-wall.service", capture=True)
@@ -1125,12 +1416,18 @@ def setup(settings: Settings) -> int:
     write(
         UNITS / f"user-{uid}.slice.d" / "unicon-memory.conf", slice_drop_in(memory_mb)
     )
+    # The low-disk check runs a copy of this script, so it does not depend
+    # on where setup was run from.
+    write(ROOM_SCRIPT, Path(__file__).read_text(), mode=0o755)
+    write(UNITS / ROOM_UNIT, room_unit(settings.grader_user, slots))
+    write(UNITS / ROOM_TIMER, room_timer())
     run("systemctl", "daemon-reload")
 
     if self_test(settings) != 0:
         say("the self-test failed, so no agent is enabled")
         return 1
     run("systemctl", "enable", "--now", *map(agent_name, slots), capture=True)
+    run("systemctl", "enable", "--now", ROOM_TIMER, capture=True)
     for slot in slots:
         say(
             f"agent {slot.name} started: cores {slot.cpus}, "
@@ -1145,9 +1442,13 @@ def agent_name(slot: Slot) -> str:
 
 
 def disable_agents() -> None:
-    """Every agent disabled and stopped: the one before slots, each slot's
-    enabled, one by one, as a unit missing fails the whole call, and any
-    slot's still running."""
+    """The low-disk check disabled and stopped first, since it starts an
+    agent it stopped, and its marks cleared; then every agent disabled and
+    stopped: the one before slots, each slot's enabled, one by one, as a
+    unit missing fails the whole call, and any slot's still running."""
+    run("systemctl", "disable", "--now", ROOM_TIMER, check=False, capture=True)
+    run("systemctl", "stop", ROOM_UNIT, check=False, capture=True)
+    shutil.rmtree(ROOM_STATE, ignore_errors=True)
     wants = UNITS / "multi-user.target.wants"
     enabled = sorted(path.name for path in wants.glob("unicon-agent@*.service"))
     for unit in (OLD_AGENT, *enabled):
@@ -1161,7 +1462,8 @@ def machine_cpus() -> list[int]:
 
 
 def machine_slots(settings: Settings) -> tuple[Slot, ...]:
-    """This machine's slots, from `SLOT_TABLE`, its CPUs and its memory."""
+    """This machine's slots, from `SLOT_TABLE`, its CPUs, its memory and
+    its disk."""
     try:
         text = SLOT_TABLE.read_text()
     except OSError as error:
@@ -1170,8 +1472,42 @@ def machine_slots(settings: Settings) -> tuple[Slot, ...]:
             f"{error}"
         ) from error
     return plan_slots(
-        read_sizes(text), settings, machine_cpus(), memory_total() // 2**20
+        read_sizes(text),
+        settings,
+        machine_cpus(),
+        memory_total() // 2**20,
+        disks_room(),
     )
+
+
+def machine_disks(settings: Settings, slots: Sequence[Slot]) -> tuple[Disk, ...]:
+    """Every disk setup makes: each slot's, then the cache's."""
+    cache = Disk(CACHE_DISK.with_suffix(".img"), settings.cache_gb * 2**30)
+    return (*(slot.disk for slot in slots), cache)
+
+
+def allocated(path: Path) -> int:
+    """The bytes the file at `path` holds on the machine's disk."""
+    return path.stat().st_blocks * 512
+
+
+def disks_room() -> int:
+    """The bytes the machine's disk under `DISKS` has for the disks setup
+    makes: what is free, and what every disk made before holds, a disk's
+    file left half made among them, since `make_disks` gives back each it
+    removes or makes again before it makes any. So setup run again finds
+    the room it found before."""
+    below = DISKS
+    while not below.exists():
+        below = below.parent
+    made = [
+        image
+        for folder in (DISKS, SLOT_DISKS)
+        for pattern in ("*.img", "*.img.new")
+        for image in folder.glob(pattern)
+        if image.is_file()
+    ]
+    return shutil.disk_usage(below).free + sum(map(allocated, made))
 
 
 def make_users(settings: Settings) -> pwd.struct_passwd:
@@ -1223,30 +1559,38 @@ def make_users(settings: Settings) -> pwd.struct_passwd:
     return grader
 
 
-def stop_daemon(settings: Settings, uid: int) -> None:
-    """Kill every container of the throwaway user's daemon, then stop the
-    daemon, before the wall comes down: a step's container outlives its
-    agent. The daemon starts again only once the settings are in place.
-    Refuses to go on, the wall still up, while the daemon answers."""
-    running = docker("ps", "--quiet", check=False, timeout=60).split()
-    if running:
-        docker("kill", *running, check=False, timeout=60)
+def stop_daemons(settings: Settings, uid: int) -> None:
+    """Kill every container of every daemon of the throwaway user's, each
+    found by its socket, then stop the daemons, before the wall comes
+    down: a step's container outlives its agent. The daemons start again
+    only once the settings are in place. Refuses to go on, the wall still
+    up, while a daemon answers."""
+    found = sorted(path.stem for path in SOCKET_DIRECTORY.glob("*.sock"))
+    for slot in found:
+        running = docker(slot, "ps", "--quiet", check=False, timeout=60).split()
+        if running:
+            docker(slot, "kill", *running, check=False, timeout=60)
     as_user(
         settings.grader_user,
         uid,
         "systemctl",
         "--user",
         "stop",
-        "docker.service",
+        "unicon-docker@*.service",
         check=False,
         timeout=120,
     )
     # With no daemon to answer, the CLI still prints an empty line.
-    if docker(
-        "info", "--format", "{{.ServerVersion}}", check=False, timeout=60
-    ).strip():
+    answering = [
+        slot
+        for slot in found
+        if docker(
+            slot, "info", "--format", "{{.ServerVersion}}", check=False, timeout=60
+        ).strip()
+    ]
+    if answering:
         raise MachineError(
-            "the throwaway user's daemon did not stop, so the wall stays up"
+            f"the daemon of {', '.join(answering)} did not stop, so the wall stays up"
         )
 
 
@@ -1278,19 +1622,71 @@ def allow_rootlesskit() -> None:
     say("AppArmor: rootlesskit may make its user namespace")
 
 
-def check_data_root(root: Path, grader: pwd.struct_passwd) -> int:
-    """The data root's size, once it is a filesystem of its own and the
-    throwaway user's."""
-    if not root.is_dir() or not os.path.ismount(root):
-        raise MachineError(
-            f"{root} is not a filesystem of its own; mount one there, so a "
-            "disk filled with images and caches stops at its size"
-        )
-    os.chown(root, grader.pw_uid, grader.pw_gid)
-    root.chmod(0o700)
-    usage = shutil.disk_usage(root)
-    say(f"data root {root}: {usage.total // 2**30} GiB of its own")
-    return usage.total
+def make_disks(disks: Sequence[Disk], grader: pwd.struct_passwd) -> int:
+    """Each disk made once, kept on every run after, and mounted at every
+    boot (`fstab`); the cache's filesystem's size in bytes.
+
+    A disk is made as a file reserved whole, then formatted with no blocks
+    kept for root, which no step is, and no discard, which through the
+    loop device would give the reserved blocks back. It is made under
+    another name and renamed, so a file of its name is always a disk. One
+    made before is reserved again, which fills any hole and keeps its
+    data; one of another size is made again, empty, and a slot's gone is
+    removed. Each disk's root belongs to the throwaway user: a slot's
+    is its daemon's data root, and on the cache's Docker makes an org's
+    folder (0755) the first time a step of that org mounts it, since orgs
+    appear after setup. Run with every daemon stopped.
+    """
+    # The daemons, as the throwaway user, pass through to their data roots.
+    SLOT_DISKS.mkdir(parents=True, exist_ok=True)
+    for folder in (DISKS, SLOT_DISKS):
+        folder.chmod(0o755)
+    # Every disk not kept is given back before any is made, as the room
+    # for them was counted (`disks_room`): one left half made by a run
+    # that stopped, a slot's gone, and one of another size.
+    for folder in (DISKS, SLOT_DISKS):
+        for made in folder.glob("*.img.new"):
+            made.unlink()
+    wanted = {disk.image for disk in disks}
+    for image in sorted(SLOT_DISKS.glob("*.img")):
+        if image not in wanted:
+            say(f"removing the disk of the slot {image.stem}, gone")
+            unmount(image.with_suffix(""))
+            image.unlink()
+            with contextlib.suppress(FileNotFoundError):
+                image.with_suffix("").rmdir()
+    for disk in disks:
+        if disk.image.is_file() and disk.image.stat().st_size != disk.size:
+            say(f"disk {disk.mount}: made again at {disk.size // 2**30} GiB, empty")
+            unmount(disk.mount)
+            disk.image.unlink()
+    for disk in disks:
+        if disk.image.is_file():
+            run("fallocate", "--length", str(disk.size), str(disk.image))
+        else:
+            made = disk.image.with_name(disk.image.name + ".new")
+            os.close(os.open(made, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600))
+            run("fallocate", "--length", str(disk.size), str(made))
+            run("mkfs.ext4", "-q", "-F", "-m", "0", "-E", "nodiscard", str(made))
+            made.replace(disk.image)
+        disk.mount.mkdir(mode=0o755, exist_ok=True)
+    write(FSTAB, fstab(FSTAB.read_text(), disks, grader.pw_uid))
+    run("systemctl", "daemon-reload")
+    for disk in disks:
+        if not os.path.ismount(disk.mount):
+            run("mount", str(disk.mount), capture=True)
+        if not os.path.ismount(disk.mount):
+            raise MachineError(f"{disk.image} did not mount at {disk.mount}")
+        os.chown(disk.mount, grader.pw_uid, grader.pw_gid)
+        disk.mount.chmod(0o700)
+        usage = shutil.disk_usage(disk.mount)
+        say(f"disk {disk.mount}: {usage.total / 2**30:.1f} GiB of its own")
+    return shutil.disk_usage(CACHE_DISK).total
+
+
+def unmount(mount: Path) -> None:
+    if os.path.ismount(mount):
+        run("umount", str(mount), capture=True)
 
 
 def count_kills_locally(uid: int) -> None:
@@ -1305,33 +1701,78 @@ def count_kills_locally(uid: int) -> None:
         say(f"warning: {CGROUP} did not take {LOCAL_EVENTS}; the self-test says why")
 
 
-def start_daemon(settings: Settings, grader: pwd.struct_passwd) -> None:
+def write_daemons(
+    settings: Settings, grader: pwd.struct_passwd, slots: Sequence[Slot]
+) -> None:
+    """Each slot's daemon.json and the daemons' unit, as the throwaway user,
+    whose folder it is: root writing there would follow whatever links
+    that user left in it. The daemon.json of each slot gone is removed,
+    and its daemon disabled."""
+    user, uid, home = settings.grader_user, grader.pw_uid, Path(grader.pw_dir)
+    configs = home / ".config/docker"
+    files = [
+        (configs, f"daemon-{slot.name}.json", daemon_json(settings, uid, slot.name))
+        for slot in slots
+    ]
+    files.append((home / ".config/systemd/user", DAEMON_UNIT, daemon_unit()))
+    for folder, name, text in files:
+        as_user(
+            user,
+            uid,
+            "sh",
+            "-c",
+            'umask 077 && mkdir -p "$1" && cat > "$1/$2.new" '
+            '&& mv -f "$1/$2.new" "$1/$2"',
+            "sh",
+            str(folder),
+            name,
+            stdin=text,
+        )
+    names = {slot.name for slot in slots}
+    as_user(user, uid, "systemctl", "--user", "daemon-reload")
+    for path in sorted(configs.glob("daemon-*.json")):
+        slot = path.name.removeprefix("daemon-").removesuffix(".json")
+        if slot not in names:
+            unit = f"unicon-docker@{slot}.service"
+            as_user(user, uid, "systemctl", "--user", "disable", unit)
+            as_user(user, uid, "rm", "-f", str(path))
+
+
+def start_daemons(
+    settings: Settings, grader: pwd.struct_passwd, slots: Sequence[Slot]
+) -> None:
+    """Every slot's daemon enabled and started again, and each waited for:
+    rootlesskit copies /etc as a daemon starts, so the names pinned above
+    reach it only through a restart."""
     user, uid = settings.grader_user, grader.pw_uid
-    unit = Path(grader.pw_dir) / ".config/systemd/user/docker.service"
-    if not unit.exists():
-        say("installing rootless Docker")
-        as_user(user, uid, "dockerd-rootless-setuptool.sh", "install", timeout=300)
-    as_user(user, uid, "systemctl", "--user", "enable", "docker.service")
-    # rootlesskit copies /etc at the daemon's start, so the names pinned
-    # above reach it only through a restart.
-    as_user(user, uid, "systemctl", "--user", "reset-failed", "docker.service")
-    as_user(user, uid, "systemctl", "--user", "restart", "docker.service")
-    for _ in range(60):
-        if docker("info", "--format", "{{.ServerVersion}}", check=False).strip():
-            return
-        time.sleep(1)
-    raise MachineError(f"the rootless daemon did not answer on {SOCKET_DIRECTORY}")
+    as_user(user, uid, "dockerd-rootless-setuptool.sh", "check", timeout=300)
+    units = [f"unicon-docker@{slot.name}.service" for slot in slots]
+    as_user(user, uid, "systemctl", "--user", "enable", *units)
+    as_user(user, uid, "systemctl", "--user", "reset-failed", *units)
+    as_user(user, uid, "systemctl", "--user", "restart", *units, timeout=300)
+    for slot in slots:
+        for _ in range(60):
+            if docker(
+                slot.name, "info", "--format", "{{.ServerVersion}}", check=False
+            ).strip():
+                break
+            time.sleep(1)
+        else:
+            raise MachineError(
+                f"the daemon of slot {slot.name} did not answer on "
+                f"{daemon_socket(slot.name)}"
+            )
 
 
-def pull(image: str, tries: int = 3) -> None:
-    """A pull, tried again a few seconds later, since a registry that drops
-    one request, or a daemon that has just started, should not stop an
-    enrolment.
+def pull(slot: str, image: str, tries: int = 3) -> None:
+    """A pull into the slot's daemon, tried again a few seconds later, since
+    a registry that drops one request, or a daemon that has just started,
+    should not stop an enrolment.
     """
-    say(f"pulling {image}")
+    say(f"pulling {image} into slot {slot}")
     for attempt in range(tries):
         try:
-            docker("pull", "-q", image, timeout=900)
+            docker(slot, "pull", "-q", image, timeout=900)
             return
         except MachineError:
             if attempt == tries - 1:
@@ -1339,22 +1780,23 @@ def pull(image: str, tries: int = 3) -> None:
             time.sleep(5)
 
 
-def install_agent(settings: Settings) -> None:
-    """The agent binary, copied out of its pinned image, so the agent runs
-    on the machine as its own user rather than in a container of the
-    throwaway user's daemon, whose traffic the wall would hold. The daemon
-    is the throwaway user's, so what it hands over is installed only as a
-    plain file with the SHA-256 the settings pin for this architecture.
+def install_agent(settings: Settings, slot: str) -> None:
+    """The agent binary, copied out of its pinned image through the slot's
+    daemon, so the agent runs on the machine as its own user rather than
+    in a container of the throwaway user's daemon, whose traffic the wall
+    would hold. The daemon is the throwaway user's, so what it hands over
+    is installed only as a plain file with the SHA-256 the settings pin
+    for this architecture.
     """
     expected = settings.agent_binary_sha256[architecture()]
-    pull(settings.agent_image)
-    container = docker("create", settings.agent_image).strip()
+    pull(slot, settings.agent_image)
+    container = docker(slot, "create", settings.agent_image).strip()
     staging = Path(
         tempfile.mkdtemp(prefix=".woodpecker-agent-", dir=AGENT_BINARY.parent)
     )
     try:
         copied = staging / AGENT_BINARY.name
-        docker("cp", f"{container}:/bin/woodpecker-agent", str(copied))
+        docker(slot, "cp", f"{container}:/bin/woodpecker-agent", str(copied))
         if copied.is_symlink() or not copied.is_file():
             raise MachineError("the agent image's /bin/woodpecker-agent is not a file")
         digest = hashlib.sha256(copied.read_bytes()).hexdigest()
@@ -1366,7 +1808,7 @@ def install_agent(settings: Settings) -> None:
         copied.chmod(0o755)
         copied.replace(AGENT_BINARY)
     finally:
-        docker("rm", container, check=False)
+        docker(slot, "rm", container, check=False)
         shutil.rmtree(staging, ignore_errors=True)
 
 
@@ -1487,13 +1929,18 @@ def self_test(settings: Settings) -> int:
         == 0
     )
     report.check(wall_up, f"the nftables table {WALL_TABLE} is loaded")
-    check_daemon(settings, grader, report)
+    if not check_daemons(grader, slots, report):
+        say(f"{len(report.failed)} checks failed, and the rest need every daemon")
+        return 1
     check_root_docker(report)
-    held = check_reach(settings, grader, slots, report)
-    check_limits(settings, report)
+    first = slots[0].name
+    held = check_reach(settings, grader, slots, first, report)
+    check_limits(settings, first, report)
     check_slots(settings, grader, slots, report)
-    check_kills(settings, report)
-    check_block_devices(settings, report)
+    check_disks(settings, slots, report)
+    check_cache(settings, grader, slots, report)
+    check_kills(settings, first, report)
+    check_block_devices(settings, first, report)
     check_kernel(report)
     say(f"network wall: {'on' if wall_up and held else 'off'}")
     if report.failed:
@@ -1502,21 +1949,41 @@ def self_test(settings: Settings) -> int:
     return 0
 
 
-def check_daemon(settings: Settings, grader: pwd.struct_passwd, report: Report) -> None:
-    info = json.loads(docker("info", "--format", "{{json .}}"))
-    options = " ".join(info.get("SecurityOptions") or [])
-    report.check("name=rootless" in options, "the daemon is rootless", options)
-    report.check(
-        info.get("CgroupVersion") == "2" and info.get("CgroupDriver") == "systemd",
-        "the daemon runs on cgroup v2 under systemd",
-        f"{info.get('CgroupDriver')} v{info.get('CgroupVersion')}",
-    )
-    root = Path(str(info.get("DockerRootDir")))
-    report.check(
-        root == settings.data_root and os.path.ismount(root),
-        "Docker's data root is its own filesystem",
-        str(root),
-    )
+def check_daemons(
+    grader: pwd.struct_passwd, slots: Sequence[Slot], report: Report
+) -> bool:
+    """Each slot's daemon answers, rootless on cgroup v2 under systemd, with
+    its data root on its slot's disk; and the controllers are delegated to
+    the throwaway user, whose daemons they all are. False when a daemon
+    does not answer."""
+    answered = True
+    for slot in slots:
+        done = docker_done(slot.name, "info", "--format", "{{json .}}", check=False)
+        if not report.check(
+            done.returncode == 0,
+            f"slot {slot.name}'s daemon answers on {daemon_socket(slot.name)}",
+            f"exit {done.returncode}" if done.returncode else "",
+        ):
+            answered = False
+            continue
+        info = json.loads(done.stdout)
+        options = " ".join(info.get("SecurityOptions") or [])
+        report.check(
+            "name=rootless" in options,
+            f"slot {slot.name}'s daemon is rootless",
+            options,
+        )
+        report.check(
+            info.get("CgroupVersion") == "2" and info.get("CgroupDriver") == "systemd",
+            f"slot {slot.name}'s daemon runs on cgroup v2 under systemd",
+            f"{info.get('CgroupDriver')} v{info.get('CgroupVersion')}",
+        )
+        root = Path(str(info.get("DockerRootDir")))
+        report.check(
+            root == slot.disk.mount and os.path.ismount(root),
+            f"slot {slot.name}'s data root is its own disk",
+            str(root),
+        )
     uid = grader.pw_uid
     controllers = Path(
         f"/sys/fs/cgroup/user.slice/user-{uid}.slice/user@{uid}.service/"
@@ -1528,6 +1995,7 @@ def check_daemon(settings: Settings, grader: pwd.struct_passwd, report: Report) 
         "cpu, cpuset, io, memory and pids are delegated",
         " ".join(sorted(have)),
     )
+    return answered
 
 
 def check_root_docker(report: Report) -> None:
@@ -1611,18 +2079,20 @@ def check_reach(
     settings: Settings,
     grader: pwd.struct_passwd,
     slots: Sequence[Slot],
+    daemon: str,
     report: Report,
 ) -> bool:
-    """From a container on a network made as Woodpecker makes one per
-    pipeline, then as the throwaway user in the machine's own network
-    namespace, where the daemon's pulls leave, each target tried from root
-    first. True when nothing the wall should hold got through.
+    """From a container of the slot `daemon`'s daemon on a network made as
+    Woodpecker makes one per pipeline, then as the throwaway user in the
+    machine's own network namespace, where the daemons' pulls leave, each
+    target tried from root first. True when nothing the wall should hold
+    got through.
     """
     network = "unicon-self-test"
-    docker("network", "rm", network, check=False)
-    docker("network", "create", "--ipv6", network, check=False)
-    if network not in docker("network", "ls", "--format", "{{.Name}}"):
-        docker("network", "create", network)
+    docker(daemon, "network", "rm", network, check=False)
+    docker(daemon, "network", "create", "--ipv6", network, check=False)
+    if network not in docker(daemon, "network", "ls", "--format", "{{.Name}}"):
+        docker(daemon, "network", "create", network)
     allowed = settings.wall_allow[0]
     try:
         with listening() as port:
@@ -1639,6 +2109,7 @@ def check_reach(
             control |= {f"{t.address}:{t.port}": "connected" for t in own}
             targets = [allowed, *settings.outside, *own]
             raw = docker(
+                daemon,
                 "run",
                 "--rm",
                 "--network",
@@ -1665,7 +2136,7 @@ def check_reach(
                 "PATH=/usr/local/bin:/usr/bin:/bin",
             )
     finally:
-        docker("network", "rm", network, check=False)
+        docker(daemon, "network", "rm", network, check=False)
 
     def key(target: Target) -> str:
         return f"{target.address}:{target.port}"
@@ -1730,11 +2201,12 @@ def check_slots(
     report: Report,
 ) -> None:
     """Each slot's limits, as its agent sets them on every container, read
-    from inside a container made with them: its cores alone, its memory
-    and no swap. And the throwaway user's slice capped as `slice_drop_in`
-    says, over every container of every slot."""
+    from inside a container of its daemon made with them: its cores alone,
+    its memory and no swap. And the throwaway user's slice capped as
+    `slice_drop_in` says, over every container of every slot."""
     for slot in slots:
         seen = docker(
+            slot.name,
             "run",
             "--rm",
             "--cpuset-cpus",
@@ -1768,9 +2240,185 @@ def check_slots(
     )
 
 
-def check_limits(settings: Settings, report: Report) -> None:
+# A write past the container's own disk: its layer is filled, reserved a
+# gigabyte at a time and then less, down to a block, so that no data is
+# written, and then one more write is made. The fill is removed before the
+# container ends.
+FILL_DISK = """
+import errno, json, os
+path = "/tmp/unicon-fill"
+fd = os.open(path, os.O_CREAT | os.O_WRONLY, 0o600)
+filled, chunk, write = 0, 2**30, "written"
+try:
+    while chunk >= 4096:
+        try:
+            os.posix_fallocate(fd, filled, chunk)
+            filled += chunk
+        except OSError as error:
+            if error.errno != errno.ENOSPC:
+                raise
+            chunk //= 2
+    try:
+        for n in range(64):
+            os.pwrite(fd, b"x" * 2**16, filled + n * 2**16)
+    except OSError as error:
+        write = errno.errorcode.get(error.errno, str(error.errno))
+finally:
+    os.close(fd)
+    os.unlink(path)
+print(json.dumps({"filled": filled, "write": write}))
+"""
+CACHE_WRITE = "open('/cache/token', 'w').write({token!r})"
+CACHE_READ = """
+import os
+print(open("/cache/token").read(), *(os.stat("/cache/token")[4:6]))
+"""
+
+
+def check_disks(settings: Settings, slots: Sequence[Slot], report: Report) -> None:
+    """Every disk fully allocated on the machine's disk, so the machine's
+    disk cannot fill first; and for each slot, a container of its daemon
+    writing past its disk gets `ENOSPC`, and the other slots' disks stay as
+    they were. Not tested while an agent runs, as when the self-test is
+    run by hand on a machine that grades: a full disk would fail the
+    gradings it takes."""
+    for disk in machine_disks(settings, slots):
+        held = allocated(disk.image) if disk.image.is_file() else 0
+        report.check(
+            held >= disk.size,
+            f"{disk.image} is fully allocated on the machine's disk",
+            f"{held // 2**20} of {disk.size // 2**20} MiB",
+        )
+    listed = run(
+        "systemctl",
+        "list-units",
+        "--state=active",
+        "--plain",
+        "--no-legend",
+        "unicon-agent@*.service",
+        check=False,
+        capture=True,
+    )
+    taking = [line.split()[0] for line in listed.stdout.splitlines() if line.strip()]
+    if taking:
+        report.untested(
+            "a container of each slot writing past its disk gets ENOSPC",
+            f"an agent takes gradings, {', '.join(taking)}; stop the agents first",
+        )
+        return
+    for slot in slots:
+        others = [other for other in slots if other != slot]
+        before = [shutil.disk_usage(other.disk.mount).used for other in others]
+        raw = docker(
+            slot.name,
+            "run",
+            "--rm",
+            "--entrypoint",
+            "python3",
+            settings.test_image,
+            "-c",
+            FILL_DISK,
+            check=False,
+            timeout=600,
+        )
+        after = [shutil.disk_usage(other.disk.mount).used for other in others]
+        try:
+            found = dict(json.loads(raw.strip().splitlines()[-1]))
+        except (IndexError, ValueError):
+            found = {"filled": 0, "write": raw.strip() or "nothing"}
+        report.check(
+            found["write"] == "ENOSPC",
+            f"a container of slot {slot.name} writing past its disk gets ENOSPC",
+            f"{found['filled'] / 2**30:.1f} GiB filled, then {found['write']}",
+        )
+        grown = [later - earlier for earlier, later in zip(before, after, strict=True)]
+        if others:
+            report.check(
+                all(abs(change) < 2**20 for change in grown),
+                f"the other slots' disks stay as they were while slot {slot.name}'s "
+                "is full",
+                ", ".join(
+                    f"{other.name} {change:+d} bytes"
+                    for other, change in zip(others, grown, strict=True)
+                ),
+            )
+
+
+def check_cache(
+    settings: Settings,
+    grader: pwd.struct_passwd,
+    slots: Sequence[Slot],
+    report: Report,
+) -> None:
+    """The cache's disk is a filesystem of its own, the throwaway user's; a
+    folder of it is made on first use by the first slot's daemon, 0755 and
+    the throwaway user's, as an org's is when the forge first mounts it at
+    a step's `/cache`; and every other slot reads what the first wrote
+    there, with the same owner."""
+    owner = CACHE_DISK.stat().st_uid if CACHE_DISK.exists() else None
+    report.check(
+        os.path.ismount(CACHE_DISK) and owner == grader.pw_uid,
+        f"the cache's disk {CACHE_DISK} is its own, the throwaway user's",
+        f"owner {owner}",
+    )
+    shutil.rmtree(CACHE_FOLDER_TEST, ignore_errors=True)
+    token = os.urandom(8).hex()
+    mount = ("-v", f"{CACHE_FOLDER_TEST}:/cache", "--entrypoint", "python3")
+    first, *others = slots
+    try:
+        wrote = docker_done(
+            first.name,
+            "run",
+            "--rm",
+            *mount,
+            settings.test_image,
+            "-c",
+            CACHE_WRITE.format(token=token),
+            check=False,
+            timeout=120,
+        )
+        made = CACHE_FOLDER_TEST.stat() if CACHE_FOLDER_TEST.is_dir() else None
+        report.check(
+            wrote.returncode == 0
+            and made is not None
+            and made.st_mode & 0o777 == 0o755
+            and made.st_uid == grader.pw_uid,
+            "a folder of the cache's disk is made on first use, 0755, the "
+            "throwaway user's",
+            f"exit {wrote.returncode}"
+            + (f", mode {made.st_mode & 0o777:o}, owner {made.st_uid}" if made else ""),
+        )
+        for other in others:
+            seen = docker(
+                other.name,
+                "run",
+                "--rm",
+                *mount,
+                settings.test_image,
+                "-c",
+                CACHE_READ,
+                check=False,
+                timeout=120,
+            ).strip()
+            report.check(
+                seen == f"{token} 0 0",
+                f"slot {other.name} reads what slot {first.name} wrote to /cache, "
+                "as the same owner",
+                seen or "nothing",
+            )
+        if not others:
+            report.untested(
+                "a write to /cache from one slot is read from another",
+                "this machine has one slot",
+            )
+    finally:
+        shutil.rmtree(CACHE_FOLDER_TEST, ignore_errors=True)
+
+
+def check_limits(settings: Settings, daemon: str, report: Report) -> None:
     limited = ("--memory", "64m", "--memory-swap", "64m", "--pids-limit", "32")
     hog = docker_done(
+        daemon,
         "run",
         "--rm",
         *limited,
@@ -1788,6 +2436,7 @@ def check_limits(settings: Settings, report: Report) -> None:
         f"exit {hog.returncode}",
     )
     forks = docker(
+        daemon,
         "run",
         "--rm",
         *limited,
@@ -1806,7 +2455,7 @@ def check_limits(settings: Settings, report: Report) -> None:
     )
 
 
-def check_kills(settings: Settings, report: Report) -> None:
+def check_kills(settings: Settings, daemon: str, report: Report) -> None:
     """A container's own out-of-memory kill marks it killed, which the agent
     fails a step for; its child cgroup's, as a box's is, does not, when
     the hierarchy counts each cgroup's kills alone."""
@@ -1854,14 +2503,16 @@ def check_kills(settings: Settings, report: Report) -> None:
             "a container whose box was killed for its memory is not marked killed",
         ),
     ):
-        docker("rm", "-f", name, check=False)
+        docker(daemon, "rm", "-f", name, check=False)
         try:
             ran = docker_done(
-                "run", "--name", name, *arguments, check=False, timeout=120
+                daemon, "run", "--name", name, *arguments, check=False, timeout=120
             )
-            marked = docker("inspect", "--format", "{{.State.OOMKilled}}", name).strip()
+            marked = docker(
+                daemon, "inspect", "--format", "{{.State.OOMKilled}}", name
+            ).strip()
         finally:
-            docker("rm", "-f", name, check=False)
+            docker(daemon, "rm", "-f", name, check=False)
         detail = f"exit {ran.returncode}, OOMKilled {marked}"
         if name.endswith("box"):
             killed = ran.stdout.strip().splitlines()[-1:] == ["1"]
@@ -1874,8 +2525,9 @@ def check_kills(settings: Settings, report: Report) -> None:
             report.check(marked == wanted, what, detail)
 
 
-def check_block_devices(settings: Settings, report: Report) -> None:
+def check_block_devices(settings: Settings, daemon: str, report: Report) -> None:
     opened = docker(
+        daemon,
         "run",
         "--rm",
         "--privileged",
@@ -1917,12 +2569,127 @@ def read_sysctl(name: str) -> int | None:
         return None
 
 
+# The low-disk check.
+
+
+def check_room(grader: pwd.struct_passwd, slot: str) -> None:
+    """A nearly full slot (`room_mark`) stops taking gradings until its disk
+    has room again, from a timer every minute. Stopping an agent kills its
+    running workflow and leaves that workflow's container, network and
+    volume behind, so the agent is stopped only once its slot's daemon has
+    no workflow container and no workflow network (`workflow_running`): a
+    workflow between its steps, or pulling its next step's image, runs no
+    container, but its network lives from its start to its end. A
+    network older than any workflow runs is one an agent stopped
+    mid-workflow left behind, and is removed with the rest. One taken
+    between that look and the stop is killed, which the forge reads as
+    lost. Then the daemon's stopped containers, unused volumes, networks
+    and dangling images are removed, never the pinned images, which the
+    wall would keep it from pulling again, and the agent started again
+    once the disk is back above the mark. The pool's other slots take the
+    gradings meanwhile. Root only stops and starts the agent; the daemon
+    is driven as the throwaway user `grader` (`docker_as`), whose it is.
+    A slot whose agent is not enabled, as while setup runs or after its
+    self-test failed, or whose disk is not mounted, is left alone.
+    """
+    mount = SLOT_DISKS / slot
+    agent = f"unicon-agent@{slot}.service"
+    stopped = ROOM_STATE / f"{slot}.stopped"
+    if not os.path.ismount(mount):
+        say(f"{slot}: its disk is not mounted, so it is left alone")
+        return
+    enabled = run("systemctl", "is-enabled", agent, check=False, capture=True)
+    if enabled.stdout.strip() != "enabled":
+        say(f"{slot}: its agent is not enabled, so it is left alone")
+        return
+
+    def room() -> tuple[int, int]:
+        usage = shutil.disk_usage(mount)
+        return usage.free, room_mark(usage.total)
+
+    free, mark = room()
+    if free >= mark:
+        if stopped.exists():
+            run("systemctl", "start", agent, capture=True)
+            stopped.unlink()
+            say(f"{slot}: {free / 2**30:.2f} GiB free again, so its agent started")
+        return
+    below = f"{free / 2**30:.2f} GiB free, below {mark / 2**30:.2f} GiB"
+    containers = docker_as(
+        grader,
+        slot,
+        "container",
+        "ls",
+        "--filter",
+        "name=^wp_",
+        "--format",
+        "{{.Names}}",
+    )
+    networks = docker_as(
+        grader, slot, "network", "ls", "--quiet", "--filter", "name=^wp_"
+    )
+    inspected = (
+        docker_as(grader, slot, "network", "inspect", *networks.stdout.split())
+        if networks.returncode == 0 and networks.stdout.split()
+        else subprocess.CompletedProcess([], networks.returncode, "[]", "")
+    )
+    if any(done.returncode != 0 for done in (containers, networks, inspected)):
+        say(f"{slot}: {below}, and its daemon does not answer: tried again next minute")
+        return
+    try:
+        found = json.loads(inspected.stdout)
+    except ValueError as error:
+        raise MachineError("the daemon's networks are not JSON") from error
+    if workflow_running(containers.stdout, found, time.time()):
+        say(f"{slot}: {below}, and a workflow is running: tried again next minute")
+        return
+    if not stopped.exists():
+        run("systemctl", "stop", agent, capture=True)
+        ROOM_STATE.mkdir(parents=True, exist_ok=True)
+        stopped.touch()
+        say(f"{slot}: {below}, and idle, so its agent stopped")
+    for what in ("container", "network", "image"):
+        docker_as(grader, slot, what, "prune", "--force", timeout=600)
+    docker_as(grader, slot, "volume", "prune", "--all", "--force", timeout=600)
+    free, mark = room()
+    cleaned = f"cleaned up to {free / 2**30:.2f} GiB free"
+    if free < mark:
+        say(f"{slot}: {cleaned}, so its agent stays stopped")
+        return
+    run("systemctl", "start", agent, capture=True)
+    stopped.unlink()
+    say(f"{slot}: {cleaned}, so its agent started")
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="grading-machine.py")
-    parser.add_argument("command", choices=("setup", "self-test"))
-    parser.add_argument("settings", type=Path)
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name in ("setup", "self-test"):
+        commands.add_parser(name).add_argument("settings", type=Path)
+    room = commands.add_parser("room")
+    room.add_argument("--grader", required=True)
+    room.add_argument("slots", nargs="+")
     options = parser.parse_args(argv)
     try:
+        if options.command == "room":
+            if os.geteuid() != 0:
+                raise MachineError("run as root")
+            try:
+                grader = pwd.getpwnam(options.grader)
+            except KeyError as error:
+                raise MachineError(f"no user {options.grader}") from error
+            if grader.pw_uid == 0:
+                raise MachineError(f"{options.grader} is root, not the throwaway user")
+            # One slot that cannot be looked at keeps none of the others
+            # from it.
+            failed = False
+            for slot in options.slots:
+                try:
+                    check_room(grader, slot)
+                except MachineError as error:
+                    say(f"{slot}: {error}")
+                    failed = True
+            return 1 if failed else 0
         settings = Settings.read(options.settings)
         if options.command == "setup":
             return setup(settings)

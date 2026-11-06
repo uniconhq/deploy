@@ -527,10 +527,16 @@ jobs:
         if: failure()
         working-directory: deploy
         run: |
-          # The grading's own reason is a backend line, and the proxy's
-          # access log fills a plain tail before that line is reached.
+          # The backend's reason, such as the import error that kept it from
+          # starting, is in its own log, and the other services fill a plain
+          # tail before that log is reached. So the backend's whole log comes
+          # first, then its grading lines picked out, then the tail of all.
+          echo "== backend"
+          docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color backend || true
+          echo "== backend grading lines"
           docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color backend \
             | grep -E 'steps\.(faulted|concluded)' || true
+          echo "== every service, last 120 lines"
           docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color | tail -120
 
   workflows:
