@@ -832,13 +832,23 @@ to Unicon" from Forgejo's consent page to the app's home.
 `test_compile_error.py` sends a C++ solution that does not compile to a
 task on `unicon/classic@v6` and finds every run `compile_error`, the
 submission's row "Did not compile" and the compiler's log on its page.
+`test_pipelines.py` reads what the CI holds for a grading, from its API
+as `unicon-ci` with `UNICON_WOODPECKER_TOKEN` from `.env` (at
+`127.0.0.1:8000`, or `UNICON_E2E_CI_URL`): one pipeline with one
+workflow, the checkout in `submission/`, a generator run in each
+grading, a regrade after a
+checker change restarting the pipeline before and graded by the new
+checker, and a killed agent giving the platform's own retry, a restart of
+the dead pipeline. That last one stops and starts the dev agent, and
+waits for the grading's deadline, about ten minutes, since Woodpecker
+3.18.1 drops a dead agent's workflow and leaves its pipeline running.
 `test_memory.py` and `test_escape.py` grade a task on `unicon/classic@v6`,
 and the runner's escape fixtures, through the API; they need a grading
 machine with `exec`'s shape, so they are skipped unless `UNICON_E2E_ESCAPE`
 is set.
 Every name carries a random suffix, so it runs again on the same stack
-without clearing anything; it takes about a minute. Without `UNICON_E2E_URL`
-it is skipped, so `uv run pytest` stays a unit run. `UNICON_E2E_COMPOSE` is
+without clearing anything; it takes a few minutes, and the killed agent
+ten more. Without `UNICON_E2E_URL` it is skipped, so `uv run pytest` stays a unit run. `UNICON_E2E_COMPOSE` is
 the compose command the accounts are made with, from this directory; it
 defaults to the dev files.
 
