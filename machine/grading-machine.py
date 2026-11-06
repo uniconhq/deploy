@@ -204,6 +204,9 @@ too (`UNICON_SLOT_SIZES`, written by bootstrap): kept beside this script."""
 SYSTEM_MB = 1024
 """What a machine keeps of its memory, in MB, outside the throwaway user's
 slice, which every container is in: the system and the agents."""
+SYSTEM_DISK_GB = 10
+"""What a machine keeps free of its disk, in GiB, outside every disk setup
+makes: the system, the agents and the throwaway user's home."""
 DAEMON_MB = 256
 """What the slice keeps beside each slot, in MB, for the slot's own
 daemon: dockerd, containerd and rootlesskit with its network helper, about
@@ -510,8 +513,9 @@ def plan_slots(
             f"The smallest machine a {smallest.name} slot fits on has "
             f"{SYSTEM_CORES + smallest.cores} cores, "
             f"{SYSTEM_MB + holds(smallest)} MB of memory (MemTotal) and "
-            f"{smallest.disk_gb + settings.cache_gb} GiB free on its disk under "
-            f"{DISKS}, for the slot's disk and the cache's (cache_gb)"
+            f"{smallest.disk_gb + settings.cache_gb + SYSTEM_DISK_GB} GiB free on "
+            f"its disk under {DISKS}, for the slot's disk, the cache's (cache_gb) "
+            f"and the system's"
         )
     slots: list[Slot] = []
     for size in sizes:
@@ -1495,8 +1499,8 @@ def disks_room() -> int:
     """The bytes the machine's disk under `DISKS` has for the disks setup
     makes: what is free, and what every disk made before holds, a disk's
     file left half made among them, since `make_disks` gives back each it
-    removes or makes again before it makes any. So setup run again finds
-    the room it found before."""
+    removes or makes again before it makes any, less `SYSTEM_DISK_GB`. So
+    setup run again finds the room it found before."""
     below = DISKS
     while not below.exists():
         below = below.parent
@@ -1507,7 +1511,8 @@ def disks_room() -> int:
         for image in folder.glob(pattern)
         if image.is_file()
     ]
-    return shutil.disk_usage(below).free + sum(map(allocated, made))
+    room = shutil.disk_usage(below).free + sum(map(allocated, made))
+    return max(0, room - SYSTEM_DISK_GB * 2**30)
 
 
 def make_users(settings: Settings) -> pwd.struct_passwd:
