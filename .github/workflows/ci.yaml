@@ -306,8 +306,9 @@ jobs:
           expect 404 GET "$app/-/uploads/door"
           expect 404 POST "$app/-/uploads/door"
           # The download door: without a session each of its shapes, a
-          # submission's file, a task's file at a commit and a workflow
-          # version's file, is no such file, and nothing but a read is routed.
+          # submission's file, a task's file at a commit, a workflow
+          # version's file and an input a task shows that is not shown, is
+          # no such file, and nothing but a read is routed.
           expect 404 GET "$app/-/downloads/acme/spring/sum/1/files/submission/main.py"
           expect 404 PUT "$app/-/downloads/acme/spring/sum/1/files/submission/main.py"
           commit="0123456789abcdef0123456789abcdef01234567"
@@ -317,6 +318,10 @@ jobs:
           expect 404 PUT "$app/-/downloads/workflows/bob/tuned/versions/v1/scorer/main.py"
           expect 404 GET "$app/-/downloads/workflows/bob/tuned/draft/scorer/main.py"
           expect 404 PUT "$app/-/downloads/workflows/bob/tuned/draft/scorer/main.py"
+          expect 404 GET "$app/-/downloads/acme/spring/sum/inputs/header"
+          expect 404 PUT "$app/-/downloads/acme/spring/sum/inputs/header"
+          expect 404 GET "$app/-/downloads/acme/spring/sum/runs/all/1/inputs/input"
+          expect 404 GET "$app/-/downloads/acme/spring/sum/1/runs/first_not_passed/1/inputs/input"
           expect 404 GET "$app/-/downloads/door"
 
       # The development git listener every grading step has as its HTTP

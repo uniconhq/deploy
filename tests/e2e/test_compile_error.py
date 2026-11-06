@@ -66,7 +66,11 @@ scoring:
   values:
     passed: {block: sum, over: {runs: all}, of: {run: [all, passed]}}
   show:
-    now: [passed, all, log]
+    always:
+      values: [passed]
+      outputs: [log, compiled]
+      runs:
+        - {of: all, fields: [verdict, passed, score, time_ms, memory_kb]}
 submissions: {max: 50, rate: {count: 1, per: 5}}
 """
 

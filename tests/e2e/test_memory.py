@@ -101,7 +101,10 @@ scoring:
   values:
     passed: {block: sum, over: {runs: all}, of: {run: [all, passed]}}
   show:
-    now: [passed, all, tests/]
+    always:
+      values: [passed]
+      runs:
+        - {of: all, fields: [input, answer, verdict, passed, score, time_ms, memory_kb]}
 submissions: {max: 50, rate: {count: 1, per: 5}}
 """
 
@@ -142,7 +145,7 @@ def test_a_run_over_its_memory_ends_alone(browser: Browser) -> None:
         return None if found is None else str(found)
 
     ended = {
-        run["tuples"][0]["key"]["input"]: (run["verdict"], score_of(run))
+        run["tuples"][0]["key"]["input"]["file"]: (run["verdict"], score_of(run))
         for run in grading["runs"]
     }
     assert ended == {

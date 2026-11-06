@@ -103,7 +103,7 @@ def test_every_attack_from_a_box_is_refused(browser: Browser) -> None:
 
     expected = json.loads((ESCAPE / "expected.json").read_text())
     ended = {
-        Path(run["tuples"][0]["key"]["attack"]).stem: run["verdict"]
+        Path(run["tuples"][0]["key"]["attack"]["file"]).stem: run["verdict"]
         for run in grading["runs"]
     }
     assert set(ended) == set(expected)
