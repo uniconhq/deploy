@@ -9,7 +9,7 @@ description: >-
   output and the task's answer file, and scores the output from 0 to 1.
 inputs:
   code: {type: file, title: Solution, help: The entrant's source file.}
-  language: {type: enum, options: [c, cpp, python], title: Language}
+  language: {type: enum, options: [c, cpp, java, kotlin, python, javascript, typescript, csharp, rust, r, ruby], title: Language}
   input: {type: file, title: Test input, help: What the solution reads.}
   answer:
     type: file
@@ -21,7 +21,7 @@ inputs:
 
 steps:
   - id: run-solution
-    use: unicon/exec@v3
+    use: unicon/exec@v4
     with:
       source: ${{ inputs.code }}
       language: ${{ inputs.language }}

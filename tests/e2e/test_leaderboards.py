@@ -1,12 +1,15 @@
 """Rank one contest on a leaderboard that reads a value hidden until the
 close, on the running compose stack.
 
-The organiser builds the starter task's two runs on the Runs card, one
-shown now and one after the close, and the values on the Scoring card:
-`main_points` and `final_points`, 50 for a run that passes, and `total`,
-their sum, shown only after the close. The contest's leaderboard reads
-`total`. Before the close an entrant sees a dash there, not the points so
-far, and staff see the number. After the close the entrant sees it too.
+The organiser builds the starter task's two runs on the Runs card, and
+on the Scoring card a group for each and the values: `main_points` and
+`final_points`, 50 for a run that passes, and `total`, their sum. In the
+grid of what entrants see, Main's runs and `main_points` are shown always,
+and Final's runs, `final_points` and `total` after the deadline, which is
+the task's close; the starter's runs of all and its `score` are turned
+off. The contest's leaderboard reads `total`. Before the close an entrant
+sees a dash there, not the points so far, and staff see the number. After
+the close the entrant sees it too.
 """
 
 from __future__ import annotations
@@ -98,23 +101,34 @@ def add_value(page: Page, scoring: Locator, text: str, name: str, when: str) -> 
     shown(scoring, name, when)
 
 
+def moment(scoring: Locator, part: str, when: str) -> Locator:
+    """The box for `part` at the moment `when` in the grid of what entrants
+    see: a value by its name, a run's field as `Passed of <group>`."""
+    return scoring.get_by_role("table", name="What entrants see").get_by_role(
+        "checkbox", name=f"{part}, {when}", exact=True
+    )
+
+
 def shown(scoring: Locator, name: str, when: str) -> None:
-    """When the value `name` is shown to entrants, set on its own card."""
-    scoring.get_by_role("group", name=f"Value {name}").get_by_role(
-        "combobox", name="Shown to entrants"
-    ).select_option(label=when)
+    moment(scoring, name, when).check()
 
 
 def add_group(
     page: Page, scoring: Locator, name: str, rows: list[str], when: str
 ) -> None:
+    """A group of `rows`, and its runs' Passed shown at `when`: the runs
+    added in the grid start as all's, which is picked off for the group."""
     scoring.get_by_role("button", name="Add a group").click()
     box = scoring.locator("input[aria-label^='Name of group_']").last
     box.fill(name)
     page.keyboard.press("Tab")
     for row in rows:
         scoring.get_by_role("checkbox", name=f"{row} in {name}").check()
-    scoring.get_by_label(f"When {name} is shown").select_option(label=when)
+    scoring.get_by_role("button", name="Add runs").click()
+    scoring.get_by_role("rowgroup", name="Runs: all, every run").get_by_role(
+        "combobox", name="Runs of"
+    ).select_option(label=name)
+    moment(scoring, f"Passed of {name}", when).check()
 
 
 def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
@@ -145,20 +159,24 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     upload_run_file(organiser, 2, "answer", b"12\n")
 
     scoring = organiser.get_by_role("region", name="Scoring")
-    add_group(organiser, scoring, "main_tests", ["Main"], "Now")
-    add_group(organiser, scoring, "final_tests", ["Final"], "After the close")
-    add_value(organiser, scoring, "50 * sum(main_tests.passed)", "main_points", "Now")
+    # The starter shows every run's verdict always, Final's among them.
+    scoring.get_by_role("button", name="Remove the runs of all").click()
+    add_group(organiser, scoring, "main_tests", ["Main"], "Always")
+    add_group(organiser, scoring, "final_tests", ["Final"], "After the deadline")
+    add_value(
+        organiser, scoring, "50 * sum(main_tests.passed)", "main_points", "Always"
+    )
     add_value(
         organiser,
         scoring,
         "50 * sum(final_tests.passed)",
         "final_points",
-        "After the close",
+        "After the deadline",
     )
     add_value(
-        organiser, scoring, "main_points + final_points", "total", "After the close"
+        organiser, scoring, "main_points + final_points", "total", "After the deadline"
     )
-    shown(scoring, "score", "Not shown")
+    moment(scoring, "score", "Always").uncheck()
     submission_rate(organiser, 10, 60)
     save_task(organiser)
     write_statement(organiser, task_page, STATEMENT)

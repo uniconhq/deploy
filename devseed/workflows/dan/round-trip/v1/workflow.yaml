@@ -1,5 +1,5 @@
 # dan/round-trip@v1: a solution run both ways on one test, each way a run
-# of unicon/classic@v5: there, a word to encode, and back, a code to
+# of unicon/classic@v6: there, a word to encode, and back, a code to
 # decode. A test passes when both ways are right; each way's score is an
 # output too.
 description: >-
@@ -8,7 +8,7 @@ description: >-
   and each way's score is an output too.
 inputs:
   code: {type: file, title: Solution}
-  language: {type: enum, options: [c, cpp, java, python], title: Language}
+  language: {type: enum, options: [c, cpp, java, kotlin, python, javascript, typescript, csharp, rust, r, ruby], title: Language}
   there: {type: file, title: Word to encode}
   there_answer: {type: file, title: Its code}
   back: {type: file, title: Code to decode}
@@ -18,7 +18,7 @@ inputs:
 
 steps:
   - id: there
-    use: unicon/classic@v5
+    use: unicon/classic@v6
     with:
       code: ${{ inputs.code }}
       language: ${{ inputs.language }}
@@ -27,7 +27,7 @@ steps:
       time_limit: ${{ inputs.time_limit }}
       memory_limit: ${{ inputs.memory_limit }}
   - id: back
-    use: unicon/classic@v5
+    use: unicon/classic@v6
     with:
       code: ${{ inputs.code }}
       language: ${{ inputs.language }}

@@ -17,7 +17,14 @@ SPRING = "spring-open-2026"
 RELAY = "summer-relay-2026"
 AUTUMN = "autumn-open-2026"
 SPRING_TASKS = ("sum-of-two", "islands", "making-change", "guess-the-number")
-RELAY_TASKS = ("pairs", "round-trip", "array-sum", "java-sum")
+RELAY_TASKS = (
+    "pairs",
+    "round-trip",
+    "array-sum",
+    "java-sum",
+    "kotlin-sum",
+    "typescript-sum",
+)
 AUTUMN_TASKS = ("warm-up",)
 LATE_TASK = "making-change"
 """Spring's one task with a due time, set once its first submission is in."""
@@ -30,6 +37,8 @@ SHORT = {
     "round-trip": "trip",
     "array-sum": "arrays",
     "java-sum": "java",
+    "kotlin-sum": "kotlin",
+    "typescript-sum": "typescript",
 }
 """Each task's name in its leaderboard columns, which have no titles."""
 
@@ -96,7 +105,7 @@ def relay(state: str, start: datetime, end: datetime) -> str:
         {
             "name": "Summer Relay 2026",
             "description": (
-                "Two weeks, three problems, teams of up to two. Any member may "
+                "Two weeks, six problems, teams of up to two. Any member may "
                 "submit for the team."
             ),
             "start": at(start),

@@ -1,9 +1,9 @@
-# unicon/interactive@v3, workflow.yaml: one run of an entrant's program
+# unicon/interactive@v4, workflow.yaml: one run of an entrant's program
 # against the task's judge, linked both ways, and the verdict the verdict
 # script gives from how each ended. The format is SIMPLER-CORE.md 7.
 inputs:
   code: {type: folder, title: Solution}
-  language: {type: enum, options: [c, cpp, java, python], title: Language}
+  language: {type: enum, options: [c, cpp, java, kotlin, python, javascript, typescript, csharp, rust, r, ruby], title: Language}
   judge:
     type: folder
     title: Judge
@@ -15,7 +15,7 @@ inputs:
       verdict is an error of the step, unless SIGPIPE killed it.
   judge_language:
     type: enum
-    options: [c, cpp, java, python]
+    options: [c, cpp, java, kotlin, python, javascript, typescript, csharp, rust, r, ruby]
     title: Judge's language
   judge_manifest:
     type: file
@@ -38,7 +38,7 @@ inputs:
 
 steps:
   - id: game
-    use: unicon/exec@v3
+    use: unicon/exec@v4
     with:
       programs:
         entrant:
@@ -58,7 +58,7 @@ steps:
         - entrant -> judge
         - judge -> entrant
   - id: decide
-    use: unicon/exec@v3
+    use: unicon/exec@v4
     with:
       source: ${{ workflow.verdict/ }}
       language: python

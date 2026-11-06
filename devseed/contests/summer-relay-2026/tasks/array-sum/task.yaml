@@ -1,5 +1,5 @@
 name: Array Sum
-workflow: unicon/classic@v5
+workflow: unicon/classic@v6
 environment:
   python:
     packages: [numpy>=2.3]

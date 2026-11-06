@@ -14,34 +14,37 @@ Five people:
 The workflows use each other's versions as steps:
 
 - `judgekit/check@v1`, a checker the task brings, compiled and run by
-  `unicon/exec@v3`;
+  `unicon/exec@v4`;
 - `judgekit/special@v1`, a run judged by a checker: the solution run by
-  `unicon/exec@v3`, and `judgekit/check@v1` as a box;
-- `riverside/standard@v1`, private to the club: `unicon/classic@v5`
+  `unicon/exec@v4`, and `judgekit/check@v1` as a box;
+- `riverside/standard@v1`, private to the club: `unicon/classic@v6`
   under the club's limits;
 - `riverside/coins@v1`, private to the club: the solution run by
-  `unicon/exec@v3`, and `judgekit/check@v1` as a box, with a checker of
+  `unicon/exec@v4`, and `judgekit/check@v1` as a box, with a checker of
   its own given a 2 MB table, `data/fewest.bin`, uploaded into the draft,
   as its answer; its draft is ahead of v1 by a changed checker;
-- `dan/round-trip@v1`: `unicon/classic@v5` twice, once each way;
-- `bob/practice@v1`: `unicon/classic@v5` under bob's own limits, used by
+- `dan/round-trip@v1`: `unicon/classic@v6` twice, once each way;
+- `bob/practice@v1`: `unicon/classic@v6` under bob's own limits, used by
   no task.
 
 Three contests, all riverside's:
 
 - Spring Open 2026, which started three hours before the seed and is
-  closed by it, with results released: Sum of Two on unicon/classic@v5,
+  closed by it, with results released: Sum of Two on unicon/classic@v6,
   Grid Islands on riverside/standard@v1 with two subtasks and its points
   on release,
   Making Change on riverside/coins@v1, due once bob's submission is in,
   so carol's and erin's a minute later are late, and Guess the Number on
-  unicon/interactive@v3. Two
+  unicon/interactive@v4. Two
   leaderboards: ICPC standings and points. A question bob asked, answered
   in public, and an announcement.
 - Summer Relay 2026, running: Closest Pair on judgekit/special@v1, whose
   checker gives part of a test's points to a pair that is close but not
-  closest, and Round Trip on dan/round-trip@v1, a relay points board,
-  two more days on Round Trip for erin, and a question from her not yet
+  closest, Round Trip on dan/round-trip@v1, and four sums on
+  unicon/classic@v6, each naming its toolchain or its packages: Array Sum
+  with numpy, Java Sum on Java 25, Kotlin Sum with JUnit 5 from Maven
+  Central and TypeScript Sum with chai from npm. A relay points board, two
+  more days on Round Trip for erin, and a question from her not yet
   answered.
 - Autumn Open 2026, a draft with one task not written yet.
 
@@ -70,7 +73,20 @@ PEOPLE = ("alice", "bob", "carol", "dan", "erin")
 CLUB = "riverside"
 KIT = "judgekit"
 WORKFLOW_FILE = "workflow.yaml"
-LANGUAGES = {".py": "python", ".cpp": "cpp", ".java": "java"}
+LANGUAGES = {
+    ".c": "c",
+    ".cpp": "cpp",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".py": "python",
+    ".js": "javascript",
+    ".ts": "typescript",
+    ".cs": "csharp",
+    ".rs": "rust",
+    ".R": "r",
+    ".rb": "ruby",
+}
+"""Each seeded program's language, by its file's suffix."""
 ON_TIME = "bob"
 """Who sends Spring's late task its first submission, before it is due."""
 LATE_BY = timedelta(minutes=1)

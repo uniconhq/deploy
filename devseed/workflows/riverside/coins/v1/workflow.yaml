@@ -11,14 +11,14 @@ description: >-
   answer file.
 inputs:
   code: {type: file, title: Solution}
-  language: {type: enum, options: [c, cpp, java, python], title: Language}
+  language: {type: enum, options: [c, cpp, java, kotlin, python, javascript, typescript, csharp, rust, r, ruby], title: Language}
   input: {type: file, title: Amount}
   time_limit: {type: number, title: Time limit, unit: seconds}
   memory_limit: {type: number, title: Memory limit, unit: MB}
 
 steps:
   - id: solution
-    use: unicon/exec@v3
+    use: unicon/exec@v4
     with:
       source: ${{ inputs.code }}
       language: ${{ inputs.language }}
