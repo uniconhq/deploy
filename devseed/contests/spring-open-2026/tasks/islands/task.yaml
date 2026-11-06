@@ -26,6 +26,12 @@ scoring:
         - {block: mul, of: [60, {value: large_ok}]}
     solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
   show:
-    now: [sample, samples/, log]
-    on_release: [small_ok, large_ok, points, solved, all, tests/]
+    always:
+      outputs: [log, compiled]
+      runs:
+        - {of: sample, fields: [input, answer, verdict, passed, score, time_ms, label, message]}
+    after_release:
+      values: [small_ok, large_ok, points, solved]
+      runs:
+        - {of: all, fields: [input, answer, verdict, passed, score, time_ms, label, message]}
 submissions: {rate: {count: 10, per: 60}}

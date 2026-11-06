@@ -277,10 +277,20 @@ origin, so it needs no CORS and the session cookie goes with it.
 Downloads come back the same way. `/-/downloads/<org>/<contest>/<task>/<number>/files/...`
 is one file of a contestant's own submission, and
 `/-/downloads/<org>/<contest>/<task>/versions/<commit>/<path>` one of a task's
-own files at a version, for whoever holds a role reaching the task. Each takes
+own files at a version, for whoever holds a role reaching the task.
+`/-/downloads/<org>/<contest>/<task>/inputs/<name>` and
+`.../<task>/runs/<group>/<place>/inputs/<name>`, with a file's path below a
+folder after either, are an input the task's `show` shows, for whoever reads
+the task's page while it is shown, and
+`.../<task>/<number>/runs/<group>/<place>/inputs/<name>` a run's input a
+contestant's own result shows them. A shown input is read with the
+platform's own credential, not the reader's, since a visitor has none, so the
+forge checks no access as it serves it: the backend's check that the input is
+shown now, to this reader, and the map holding the answer to the task's
+repository are the only controls. Each takes
 GET alone, and nginx asks the backend first; the backend answers with the
 forge's media endpoint for that file, in a submission's repository or the
-task's, and the person's own credential, and nginx streams Forgejo's answer
+task's, and the credential to read it with, and nginx streams Forgejo's answer
 whatever its size, a range included, as an attachment with its own security
 headers and the app's cookie dropped. Two maps hold each answer to the one
 shape its address may lead to, and every refusal, nginx's, the backend's or

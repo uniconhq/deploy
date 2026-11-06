@@ -28,6 +28,13 @@ scoring:
             - 6
     solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
   show:
-    now: [points, sample, samples/, log]
-    after_close: [solved, all, tests/]
+    always:
+      values: [points]
+      outputs: [log, compiled]
+      runs:
+        - {of: sample, fields: [input, verdict, passed, score, time_ms, label, message]}
+    after_deadline:
+      values: [solved]
+      runs:
+        - {of: all, fields: [input, verdict, passed, score, time_ms, label, message]}
 submissions: {rate: {count: 10, per: 60}}

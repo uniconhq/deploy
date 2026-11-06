@@ -19,5 +19,10 @@ scoring:
     both_ways: {block: sum, over: {runs: all}, of: {run: [all, passed]}}
     points: {block: mul, of: [25, {value: both_ways}]}
   show:
-    now: [points, both_ways, all, tests/1/, log]
+    always:
+      values: [points, both_ways]
+      outputs: [log, compiled]
+      runs:
+        - {of: all, fields: [verdict, passed, there_score, back_score, label, message]}
+        - {of: sample, fields: [there, there_answer, back, back_answer]}
 submissions: {rate: {count: 10, per: 60}}

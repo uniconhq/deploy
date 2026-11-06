@@ -24,5 +24,9 @@ scoring:
   values:
     solved: {block: min, over: {runs: all}, of: {run: [all, passed]}}
   show:
-    now: [solved, all, log]
+    always:
+      values: [solved]
+      outputs: [log, compiled]
+      runs:
+        - {of: all, fields: [verdict, passed, time_ms, memory_kb, label, message]}
 submissions: {rate: {count: 10, per: 60}}

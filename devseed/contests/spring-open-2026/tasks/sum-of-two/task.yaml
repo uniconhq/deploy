@@ -21,6 +21,13 @@ scoring:
   values:
     solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
   show:
-    now: [solved, sample, all, samples/, log]
-    after_close: [tests/]
+    always:
+      values: [solved]
+      outputs: [log, compiled]
+      runs:
+        - {of: sample, fields: [input, answer, verdict, passed, score, time_ms, memory_kb, label, message]}
+        - {of: all, fields: [verdict, passed, score, time_ms, memory_kb, label, message]}
+    after_deadline:
+      runs:
+        - {of: all, fields: [input, answer]}
 submissions: {rate: {count: 10, per: 60}}

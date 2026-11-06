@@ -12,7 +12,11 @@ version's files are asked for at
 `workflows/<owner>/<name>/versions/<version>/<path>`, the version's own name,
 and the forge names each in the workflow's repository at the commit that
 name stands at, and a workflow draft's at
-`workflows/<owner>/<name>/draft/<path>`, at the draft's head. No kind's
+`workflows/<owner>/<name>/draft/<path>`, at the draft's head. A file of an
+input a task's `show` shows is asked for at `inputs/<name>`, or a run's at
+`runs/<group>/<place>/inputs/<name>`, after a submission's number for a run
+its result shows, a folder's file at its path after either, and the forge
+names each in the task's own repository at a commit. No kind's
 patterns take another's addresses. Everything else
 the locations do is written once, in `download.conf`, which compose mounts
 where they include it.
@@ -44,6 +48,7 @@ def _location() -> re.Pattern[str]:
         if "/versions/" not in pattern
         and "/entrants/" not in pattern
         and "/workflows/" not in pattern
+        and "/inputs/" not in pattern
     ]
     assert len(found) == 1, found
     return re.compile(found[0])
@@ -78,6 +83,24 @@ def _workflow_location() -> re.Pattern[str]:
 
 def _draft_location() -> re.Pattern[str]:
     found = [pattern for pattern in _locations() if "/draft" in pattern]
+    assert len(found) == 1, found
+    return re.compile(found[0])
+
+
+def _setting_location() -> re.Pattern[str]:
+    """A file of a setting a task shows."""
+    found = [
+        pattern
+        for pattern in _locations()
+        if "/inputs/" in pattern and "runs" not in pattern
+    ]
+    assert len(found) == 1, found
+    return re.compile(found[0])
+
+
+def _run_input_location() -> re.Pattern[str]:
+    """A file of a run's input a task's page or a result shows."""
+    found = [pattern for pattern in _locations() if "runs/" in pattern]
     assert len(found) == 1, found
     return re.compile(found[0])
 
@@ -314,6 +337,68 @@ def test_nothing_but_a_file_of_a_draft_is_asked_at_the_drafts_door(asked: str) -
     assert not _draft_location().match(asked), asked
 
 
+@pytest.mark.parametrize(
+    ("asked", "location"),
+    [
+        ("/-/downloads/acme/spring/sum/inputs/header", "setting"),
+        ("/-/downloads/acme/spring/sum/inputs/checker/src/a%20b.py", "setting"),
+        ("/-/downloads/acme/spring/sum/runs/sample/2/inputs/input", "run"),
+        ("/-/downloads/acme/spring/sum/runs/all/1/inputs/tests/1/there.in", "run"),
+        ("/-/downloads/acme/spring/sum/3/runs/first_not_passed/1/inputs/input", "run"),
+        ("/-/downloads/acme/spring/sum/3/runs/all/12/inputs/cases/a.in", "run"),
+    ],
+)
+def test_every_file_of_a_shown_input_is_a_task_file_at_a_commit(
+    asked: str, location: str
+) -> None:
+    own = _setting_location() if location == "setting" else _run_input_location()
+    other = _run_input_location() if location == "setting" else _setting_location()
+    door = f"/api/v1/repos/k1/spring.sum.task/media/tests/1.in?ref={SHA}"
+
+    assert own.match(asked), asked
+    assert not other.match(asked), asked
+    assert not any(
+        each.match(asked)
+        for each in (
+            _location(),
+            _staff_location(),
+            _task_location(),
+            _workflow_location(),
+            _draft_location(),
+        )
+    ), asked
+    assert _task_map().match(door), door
+    assert "proxy_pass $forgejo$task_file_target;" in _location_body(own.pattern)
+
+
+@pytest.mark.parametrize(
+    "asked",
+    [
+        "/-/downloads/acme/spring/sum/inputs",
+        "/-/downloads/acme/spring/sum/inputs/",
+        "/-/downloads/acme/spring/sum/inputs/header/",
+        "/-/downloads/acme/spring/sum/runs/all/inputs/input",
+        "/-/downloads/acme/spring/sum/runs/all/x/inputs/input",
+        "/-/downloads/acme/spring/sum/runs/all/1/input",
+        "/-/downloads/acme/spring/sum/x/runs/all/1/inputs/input",
+        "/-/downloads/acme/spring/inputs/header",
+    ],
+    ids=[
+        "no name",
+        "an empty name",
+        "an empty path",
+        "no place",
+        "a place that is no number",
+        "not the word",
+        "a number that is not one",
+        "no task",
+    ],
+)
+def test_nothing_but_a_shown_inputs_file_is_asked_at_its_door(asked: str) -> None:
+    assert not _setting_location().match(asked), asked
+    assert not _run_input_location().match(asked), asked
+
+
 def test_neither_kind_of_address_is_taken_by_the_others_location() -> None:
     submitted = [
         "/-/downloads/acme/spring/sum/3/files/submission/main.py",
@@ -394,7 +479,15 @@ def _directives(text: str) -> set[str]:
 @pytest.mark.parametrize(
     "pattern",
     _locations(),
-    ids=["submission", "staff file", "task file", "workflow file", "draft file"],
+    ids=[
+        "submission",
+        "staff file",
+        "task file",
+        "workflow file",
+        "draft file",
+        "shown setting",
+        "shown run input",
+    ],
 )
 def test_every_download_location_shares_one_file_of_directives(pattern: str) -> None:
     body = _location_body(pattern)
