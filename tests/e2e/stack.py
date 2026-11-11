@@ -293,7 +293,7 @@ def open_contest(page: Page, org: str, contest: str) -> None:
     dialog = page.get_by_role("dialog", name="Open the contest?")
     dialog.get_by_role("button", name="Open the contest").click()
     expect(dialog).to_be_hidden(timeout=CREATE_TIMEOUT_MS)
-    expect(status.get_by_text("Live", exact=True)).to_be_visible()
+    expect(page.get_by_role("timer", name="Contest status")).to_contain_text("Live")
 
 
 def task_timeline(

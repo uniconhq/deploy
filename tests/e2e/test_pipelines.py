@@ -201,7 +201,7 @@ def _workflow(organiser: Caller, org: str, name: str, files: dict[str, str]) -> 
 
 
 def _publish(organiser: Caller, path: str, files: dict[str, str], version: str) -> None:
-    draft = organiser.get(path)["draft"]
+    draft = organiser.get(f"{path}/draft")
     changes = [
         {
             "path": name,

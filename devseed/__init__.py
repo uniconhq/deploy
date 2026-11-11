@@ -270,7 +270,7 @@ def save_draft(
 ) -> None:
     """Save the folder's files over the draft, `workflow.yaml` as its
     definition, and each of `uploads` by its upload."""
-    draft = maker.get(path)["draft"]
+    draft = maker.get(f"{path}/draft")
     changes: list[dict[str, Any]] = [
         {
             "path": name,
@@ -290,16 +290,14 @@ def save_draft(
         for name, id_ in uploads.items()
     ]
     definition = folder / WORKFLOW_FILE
-    content = (
-        definition.read_text(encoding="utf-8")
-        if definition.exists()
-        else draft["content"]
-    )
-    maker.send(
-        "PUT",
-        f"{path}/draft",
-        {"content": content, "token": draft["token"], "changes": changes},
-    )
+    body: dict[str, Any] = {"token": draft["token"], "changes": changes}
+    if definition.exists():
+        body["content"] = definition.read_text(encoding="utf-8")
+    elif draft["content"] is not None:
+        body["content"] = draft["content"]
+    else:
+        body["values"] = draft["values"]
+    maker.send("PUT", f"{path}/draft", body)
 
 
 def upload(maker: api.Caller, path: str, name: str, content: bytes) -> str:
