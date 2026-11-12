@@ -1,0 +1,29 @@
+# judgekit/compare@v1: judge one output against the task's answer file,
+# word by word, with the compare program beside this file.
+description: >-
+  Compares an entrant's output with the task's answer file, word by word.
+  Both are split into words on spaces, tabs and new lines, so extra
+  spaces, blank lines and a missing last new line do not matter, but
+  every word must match exactly, letter case included. When every word
+  matches, the output is taken and scores 1. Otherwise it is not taken,
+  and its message says which word was the first to differ, or that the
+  output has too few or too many words, without showing the answer.
+inputs:
+  output: {type: file, title: Entrant's output}
+  answer: {type: file, title: Answer file}
+
+steps:
+  - id: compare
+    use: unicon/exec@v4
+    with:
+      source: ${{ workflow.compare/ }}
+      language: python
+      manifest: ${{ workflow.program.yaml }}
+      time_limit: 5
+      memory_limit: 256
+      files:
+        output: ${{ inputs.output }}
+        answer: ${{ inputs.answer }}
+
+outputs:
+  score: {from: "${{ steps.compare.score }}", title: Score}

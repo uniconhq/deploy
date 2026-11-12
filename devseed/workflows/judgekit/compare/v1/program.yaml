@@ -1,0 +1,4 @@
+# What judgekit/compare@v1's compare program reports: score 1 for an output
+# that matches, with verdict 0 for one it takes and 1 for one it does not.
+reports:
+  score: {better: higher, at_least: 0, at_most: 1}

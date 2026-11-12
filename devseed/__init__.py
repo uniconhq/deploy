@@ -17,6 +17,10 @@ The workflows use each other's versions as steps:
   `unicon/exec@v4`;
 - `judgekit/special@v1`, a run judged by a checker: the solution run by
   `unicon/exec@v4`, and `judgekit/check@v1` as a box;
+- `judgekit/compare@v1`, an output matched word by word with the answer
+  file by a compare program of its own, run by `unicon/exec@v4`;
+- `alice/two-sum@v1`, alice's own: the solution run by `unicon/exec@v4`,
+  and `judgekit/compare@v1` as a box;
 - `riverside/standard@v1`, private to the club: `unicon/classic@v6`
   under the club's limits;
 - `riverside/coins@v1`, private to the club: the solution run by
@@ -40,7 +44,8 @@ Three contests, all riverside's:
   in public, and an announcement.
 - Summer Relay 2026, running: Closest Pair on judgekit/special@v1, whose
   checker gives part of a test's points to a pair that is close but not
-  closest, Round Trip on dan/round-trip@v1, and four sums on
+  closest, Two Sum on alice/two-sum@v1, where erin's solution misses a
+  pair of equal numbers, Round Trip on dan/round-trip@v1, and four sums on
   unicon/classic@v6, each naming its toolchain or its packages: Array Sum
   with numpy, Java Sum on Java 25, Kotlin Sum with JUnit 5 from Maven
   Central and TypeScript Sum with chai from npm. A relay points board, two
@@ -122,6 +127,8 @@ def fewest_coins() -> bytes:
 WORKFLOWS = (
     Workflow("dan", KIT, "check", visibility="public"),
     Workflow("dan", KIT, "special", visibility="public"),
+    Workflow("dan", KIT, "compare", visibility="public"),
+    Workflow("alice", "alice", "two-sum"),
     Workflow("alice", CLUB, "standard"),
     Workflow("alice", CLUB, "coins", made={"data/fewest.bin": fewest_coins}),
     Workflow("dan", "dan", "round-trip", visibility="shared", readers=("alice",)),

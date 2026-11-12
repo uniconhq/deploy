@@ -1,0 +1,33 @@
+# alice/two-sum@v1: one run of a Two Sum solution on one test, judged by
+# judgekit/compare@v1.
+description: >-
+  Runs the entrant's solution on the test's input under the task's limits,
+  then judgekit/compare@v1 compares what it printed with the answer file,
+  word by word.
+inputs:
+  code: {type: file, title: Solution}
+  language: {type: enum, options: [c, cpp, java, kotlin, python, javascript, typescript, csharp, rust, r, ruby], title: Language}
+  input: {type: file, title: Test input}
+  answer: {type: file, title: Answer file}
+  time_limit: {type: number, title: Time limit, unit: seconds}
+  memory_limit: {type: number, title: Memory limit, unit: MB}
+
+steps:
+  - id: solution
+    use: unicon/exec@v4
+    with:
+      source: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+      stdin: ${{ inputs.input }}
+      time_limit: ${{ inputs.time_limit }}
+      memory_limit: ${{ inputs.memory_limit }}
+  - id: compare
+    use: judgekit/compare@v1
+    with:
+      output: ${{ steps.solution.output }}
+      answer: ${{ inputs.answer }}
+
+outputs:
+  score: ${{ steps.compare.score }}
+  time_ms: {from: "${{ steps.solution.time_ms }}", title: Run time, unit: ms}
+  log: {from: "${{ steps.solution.log }}", title: Compile log}

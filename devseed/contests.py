@@ -19,6 +19,7 @@ AUTUMN = "autumn-open-2026"
 SPRING_TASKS = ("sum-of-two", "islands", "making-change", "guess-the-number")
 RELAY_TASKS = (
     "pairs",
+    "two-sum",
     "round-trip",
     "array-sum",
     "java-sum",
@@ -34,6 +35,7 @@ SHORT = {
     "making-change": "change",
     "guess-the-number": "guess",
     "pairs": "pairs",
+    "two-sum": "twosum",
     "round-trip": "trip",
     "array-sum": "arrays",
     "java-sum": "java",
@@ -105,7 +107,7 @@ def relay(state: str, start: datetime, end: datetime) -> str:
         {
             "name": "Summer Relay 2026",
             "description": (
-                "Two weeks, six problems, teams of up to two. Any member may "
+                "Two weeks, seven problems, teams of up to two. Any member may "
                 "submit for the team."
             ),
             "start": at(start),
@@ -121,6 +123,7 @@ def relay(state: str, start: datetime, end: datetime) -> str:
                     **points(
                         {
                             "pairs_points": best("pairs", "points"),
+                            "twosum_points": best("two-sum", "points"),
                             "trip_points": best("round-trip", "points"),
                             "arrays_points": best("array-sum", "points"),
                         }
