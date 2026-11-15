@@ -10,14 +10,12 @@ inputs:
   memory_limit: 256
   judge_time_limit: 3
   judge_memory_limit: 256
-repeat:
-  - inputs: [input]
-    tuples:
-      - {input: samples/1.in, title: Sample}
-      - tests/1.in
-      - tests/2.in
-      - tests/3.in
-      - {input: tests/4.in, title: The largest}
+tests:
+  - {input: samples/1.in}
+  - {input: tests/1.in}
+  - {input: tests/2.in}
+  - {input: tests/3.in}
+  - {input: tests/4.in}
 scoring:
   groups:
     sample: {input: [samples/1.in]}

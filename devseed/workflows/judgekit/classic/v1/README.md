@@ -4,7 +4,7 @@ One run of an entrant's program on one input. `request.yaml` compiles and
 runs the entrant's code with `unicon/exec@v4` on the run's `input` under
 the task's limits, and compiles and runs `diff/diff.py` with exec, given
 `diff/program.yaml` as its manifest and the program's output and the run's
-`answer` as named files. A task repeats it over its tests with `repeat`.
+`answer` as named files. A task runs it once per row of its `tests` table.
 Each step compiles its source once, before any run, from the machine's
 cache when it can; the save checks that `diff/` compiles.
 

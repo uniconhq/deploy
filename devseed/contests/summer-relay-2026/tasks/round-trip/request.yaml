@@ -5,13 +5,11 @@ inputs:
   language: {entrant: {options: [python, cpp], default: python}}
   time_limit: 1
   memory_limit: 256
-repeat:
-  - inputs: [there, there_answer, back, back_answer]
-    tuples:
-      - {there: tests/1/there.in, there_answer: tests/1/there.ans, back: tests/1/back.in, back_answer: tests/1/back.ans, title: Sample}
-      - [tests/2/there.in, tests/2/there.ans, tests/2/back.in, tests/2/back.ans]
-      - [tests/3/there.in, tests/3/there.ans, tests/3/back.in, tests/3/back.ans]
-      - {there: tests/4/there.in, there_answer: tests/4/there.ans, back: tests/4/back.in, back_answer: tests/4/back.ans, title: Round the end}
+tests:
+  - {there: tests/1/there.in, there_answer: tests/1/there.ans, back: tests/1/back.in, back_answer: tests/1/back.ans}
+  - {there: tests/2/there.in, there_answer: tests/2/there.ans, back: tests/2/back.in, back_answer: tests/2/back.ans}
+  - {there: tests/3/there.in, there_answer: tests/3/there.ans, back: tests/3/back.in, back_answer: tests/3/back.ans}
+  - {there: tests/4/there.in, there_answer: tests/4/there.ans, back: tests/4/back.in, back_answer: tests/4/back.ans}
 scoring:
   groups:
     sample: {there: [tests/1/there.in]}

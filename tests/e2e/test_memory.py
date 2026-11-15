@@ -91,13 +91,11 @@ inputs:
   language: c
   time_limit: 5
   memory_limit: 64
-repeat:
-  - inputs: [input, answer]
-    tuples:
-      - [tests/1.in, tests/1.ans]
-      - [tests/2.in, tests/2.ans]
-      - [tests/3.in, tests/3.ans]
-      - [tests/4.in, tests/4.ans]
+tests:
+  - {input: tests/1.in, answer: tests/1.ans}
+  - {input: tests/2.in, answer: tests/2.ans}
+  - {input: tests/3.in, answer: tests/3.ans}
+  - {input: tests/4.in, answer: tests/4.ans}
 scoring:
   values:
     passed: {block: sum, over: {runs: all}, of: {run: [all, passed]}}
@@ -147,7 +145,7 @@ def test_a_run_over_its_memory_ends_alone(browser: Browser) -> None:
         return None if found is None else str(found)
 
     ended = {
-        run["tuples"][0]["key"]["input"]["file"]: (run["verdict"], score_of(run))
+        run["key"]["input"]["file"]: (run["verdict"], score_of(run))
         for run in grading["runs"]
     }
     assert ended == {

@@ -7,14 +7,12 @@ inputs:
   language: {entrant: {options: [python, cpp], default: python}}
   time_limit: 1
   memory_limit: 256
-repeat:
-  - inputs: [input, answer]
-    tuples:
-      - {input: samples/1.in, answer: samples/1.ans, title: Sample}
-      - [tests/1.in, tests/1.ans]
-      - [tests/2.in, tests/2.ans]
-      - {input: tests/3.in, answer: tests/3.ans, title: Both at the bound}
-      - [tests/4.in, tests/4.ans]
+tests:
+  - {input: samples/1.in, answer: samples/1.ans}
+  - {input: tests/1.in, answer: tests/1.ans}
+  - {input: tests/2.in, answer: tests/2.ans}
+  - {input: tests/3.in, answer: tests/3.ans}
+  - {input: tests/4.in, answer: tests/4.ans}
 scoring:
   groups:
     sample: {input: [samples/1.in]}

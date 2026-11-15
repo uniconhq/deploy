@@ -57,11 +57,9 @@ inputs:
   language: cpp
   time_limit: 1
   memory_limit: 256
-repeat:
-  - inputs: [input, answer]
-    tuples:
-      - [tests/1.in, tests/1.ans]
-      - [tests/2.in, tests/2.ans]
+tests:
+  - {input: tests/1.in, answer: tests/1.ans}
+  - {input: tests/2.in, answer: tests/2.ans}
 scoring:
   values:
     passed: {block: sum, over: {runs: all}, of: {run: [all, passed]}}

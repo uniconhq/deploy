@@ -3,14 +3,12 @@ workflow: riverside/standard@v1
 inputs:
   code: {entrant: {label: Your solution, max_size: 1MB}}
   language: {entrant: {options: [python, cpp], default: python}}
-repeat:
-  - inputs: [input, answer]
-    tuples:
-      - {input: samples/1.in, answer: samples/1.ans, title: Sample}
-      - {input: tests/1.in, answer: tests/1.ans, title: Small}
-      - {input: tests/2.in, answer: tests/2.ans, title: Medium}
-      - {input: tests/3.in, answer: tests/3.ans, title: One long island}
-      - {input: tests/4.in, answer: tests/4.ans, title: Large}
+tests:
+  - {input: samples/1.in, answer: samples/1.ans}
+  - {input: tests/1.in, answer: tests/1.ans}
+  - {input: tests/2.in, answer: tests/2.ans}
+  - {input: tests/3.in, answer: tests/3.ans}
+  - {input: tests/4.in, answer: tests/4.ans}
 scoring:
   groups:
     sample: {input: [samples/1.in]}
