@@ -31,7 +31,7 @@ inputs:
   language: {entrant: {label: Language, options: [python]}}
   time_limit: 2
   memory_limit: 256
-tests:
+runs:
   - {input: 1.in, answer: 1.ans}
 scoring:
   values:

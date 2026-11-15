@@ -10,7 +10,7 @@ inputs:
   memory_limit: 256
   judge_time_limit: 3
   judge_memory_limit: 256
-tests:
+runs:
   - {input: samples/1.in}
   - {input: tests/1.in}
   - {input: tests/2.in}

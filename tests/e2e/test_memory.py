@@ -91,7 +91,7 @@ inputs:
   language: c
   time_limit: 5
   memory_limit: 64
-tests:
+runs:
   - {input: tests/1.in, answer: tests/1.ans}
   - {input: tests/2.in, answer: tests/2.ans}
   - {input: tests/3.in, answer: tests/3.ans}

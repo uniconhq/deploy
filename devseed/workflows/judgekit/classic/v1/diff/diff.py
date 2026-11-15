@@ -1,6 +1,6 @@
 """The classic workflow's diff script: does a run's output match the answer?
 
-exec runs it with the run's `output` and the test's `answer` placed in its
+exec runs it with the run's `output` and the run's `answer` placed in its
 working directory, and `program.yaml` beside this file as its manifest. It
 reports through the folder exec names in `UNICON_REPORT`: `verdict` 0 and
 `score` 1 when the two match, and `verdict` 1 when they do not, so a wrong

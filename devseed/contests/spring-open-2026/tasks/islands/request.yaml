@@ -3,7 +3,7 @@ workflow: riverside/standard@v1
 inputs:
   code: {entrant: {label: Your solution, max_size: 1MB}}
   language: {entrant: {options: [python, cpp], default: python}}
-tests:
+runs:
   - {input: samples/1.in, answer: samples/1.ans}
   - {input: tests/1.in, answer: tests/1.ans}
   - {input: tests/2.in, answer: tests/2.ans}

@@ -5,7 +5,7 @@ inputs:
   language: {entrant: {options: [python, cpp, java], default: python}}
   time_limit: 2
   memory_limit: 256
-tests:
+runs:
   - {input: samples/1.in}
   - {input: tests/1.in}
   - {input: tests/2.in}

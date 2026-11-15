@@ -57,7 +57,7 @@ inputs:
   language: cpp
   time_limit: 1
   memory_limit: 256
-tests:
+runs:
   - {input: tests/1.in, answer: tests/1.ans}
   - {input: tests/2.in, answer: tests/2.ans}
 scoring:

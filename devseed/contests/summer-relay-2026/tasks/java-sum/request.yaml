@@ -7,7 +7,7 @@ inputs:
   language: {entrant: {options: [java], default: java}}
   time_limit: 2
   memory_limit: 256
-tests:
+runs:
   - {input: tests/1.in, answer: tests/1.ans}
 scoring:
   values:
