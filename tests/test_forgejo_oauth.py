@@ -163,8 +163,8 @@ def test_applications_with_another_name_are_left_alone(forge: FakeForge) -> None
     forge.existing = [
         {
             "id": 7,
-            "name": "Woodpecker",
-            "client_id": "woodpeckers-own",
+            "name": "Other",
+            "client_id": "others-own",
             "redirect_uris": ["http://localhost:8000/authorize"],
         }
     ]

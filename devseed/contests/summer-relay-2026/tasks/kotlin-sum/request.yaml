@@ -1,5 +1,5 @@
 name: Kotlin Sum
-workflow: unicon/classic@v6
+workflow: judgekit/classic@v1
 environment:
   kotlin:
     packages: ["org.junit.jupiter:junit-jupiter:5.+"]

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import os
-import re
 from pathlib import Path
 
 import pytest
@@ -131,34 +130,9 @@ def test_a_key_the_template_gained_since_env_was_written_takes_its_default(
     assert _starting_values(template, {}) == {"KEPT": "from the template"}
 
 
-def test_a_rerun_drops_the_keys_nothing_reads(template: Path) -> None:
-    """An older .env that still holds a retired key, set by hand or by an
-    earlier bootstrap, loses it on the next run instead of carrying it under
-    the added-outside-the-template marker."""
-    from bootstrap.main import RETIRED, _starting_values
-
-    previous = {key: "stale" for key in RETIRED} | {"FILLED": "kept"}
-
-    values = _starting_values(template, previous)
-
-    assert values == {"FILLED": "kept", "KEPT": "from the template"}
-    assert envfile.ADDED_OUTSIDE_TEMPLATE not in envfile.render(template, values)
-
-
-def test_no_retired_key_is_in_the_template_or_the_compose_files() -> None:
-    from bootstrap.main import RETIRED
-
-    template = envfile.load(DEPLOY / ".env.example")
-    assert RETIRED.isdisjoint(template)
-    for name in ("compose.yaml", "compose.dev.yaml"):
-        text = (DEPLOY / name).read_text(encoding="utf-8")
-        read = set(re.findall(r"\$\{([A-Za-z_][A-Za-z0-9_]*)", text))
-        assert RETIRED.isdisjoint(read), name
-
-
 def test_only_the_development_overlay_lets_exec_run_under_root_docker() -> None:
     """exec runs under root Docker only where UNICON_DEV_ROOT_DOCKER is 1,
-    which the laptop's stack sets on every step and nothing else may."""
+    which the laptop's exec runner sets on every job and nothing else may."""
     assert "UNICON_DEV_ROOT_DOCKER" not in (DEPLOY / "compose.yaml").read_text(
         encoding="utf-8"
     )
@@ -168,22 +142,19 @@ def test_only_the_development_overlay_lets_exec_run_under_root_docker() -> None:
     assert "UNICON_DEV_ROOT_DOCKER" not in (
         DEPLOY / "machine" / "grading-machine.py"
     ).read_text(encoding="utf-8")
-    assert "WOODPECKER_ENVIRONMENT: UNICON_DEV_ROOT_DOCKER:1\n" in (
-        DEPLOY / "compose.dev.yaml"
-    ).read_text(encoding="utf-8")
+    assert 'UNICON_DEV_ROOT_DOCKER: "1"\n' in (DEPLOY / "compose.dev.yaml").read_text(
+        encoding="utf-8"
+    )
 
 
 def test_compose_names_what_bootstrap_makes() -> None:
     """compose.yaml writes the bucket names and the platform account into the
     backend's environment itself, so they have to be the ones bootstrap
-    makes. The backend writes one bucket: what people upload goes through the
-    upload door into the one Forgejo owns, which the backend only reads, for
-    a grading machine's downloads."""
+    makes."""
     text = (DEPLOY / "compose.yaml").read_text(encoding="utf-8")
 
     assert f"UNICON_S3_UPLOADS_BUCKET: {main.UPLOADS_BUCKET}\n" in text
     assert f"UNICON_S3_RESULTS_BUCKET: {main.RESULTS_BUCKET}\n" in text
-    assert f"UNICON_S3_LFS_BUCKET: {main.FORGEJO_LFS_BUCKET}\n" in text
     assert f"UNICON_FORGE_PLATFORM_ACCOUNT: {main.BACKEND_ACCOUNT}\n" in text
 
 

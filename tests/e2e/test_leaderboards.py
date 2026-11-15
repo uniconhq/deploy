@@ -1,15 +1,15 @@
 """Rank one contest on a leaderboard that reads a value hidden until the
 close, on the running compose stack.
 
-The organiser builds the starter task's two runs on the Runs card, and
-on the Scoring card a group for each and the values: `main_points` and
-`final_points`, 50 for a run that passes, and `total`, their sum. In the
-grid of what entrants see, Main's runs and `main_points` are shown always,
-and Final's runs, `final_points` and `total` after the deadline, which is
-the task's close; the starter's runs of all and its `score` are turned
-off. The contest's leaderboard reads `total`. Before the close an entrant
-sees a dash there, not the points so far, and staff see the number. After
-the close the entrant sees it too.
+The organiser starts the task on the org's classic as `api.SUM`, builds its
+two runs on the Runs card, and on the Scoring card a group for each and the
+values: `main_points` and `final_points`, 50 for a run that passes, and
+`total`, their sum. In the grid of what entrants see, Main's runs and
+`main_points` are shown always, and Final's runs, `final_points` and `total`
+after the deadline, which is the task's close; `SUM`'s runs of all and its
+`score` are turned off. The contest's leaderboard reads `total`. Before the
+close an entrant sees a dash there, not the points so far, and staff see the
+number. After the close the entrant sees it too.
 """
 
 from __future__ import annotations
@@ -22,6 +22,7 @@ from datetime import UTC, datetime, timedelta
 
 from playwright.sync_api import Browser, Locator, Page, expect
 
+from tests.e2e import api
 from tests.e2e.stack import (
     APP,
     CREATE_TIMEOUT_MS,
@@ -148,18 +149,26 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
     sign_in(organiser, organiser_name, organiser_password)
     create_org(organiser, org)
     create(organiser, "spring", "Create contest", "New contest")
-    create(organiser, "sum", "Create task", "New task")
+    workflow = api.publish_classic(api.Caller.of(organiser), org)
+    create(organiser, "sum", "Create task", "New task", workflow)
+    api.save_task(
+        api.Caller.of(organiser),
+        f"/orgs/{org}/contests/spring/tasks/sum",
+        f"name: sum\nworkflow: {workflow}\n{api.SUM}",
+        api.SUM_FILES,
+    )
+    reload_page(organiser)
     task_page = organiser.url
 
     runs = organiser.get_by_role("region", name="Runs")
     runs.get_by_role("textbox", name="Name of row 1").fill("Main")
     runs.get_by_role("button", name="Add a row").click()
     runs.get_by_role("textbox", name="Name of row 2").fill("Final")
-    upload_run_file(organiser, 2, "input", b"5 7\n")
-    upload_run_file(organiser, 2, "answer", b"12\n")
+    upload_run_file(organiser, 2, "input", "final.in", b"5 7\n")
+    upload_run_file(organiser, 2, "answer", "final.ans", b"12\n")
 
     scoring = organiser.get_by_role("region", name="Scoring")
-    # The starter shows every run's verdict always, Final's among them.
+    # SUM shows every run's verdict always, Final's among them.
     scoring.get_by_role("button", name="Remove the runs of all").click()
     add_group(organiser, scoring, "main_tests", ["Main"], "Always")
     add_group(organiser, scoring, "final_tests", ["Final"], "After the deadline")
@@ -207,14 +216,9 @@ def test_a_hidden_total_is_a_dash_until_the_close_and_staff_see_it(
         Name=f"Spring {stamp}",
         Start=local(now - timedelta(hours=1)),
         End=local(now + timedelta(days=2)),
+        seen="Anyone, signed in or not",
     )
     task_timeline(organiser, org, "spring", "A · sum", closes=now + timedelta(hours=2))
-    open_page(organiser, f"{APP}/orgs/{org}/contests/spring")
-    organiser.get_by_role("button", name="Change who sees it").click()
-    seen = organiser.get_by_role("dialog", name="Who sees it")
-    seen.get_by_role("radio", name="Anyone, signed in or not").check()
-    seen.get_by_role("button", name="Save").click()
-    expect(seen).to_be_hidden(timeout=CREATE_TIMEOUT_MS)
     open_contest(organiser, org, "spring")
 
     sign_in(entrant, entrant_name, entrant_password)

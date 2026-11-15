@@ -10,15 +10,47 @@ import hashlib
 import time
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 from playwright.sync_api import APIRequestContext, APIResponse, Browser, Page
+from ruamel.yaml import YAML
 
 from tests.e2e.stack import APP, VERDICT_TIMEOUT_MS, create_account, sign_in
 
 API = f"{APP}/api/v1"
 ORIGIN = {"Origin": APP}
 WHEN = "%Y-%m-%dT%H:%M:%SZ"
+REQUEST_FILE = "request.yaml"
+"""A workflow version's or a task's request, which forge builds its files from."""
+CLASSIC = Path(__file__).resolve().parents[2] / "devseed/workflows/judgekit/classic/v1"
+"""The dev seed's judgekit/classic@v1, which a test publishes in its own org."""
+SUM = """\
+inputs:
+  code: {entrant: {label: Your solution}}
+  language: {entrant: {label: Language, options: [python]}}
+  time_limit: 2
+  memory_limit: 256
+repeat:
+  - inputs: [input, answer]
+    tuples:
+      - [1.in, 1.ans]
+scoring:
+  values:
+    score:
+      block: div
+      of:
+        - {block: sum, over: {runs: all}, of: {run: [all, passed]}}
+        - {block: count, over: {runs: all}}
+  show:
+    always:
+      values: [score]
+      runs:
+        - {of: all, fields: [verdict, passed]}
+"""
+"""A task on the classic for the tests that go on to build it on its page:
+Python on one test, `1.in`, scored by the share of its tests accepted."""
+SUM_FILES = {"1.in": "1 2\n", "1.ans": "3\n"}
 
 
 def answer(response: APIResponse, what: str) -> Any:
@@ -72,8 +104,11 @@ def write_contest(organiser: Caller, contest: str, text: str) -> None:
     organiser.send("PUT", path, {"content": text, "token": token, "confirm": True})
 
 
-def save_task(organiser: Caller, task: str, files: dict[str, str]) -> None:
-    """Save every file of `files` to the task in one save, its first."""
+def save_task(
+    organiser: Caller, task: str, request: str, files: dict[str, str]
+) -> None:
+    """Save the task's `request`, given as YAML, and every file of `files`
+    in one save, its first."""
     changes = [
         {
             "path": path,
@@ -82,8 +117,16 @@ def save_task(organiser: Caller, task: str, files: dict[str, str]) -> None:
         }
         for path, text in files.items()
     ]
+    held = organiser.get(f"{task}/request")
     saved = organiser.send(
-        "POST", f"{task}/save", {"changes": changes, "confirm": True, "message": "Task"}
+        "POST",
+        f"{task}/save",
+        {
+            "changes": changes,
+            "request": {"request": request_of(request), "token": held["token"]},
+            "confirm": True,
+            "message": "Task",
+        },
     )
     if saved.get("status") == "preparing":
         deadline = time.monotonic() + 16 * 60
@@ -98,6 +141,66 @@ def save_task(organiser: Caller, task: str, files: dict[str, str]) -> None:
             )
             time.sleep(1)
     assert saved.get("number") == 1, saved
+
+
+def save_draft(maker: Caller, path: str, folder: Path, uploads: dict[str, str]) -> None:
+    """Save the folder's files over the draft, with its `request.yaml` as
+    the request, or the draft's own when it has none, and each of
+    `uploads` by its upload."""
+    draft = maker.get(f"{path}/draft")
+    changes: list[dict[str, Any]] = [
+        {
+            "path": name,
+            "token": token_of(maker, f"{path}/files/{name}"),
+            "encoding": "utf-8",
+            "content": file.read_text(encoding="utf-8"),
+        }
+        for name, file in files_of(folder).items()
+        if name != REQUEST_FILE
+    ]
+    changes += [
+        {
+            "path": name,
+            "token": token_of(maker, f"{path}/files/{name}"),
+            "upload": id_,
+        }
+        for name, id_ in uploads.items()
+    ]
+    request = folder / REQUEST_FILE
+    maker.send(
+        "PUT",
+        f"{path}/draft",
+        {
+            "request": request_of(request.read_text(encoding="utf-8"))
+            if request.exists()
+            else draft["request"],
+            "token": draft["token"],
+            "changes": changes,
+        },
+    )
+
+
+def files_of(folder: Path) -> dict[str, Path]:
+    """Every file under `folder`, by its path from there."""
+    return {
+        file.relative_to(folder).as_posix(): file
+        for file in sorted(folder.rglob("*"))
+        if file.is_file() and "__pycache__" not in file.parts
+    }
+
+
+def publish_classic(organiser: Caller, org: str) -> str:
+    """Publish `CLASSIC` as `org`'s `classic` v1; the name a task uses it by."""
+    path = f"/workflows/{org}/classic"
+    organiser.send("POST", "/workflows", {"owner": org, "name": "classic"})
+    save_draft(organiser, path, CLASSIC, {})
+    organiser.send("POST", f"{path}/versions", {"version": "v1"})
+    return f"{org}/classic@v1"
+
+
+def request_of(text: str) -> Any:
+    """A request written as YAML, as the JSON the editor routes take."""
+    return YAML(typ="safe").load(text)
 
 
 def open_once_published(organiser: Caller, contest: str, text: str) -> None:

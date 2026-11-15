@@ -1,11 +1,10 @@
-name: Array Sum
-workflow: unicon/classic@v6
+name: Java Sum
+workflow: judgekit/classic@v1
 environment:
-  python:
-    packages: [numpy>=2.3]
+  java: {version: "25"}
 inputs:
   code: entrant
-  language: {entrant: {options: [python], default: python}}
+  language: {entrant: {options: [java], default: java}}
   time_limit: 2
   memory_limit: 256
 repeat:

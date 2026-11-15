@@ -1,6 +1,6 @@
-# unicon/interactive@v4
+# judgekit/interactive@v1
 
-One run of an entrant's program against the task's judge. `workflow.yaml`
+One run of an entrant's program against the task's judge. `request.yaml`
 compiles both and runs them side by side with `unicon/exec@v4`'s programs
 form, the entrant's output the judge's input and the judge's the
 entrant's, and then compiles and runs `verdict/verdict.py` with

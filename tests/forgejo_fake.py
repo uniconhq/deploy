@@ -5,8 +5,10 @@ commits as whole file trees, its default branch, its tags and its topics.
 It stands in for Compose, the way bootstrap reaches Forgejo: its exec reads
 the curl configuration bootstrap wrote to standard input and answers with a
 body and a status the way curl's write-out prints them. Every request is kept,
-so a test can say which calls a run made and with what. A write the real
-Forgejo would refuse, such as an update naming the wrong blob, fails the test.
+so a test can say which calls a run made and with what; a push of
+Forgejo.push_commit is kept in `pushes` and moves the repository's main. A
+write the real Forgejo would refuse, such as an update naming the wrong blob,
+fails the test.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 from bootstrap.compose import Compose
-from bootstrap.forgejo import API_INSIDE_THE_CONTAINER
+from bootstrap.forgejo import API_INSIDE_THE_CONTAINER, GIT_INSIDE_THE_CONTAINER
 from bootstrap.platform_repos import blob_id
 
 ABSENT = (404, {"message": "not found"})
@@ -38,6 +40,7 @@ def read_config(stdin: str) -> dict[str, list[str]]:
 @dataclass
 class FakeRepo:
     private: bool = False
+    has_actions: bool = True
     description: str = ""
     default_branch: str = "main"
     commits: dict[str, dict[str, bytes]] = field(default_factory=dict)
@@ -62,11 +65,13 @@ class FakeForgejo(Compose):
     def __init__(self) -> None:
         super().__init__(Path("."), [])
         self.orgs: set[str] = set()
+        self.visibility: dict[str, str] = {}
         self.repos: dict[str, FakeRepo] = {}
         self.requests: list[tuple[str, str]] = []
         self.bodies: list[tuple[str, str, Any]] = []
         self.configs: list[dict[str, list[str]]] = []
         self.refusal: int | None = None
+        self.pushes: list[tuple[tuple[str, ...], str | None]] = []
 
     def seed(
         self,
@@ -104,6 +109,14 @@ class FakeForgejo(Compose):
         user: str | None = None,
         stdin: str | None = None,
     ) -> str:
+        if arguments[0] == "sh":
+            # push_commit: the commit lands on the repository's main.
+            self.pushes.append((arguments, stdin))
+            commit, target = arguments[-2:]
+            repo = self.repos[target.removeprefix(f"{GIT_INSIDE_THE_CONTAINER}/")[:-4]]
+            repo.commits[commit] = {}
+            repo.head = commit
+            return ""
         assert arguments == ("curl", "--config", "-")
         assert stdin is not None
         config = read_config(stdin)
@@ -135,6 +148,7 @@ class FakeForgejo(Compose):
     def _orgs(self, method: str, rest: list[str], body: Any) -> tuple[int, Any]:
         if method == "POST" and not rest:
             self.orgs.add(body["username"])
+            self.visibility[body["username"]] = body["visibility"]
             return 201, {"username": body["username"]}
         if method == "GET" and len(rest) == 1:
             return (200, {"username": rest[0]}) if rest[0] in self.orgs else ABSENT
@@ -157,12 +171,18 @@ class FakeForgejo(Compose):
     ) -> tuple[int, Any]:
         route = (method, rest[0] if rest else "")
         if route == ("GET", ""):
-            return 200, {"private": repo.private, "description": repo.description}
+            return 200, {
+                "private": repo.private,
+                "description": repo.description,
+                "has_actions": repo.has_actions,
+            }
         if route == ("PATCH", ""):
             if "description" in body:
                 repo.description = body["description"]
             if "private" in body:
                 repo.private = body["private"]
+            if "has_actions" in body:
+                repo.has_actions = body["has_actions"]
             return 200, {"description": repo.description, "private": repo.private}
         if route == ("GET", "branches"):
             if repo.head is None or rest[1] != repo.default_branch:

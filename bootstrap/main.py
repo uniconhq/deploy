@@ -2,59 +2,42 @@
 
 Garage first, because Forgejo needs an S3 key in its environment before it
 starts or it would store the first LFS objects on local disk and only move to
-Garage after a restart. Forgejo next, because Woodpecker will not start without
-the OAuth client that only a Forgejo administrator can create. The proxy next,
-because Forgejo's sign-in pages are reached through it, and minting the
-Woodpecker token signs in there. Woodpecker last.
+Garage after a restart. Forgejo next, then the proxy, because Forgejo's
+sign-in pages are reached through it.
 
 Every step checks before it creates, and .env is rewritten after each one, so an
 interrupted run can be resumed by running it again.
 
-After the accounts and the OAuth applications, the forge is seeded with the
-platform org and what is in it: the primitives, each version the image
-manifest lists mirrored from its repository with the manifest's image digest
-written in (primitives.py, images.py), and the built-in workflows,
-unicon/classic and unicon/interactive, at each of their versions, which
-wire them together (workflows.py). A task's first save has to find a
-workflow and its primitives the organiser can read, or nothing can be
-published, so a workflow version
-that uses a primitive version the manifest does not pin is refused before
-anything is written. Every version goes to its own tag, and a tag already at
-the forge is never edited, save a primitive version whose image alone
-differs, which moves to the new image: every version is compared with the
-forge before any is seeded, and one that differs otherwise stops the run
-there, naming each. The manifest also gives Woodpecker's git plugin, which
-every pipeline checks a submission out with and the CI lends a repository's
-credential to, and, when it pins it, the step wrapper's base image, which go
-into .env for the services that hand them on. The images of every version
-of `exec` at the forge go into .env too, as the plugins Woodpecker lets run
-privileged, since those steps make boxes of their own. So do the grading
+After the accounts and the OAuth application, and before the proxy lets
+anyone sign up, the orgs `actions` and `forgejo` get the copies of the
+actions every job uses, each `main` at its pin (actions.py). Then the forge
+is seeded with the platform org and what is in it: the primitives, each
+version the image manifest lists mirrored from its repository with the
+manifest's image digest written in (primitives.py, images.py). The platform
+makes no workflows: an organiser picks or makes one for each task, and a
+development stack's seed makes its own through the API (devseed). Every
+primitive version goes to its own tag, and a tag already at the forge is
+never edited, save one whose image alone differs, which moves to the new
+image: every version is compared with the forge before any is seeded, and
+one that differs otherwise stops the run there, naming each. The grading
 machines' slot sizes, from machine/slots.json, the one table of them, which
-a machine's setup reads too: the forge plans each run task pipeline into
-one of them.
+a machine's setup reads too, go into .env: the forge plans each exec job
+into one of them.
 
 On a development stack, the one whose compose files include compose.dev.yaml,
-bootstrap also enrols the one CI agent that overlay can run and writes its
-token to .env, and deletes any other agent that would take a grading run and
-has gone silent. Only there does --rewrite rewrite the built-in versions in
-place instead of leaving them.
+bootstrap also registers the two runners that overlay runs at Forgejo,
+writes their ids, tokens and labels to .env, each label naming the step
+helper by its digest in the manifest, and brings them up to it. Only there
+does --rewrite rewrite the primitive versions in place instead of leaving
+them.
 
-Two Garage buckets and no other: FORGEJO_LFS_BUCKET for Forgejo, which holds
-every file a person uploads, and RESULTS_BUCKET for the backend, which holds
-the grading logs. Nothing a browser sends goes into a bucket the platform
-signs for: it goes through the upload door into Forgejo's own.
+Garage holds Forgejo's bucket, FORGEJO_LFS_BUCKET, with every file a person
+uploads, and the backend's two, UNICON_BUCKETS. Nothing a browser sends
+goes into a bucket the platform signs for: it goes through the upload door
+into Forgejo's own.
 
 GENERATORS lists every key .env holds that is generated here rather than
 discovered from a service. A key already carrying a value is left alone.
-
-RETIRED lists keys an older .env may hold that nothing reads: the addresses
-of the services on the compose network, the bucket names, the platform
-account and the database URL, which compose.yaml writes itself, the
-settings whose value the backend works out on its own, and what the grading
-of test by test ran on: the harness, clone and socket filter images, the
-filter's list and the group it joined, and the clone images the CI trusted,
-now Woodpecker's git plugin alone. A run drops them rather than carrying
-them across, so nothing in .env looks like a setting that is not one.
 
 UNLOCKS names, for each generated secret that data on disk depends on, the
 volume that data lives in: Forgejo's four secrets decrypt and sign what is in
@@ -64,8 +47,8 @@ formed with. A run that finds one of those keys missing while its volume is
 still on the machine stops, because a fresh value would not be a fresh start:
 it would leave data nothing can read. The other generated values are
 re-applied on every run or only invalidate what can be made again, so a
-missing one is simply generated. Volume names are the compose project name
-from compose.yaml, then the volume name.
+missing one is simply generated. Volume names are the compose project's
+name, then the volume name.
 """
 
 from __future__ import annotations
@@ -79,73 +62,35 @@ from urllib.parse import urlparse
 import httpx
 
 from bootstrap import (
+    actions,
     envfile,
     images,
     postgres,
     primitives,
+    runners,
     secret_values,
-    workflow_description,
-    workflows,
 )
 from bootstrap.compose import Compose, ComposeFailed
 from bootstrap.forgejo import Forgejo, ForgejoError, OAuthApplication
 from bootstrap.garage import Garage, GarageError
 from bootstrap.images import Manifest
-from bootstrap.platform_repos import (
-    PLATFORM_ORG,
-    Outcome,
-    PlatformRepos,
-    Standing,
-    move,
-    publish,
-    standing,
-)
+from bootstrap.platform_repos import PLATFORM_ORG, Outcome, PlatformRepos, Standing
 from bootstrap.readiness import NotReady, wait_for
 from bootstrap.summary import Summary
-from bootstrap.woodpecker import Woodpecker, WoodpeckerError
 
 BACKEND_ACCOUNT = "unicon-backend"
-CI_ACCOUNT = "unicon-ci"
 
 FORGEJO_LFS_BUCKET = "forgejo-lfs"
-LFS_READ_KEY = "unicon-backend-lfs-read"
 RESULTS_BUCKET = "unicon-results"
 UPLOADS_BUCKET = "unicon-uploads"
 UNICON_BUCKETS = (RESULTS_BUCKET, UPLOADS_BUCKET)
 
-COMPOSE_PROJECT = "unicon"
 DEVELOPMENT_OVERLAY = "compose.dev.yaml"
-DEV_AGENT = "laptop"
-GRADING_LABEL = ("pool", "platform")
 SLOT_TABLE = Path("machine") / "slots.json"
 LIVE_STREAMS_CEILING = 65535
 """The most connections nginx's `limit_conn` takes for a cap."""
 
-GRADING_SERVICES = ("woodpecker-agent",)
-
-RETIRED = frozenset(
-    {
-        "UNICON_DATABASE_URL",
-        "UNICON_FORGE_PUBLIC_URL",
-        "UNICON_FORGE_INTERNAL_URL",
-        "UNICON_INTERNAL_URL",
-        "UNICON_FORGE_PLATFORM_ACCOUNT",
-        "UNICON_WOODPECKER_URL",
-        "UNICON_S3_ENDPOINT",
-        "UNICON_S3_REGION",
-        "UNICON_S3_UPLOADS_BUCKET",
-        "UNICON_S3_RESULTS_BUCKET",
-        "UNICON_COOKIE_SECURE",
-        "UNICON_FORGE",
-        "WOODPECKER_AGENT_SECRET",
-        "UNICON_HARNESS_IMAGE",
-        "UNICON_CLONE_IMAGE",
-        "UNICON_FILTER_IMAGE",
-        "UNICON_FILTER_IMAGES",
-        "UNICON_TRUSTED_CLONE_IMAGES",
-        "DOCKER_SOCKET_GID",
-    }
-)
+GRADING_SERVICES = ("forge-host", "runner-base", "runner-exec")
 
 UNLOCKS: dict[str, str] = {
     "FORGEJO_SECRET_KEY": "forgejo-data",
@@ -159,15 +104,12 @@ UNLOCKS: dict[str, str] = {
 GENERATORS: dict[str, Callable[[], str]] = {
     "POSTGRES_SUPERUSER_PASSWORD": secret_values.password,
     "FORGEJO_DB_PASSWORD": secret_values.password,
-    "WOODPECKER_DB_PASSWORD": secret_values.password,
     "UNICON_DB_PASSWORD": secret_values.password,
     "FORGEJO_SECRET_KEY": secret_values.forgejo_secret_key,
     "FORGEJO_INTERNAL_TOKEN": secret_values.opaque_token,
     "FORGEJO_OAUTH2_JWT_SECRET": secret_values.forgejo_jwt_secret,
     "FORGEJO_LFS_JWT_SECRET": secret_values.forgejo_jwt_secret,
     "FORGEJO_BACKEND_PASSWORD": secret_values.password,
-    "FORGEJO_CI_PASSWORD": secret_values.password,
-    "WOODPECKER_GRPC_SECRET": secret_values.opaque_token,
     "GARAGE_RPC_SECRET": secret_values.garage_rpc_secret,
     "GARAGE_ADMIN_TOKEN": secret_values.opaque_token,
     "UNICON_SESSION_SIGNING_KEY": secret_values.key_32_bytes,
@@ -178,12 +120,6 @@ GENERATORS: dict[str, Callable[[], str]] = {
 class LostEnvironment(Exception):
     """A secret is gone from .env while the volume it unlocks is still on the
     machine.
-    """
-
-
-class UnpinnedPrimitive(ValueError):
-    """A built-in workflow version uses a primitive version the image
-    manifest does not pin.
     """
 
 
@@ -207,18 +143,18 @@ def main(argv: list[str] | None = None) -> int:
         refuse_rewrite_outside_development(options.rewrite, development)
         manifest = images.load(images.choose(options.directory, options.images))
         print(f"images from {manifest.path.name}")
-        refuse_unpinned_primitives(options.directory, manifest)
 
         previous = envfile.load(env_path)
         _refuse_to_regenerate_over_existing_data(compose, env_path, previous)
         values = _starting_values(template, previous)
-        retired = sorted(RETIRED & previous.keys())
-        if retired:
-            print(f"dropped from .env, as nothing reads them: {', '.join(retired)}")
 
         _generate_missing_secrets(values, summary)
-        _derive_values(values, manifest, development=development)
+        _derive_values(values, development=development)
         values["UNICON_SLOT_SIZES"] = slot_sizes(options.directory / SLOT_TABLE)
+        if development:
+            values.update(
+                runners.labels(manifest.step_helper, options.directory / SLOT_TABLE)
+            )
         envfile.write(env_path, template, values)
 
         _start_storage(compose, values, summary)
@@ -227,16 +163,15 @@ def main(argv: list[str] | None = None) -> int:
         _start_forgejo(compose, values, summary)
         envfile.write(env_path, template, values)
 
-        _seed_platform(
-            compose, options.directory, manifest, values, summary, options.rewrite
-        )
+        _copy_actions(compose, values, summary)
+
+        _seed_platform(compose, manifest, values, summary, options.rewrite)
         envfile.write(env_path, template, values)
 
         compose.up("proxy")
-        _start_woodpecker(compose, values, summary)
         if development:
-            _enrol_dev_agent(values, summary)
-        envfile.write(env_path, template, values)
+            _register_dev_runners(compose, values, summary)
+            envfile.write(env_path, template, values)
 
         recreate_changed(compose, "backend")
         if development:
@@ -248,7 +183,6 @@ def main(argv: list[str] | None = None) -> int:
         GarageError,
         LostEnvironment,
         NotReady,
-        WoodpeckerError,
         ValueError,
         OSError,
         httpx.HTTPError,
@@ -261,7 +195,6 @@ def main(argv: list[str] | None = None) -> int:
         print(line)
     print(f"\napp      {values['UNICON_PUBLIC_URL']}")
     print(f"forgejo  {values['FORGEJO_PUBLIC_URL']}")
-    print(f"ci       {values['WOODPECKER_PUBLIC_URL']}")
     return 0
 
 
@@ -296,9 +229,9 @@ def _parse_arguments(argv: list[str] | None) -> argparse.Namespace:
         "--rewrite",
         action="store_true",
         help=(
-            "development stacks only: rewrite each version of the built-in "
-            "workflow and of each primitive in place to what is here now, "
-            "instead of stopping at a version at the forge that differs"
+            "development stacks only: rewrite each version of each primitive "
+            "in place to what is here now, instead of stopping at a version "
+            "at the forge that differs"
         ),
     )
     options = parser.parse_args(argv)
@@ -312,32 +245,6 @@ def is_development(files: list[str]) -> bool:
     is one of them.
     """
     return any(Path(file).name == DEVELOPMENT_OVERLAY for file in files)
-
-
-def refuse_unpinned_primitives(directory: Path, manifest: Manifest) -> None:
-    """Refuse a version of a built-in workflow whose steps use a primitive
-    version the manifest does not pin, since the forge would refuse every
-    task saved against that workflow version.
-    """
-    pinned = {
-        f"{PLATFORM_ORG}/{release.name}@{release.version}"
-        for release in manifest.primitives
-    }
-    unpinned = [
-        f"workflows/{name}/{version}/ uses {used}"
-        for name in workflows.seeded(directory)
-        for version, files in workflows.seed_versions(directory, name).items()
-        for used in workflows.primitives_used(files[workflows.DEFINITION])
-        if used not in pinned
-    ]
-    if unpinned:
-        raise UnpinnedPrimitive(
-            f"{manifest.path.name} does not pin every primitive version the "
-            f"built-in workflows use, so nothing is seeded: "
-            f"{'; '.join(unpinned)}. Pin each in the manifest; on a "
-            "development machine, scripts/build-images.py builds them from "
-            "the sibling checkouts into images.local.json."
-        )
 
 
 def refuse_rewrite_outside_development(rewrite: bool, development: bool) -> None:
@@ -368,15 +275,16 @@ def _refuse_to_regenerate_over_existing_data(
     lost = [key for key in UNLOCKS if not previous.get(key)]
     if not lost:
         return
+    project = compose.project()
     kept: dict[str, bool] = {}
     for key in lost:
         volume = UNLOCKS[key]
         if volume not in kept:
-            kept[volume] = compose.volume_exists(f"{COMPOSE_PROJECT}_{volume}")
+            kept[volume] = compose.volume_exists(f"{project}_{volume}")
         if kept[volume]:
             raise LostEnvironment(
                 f"{key} is missing from {env_path} but the volume "
-                f"{COMPOSE_PROJECT}_{volume} is still here. That volume holds "
+                f"{project}_{volume} is still here. That volume holds "
                 "data only that secret can read, and the secret cannot be "
                 "generated again. Either put a backed-up .env back and run "
                 "this again, or remove the stack's volumes with "
@@ -385,28 +293,25 @@ def _refuse_to_regenerate_over_existing_data(
 
 
 def _starting_values(template: Path, previous: dict[str, str]) -> dict[str, str]:
-    """Template defaults, overridden by anything a previous run already wrote,
-    except the RETIRED keys, which are dropped.
-    """
+    """Template defaults, overridden by anything a previous run already wrote."""
     values = {k: v for k, v in envfile.defaults(template).items() if v}
-    values.update({k: v for k, v in previous.items() if v and k not in RETIRED})
+    values.update({k: v for k, v in previous.items() if v})
     return values
 
 
-def _derive_values(
-    values: dict[str, str], manifest: Manifest, *, development: bool
-) -> None:
+def _derive_values(values: dict[str, str], *, development: bool) -> None:
     """Values that are a restatement of another one, recomputed every run.
 
     They are written with the generated secrets rather than at the end, so an
     interrupted run still leaves a .env the services can start from.
 
     FORGEJO_DOMAIN follows FORGEJO_PUBLIC_URL, because Forgejo puts DOMAIN in
-    clone URLs and mail, and a value set twice drifts. MAIL_ENABLED follows
-    MAIL_SMTP_ADDR, so Forgejo's mailer is on exactly when there is a server
-    to send through, and MAIL_PROTOCOL follows MAIL_SMTP_PORT, so the mail
-    is always encrypted: TLS from the start on 465, STARTTLS required on any
-    other port.
+    clone URLs and mail, and a value set twice drifts; so does
+    FORGEJO_PUBLIC_PORT, where the development stack's runners reach it.
+    MAIL_ENABLED follows MAIL_SMTP_ADDR, so Forgejo's mailer is on exactly
+    when there is a server to send through, and MAIL_PROTOCOL follows
+    MAIL_SMTP_PORT, so the mail is always encrypted: TLS from the start on
+    465, STARTTLS required on any other port.
 
     SIGN_UP_OPEN is the one switch for people making their own accounts, and
     the two settings that carry it out follow from it:
@@ -417,21 +322,19 @@ def _derive_values(
     UNICON_SESSION_HARD_TTL for the same reason: a Unicon session that
     outlives the Forgejo refresh token behind it can no longer act for the
     person, so the two are one length of time, in Forgejo's unit.
-
-    The images are the image manifest's, so none of them can be set to
-    something that is not there.
     """
     public_url = values["FORGEJO_PUBLIC_URL"]
     host = urlparse(public_url).hostname
     if not host:
         raise ValueError(f"FORGEJO_PUBLIC_URL has no host: {public_url}")
     values["FORGEJO_DOMAIN"] = host
+    values["FORGEJO_PUBLIC_PORT"] = str(
+        urlparse(public_url).port or (443 if public_url.startswith("https:") else 80)
+    )
     values["MAIL_ENABLED"] = "true" if values.get("MAIL_SMTP_ADDR") else "false"
     values["MAIL_PROTOCOL"] = (
         "smtps" if values.get("MAIL_SMTP_PORT") == "465" else "smtp+starttls"
     )
-    values["UNICON_PLUGIN_GIT_IMAGE"] = manifest.plugin_git
-    values["UNICON_PRIMITIVE_BASE_IMAGE"] = manifest.primitive_base
     open_sign_up = sign_up_open(values, development=development)
     values["UNICON_FORGE_REGISTRATION_OPEN"] = "true" if open_sign_up else "false"
     values["FORGEJO_DISABLE_REGISTRATION"] = "false" if open_sign_up else "true"
@@ -547,7 +450,6 @@ def _start_storage(compose: Compose, values: dict[str, str], summary: Summary) -
         "postgres",
         {
             "forgejo": values["FORGEJO_DB_PASSWORD"],
-            "woodpecker": values["WOODPECKER_DB_PASSWORD"],
             "unicon": values["UNICON_DB_PASSWORD"],
         },
     )
@@ -577,15 +479,6 @@ def _start_storage(compose: Compose, values: dict[str, str], summary: Summary) -
     values["UNICON_S3_ACCESS_KEY"] = backend_key.access_key_id
     values["UNICON_S3_SECRET_KEY"] = backend_key.secret_access_key
 
-    # The backend signs a grading machine's reads of a task's large files
-    # with a key of its own that may only read forgejo-lfs, so a link it
-    # hands out can never write to the store Forgejo owns.
-    lfs_key, created = garage.ensure_key(LFS_READ_KEY)
-    summary.record(f"garage key {LFS_READ_KEY}", created)
-    garage.allow_read_only(bucket_ids[FORGEJO_LFS_BUCKET], lfs_key.access_key_id)
-    values["UNICON_S3_LFS_ACCESS_KEY"] = lfs_key.access_key_id
-    values["UNICON_S3_LFS_SECRET_KEY"] = lfs_key.secret_access_key
-
 
 def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -> None:
     print("starting forgejo")
@@ -600,15 +493,6 @@ def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -
             values["FORGEJO_BACKEND_PASSWORD"],
             f"{BACKEND_ACCOUNT}@unicon.invalid",
             admin=True,
-        ),
-    )
-    summary.record(
-        f"forgejo account {CI_ACCOUNT}",
-        forgejo.ensure_user(
-            CI_ACCOUNT,
-            values["FORGEJO_CI_PASSWORD"],
-            f"{CI_ACCOUNT}@unicon.invalid",
-            admin=False,
         ),
     )
 
@@ -634,51 +518,36 @@ def _start_forgejo(compose: Compose, values: dict[str, str], summary: Summary) -
     values["UNICON_FORGE_OAUTH_CLIENT_SECRET"] = unicon_app.client_secret
     summary.record("forgejo oauth application Unicon", created)
 
-    woodpecker_app, created = forgejo.ensure_oauth_application(
-        BACKEND_ACCOUNT,
-        values["FORGEJO_BACKEND_PASSWORD"],
-        name="Woodpecker",
-        redirect_uri=f"{values['WOODPECKER_PUBLIC_URL']}/authorize",
-        known=_known_application(
-            values.get("WOODPECKER_FORGEJO_CLIENT"),
-            values.get("WOODPECKER_FORGEJO_SECRET"),
-        ),
-    )
-    values["WOODPECKER_FORGEJO_CLIENT"] = woodpecker_app.client_id
-    values["WOODPECKER_FORGEJO_SECRET"] = woodpecker_app.client_secret
-    summary.record("forgejo oauth application Woodpecker", created)
+
+def _copy_actions(compose: Compose, values: dict[str, str], summary: Summary) -> None:
+    print("copying the actions")
+    forgejo = Forgejo(compose, "forgejo")
+    token = values["UNICON_FORGE_ADMIN_TOKEN"]
+    repos = PlatformRepos(forgejo, token)
+    for copy, moved in actions.copy_actions(forgejo, repos, (BACKEND_ACCOUNT, token)):
+        summary.record(f"action copy {copy} at its pin", moved)
 
 
 def _seed_platform(
     compose: Compose,
-    directory: Path,
     manifest: Manifest,
     values: dict[str, str],
     summary: Summary,
     rewrite: bool,
 ) -> None:
-    """The platform org, each version of the primitives the manifest pins and
-    each version of every built-in workflow, in that order, since a workflow
-    names the primitives. Then every image of `exec`'s versions, which is
-    the CI's privileged list.
+    """The platform org and each version of the primitives the manifest pins.
 
     Every version is compared with the forge first, so that any that differs
     stops the run before anything is seeded, unless `rewrite`. A primitive
     version whose declaration differs only where the compiler does not read,
     its image, a title, a description or a comment, is not one of them: it
-    moves. Nor is a workflow version whose files differ only in its inputs'
-    form text, its outputs' titles and units, a comment or its
-    README.
+    moves.
     """
     repos = PlatformRepos(
         Forgejo(compose, "forgejo"), values["UNICON_FORGE_ADMIN_TOKEN"]
     )
     mirrored = {
         release: primitives.version_files(release) for release in manifest.primitives
-    }
-    definitions = {
-        name: workflows.seed_versions(directory, name)
-        for name in workflows.seeded(directory)
     }
     if not rewrite:
         refuse_differing_versions(
@@ -689,23 +558,13 @@ def _seed_platform(
                 for release, files in mirrored.items()
                 if primitives.standing_of(repos, release, files) is Standing.DIFFERENT
                 and not primitives.moves_in_place(repos, release, files)
-            ]
-            + [
-                f"{PLATFORM_ORG}/{name}@{version}, against workflows/{name}/{version}/"
-                for name, versions in definitions.items()
-                for version, files in versions.items()
-                if standing(
-                    repos, PLATFORM_ORG, workflows.repository(name), version, files
-                )
-                is Standing.DIFFERENT
-                and not workflows.moves_in_place(repos, name, version, files)
             ],
         )
 
     summary.record(f"forgejo organisation {PLATFORM_ORG}", repos.ensure_platform_org())
     summary.record(
         "package store unicon/packages",
-        repos.ensure_repository(PLATFORM_ORG, "packages", private=True),
+        repos.ensure_repository(PLATFORM_ORG, "packages"),
     )
     for primitive in manifest.primitive_names:
         repo = primitives.repository(primitive)
@@ -728,19 +587,14 @@ def _seed_platform(
             repos.ensure_mark(PLATFORM_ORG, repo, primitives.PRIMITIVE_TOPIC),
         )
 
-    for name, versions in definitions.items():
-        _seed_workflow(repos, name, versions, summary, rewrite)
-
     # An image the operator withdrew runs nowhere, under whatever name it is
-    # given, as it is matched by its digest: the forge refuses it, and the
-    # CI's privileged list does not take it. An entry no primitive at the
-    # forge names withdraws nothing, which is said.
+    # given, as it is matched by its digest: the forge refuses it. An entry
+    # no primitive at the forge names withdraws nothing, which is said.
     entries = [
         image.strip()
         for image in values.get("UNICON_WITHDRAWN_IMAGES", "").split(",")
         if image.strip()
     ]
-    withdrawn = {_digest(image) for image in entries} - {""}
     named = primitives.images_at_forge(repos, manifest.primitive_names)
     for entry in entries:
         if not _digest(entry) or all(
@@ -750,71 +604,12 @@ def _seed_platform(
                 f"note: UNICON_WITHDRAWN_IMAGES names {entry}, which no primitive "
                 "at the forge runs by that digest, so it withdraws nothing"
             )
-    boxed = [name for name in manifest.primitive_names if name in images.BOXED]
-    values["UNICON_PRIVILEGED_IMAGES"] = ",".join(
-        image
-        for image in primitives.privileged_at_forge(repos, boxed)
-        if _digest(image) not in withdrawn
-    )
 
 
 def _digest(image: str) -> str:
     """The digest an image is named by, `sha256:...`, empty for one named
     by its tag alone."""
     return image.partition("@")[2]
-
-
-def _seed_workflow(
-    repos: PlatformRepos,
-    name: str,
-    versions: dict[str, dict[str, bytes]],
-    summary: Summary,
-    rewrite: bool,
-) -> None:
-    """The built-in workflow `name`: its repository, each of its versions and
-    its mark.
-    """
-    workflow = f"{PLATFORM_ORG}/{name}"
-    workflow_repo = workflows.repository(name)
-    summary.record(
-        f"workflow {workflow} repository",
-        repos.ensure_repository(PLATFORM_ORG, workflow_repo),
-    )
-    for version, files in versions.items():
-        if workflows.moves_in_place(repos, name, version, files):
-            move(
-                repos,
-                PLATFORM_ORG,
-                workflow_repo,
-                version,
-                files,
-                message=f"Move {workflow}@{version} to text that grades alike",
-            )
-            outcome = Outcome.MOVED
-        else:
-            outcome = publish(
-                repos,
-                PLATFORM_ORG,
-                workflow_repo,
-                version,
-                files,
-                message=f"Seed {workflow}@{version}",
-                rewrite=rewrite,
-            )
-        _record_version(summary, f"workflow {workflow}", version, outcome)
-    latest = versions[next(reversed(versions))] if versions else {}
-    if workflows.README in latest:
-        repos.ensure_description(
-            PLATFORM_ORG,
-            workflow_repo,
-            workflow_description.description_of(
-                latest[workflows.README].decode("utf-8", errors="replace")
-            ),
-        )
-    summary.record(
-        f"workflow {workflow} mark {workflows.WORKFLOW_TOPIC}",
-        repos.ensure_mark(PLATFORM_ORG, workflow_repo, workflows.WORKFLOW_TOPIC),
-    )
 
 
 def refuse_differing_versions(manifest: Manifest, differing: list[str]) -> None:
@@ -828,8 +623,7 @@ def refuse_differing_versions(manifest: Manifest, differing: list[str]) -> None:
         "what is here and a version is never edited:\n"
         + "".join(f"  {version}\n" for version in differing)
         + "A primitive's declaration changed beyond its image goes under a new "
-        f"version in {manifest.path.name}, and a changed workflow definition "
-        "in a new version folder under workflows/. On a development stack, "
+        f"version in {manifest.path.name}. On a development stack, "
         "uv run bootstrap --rewrite rewrites each version in place instead."
     )
 
@@ -846,53 +640,23 @@ def _record_version(
     summary.record(label, outcome is not Outcome.PRESENT)
 
 
-def _start_woodpecker(
+def _register_dev_runners(
     compose: Compose, values: dict[str, str], summary: Summary
 ) -> None:
-    print("starting woodpecker")
-    compose.up("woodpecker-server")
-
-    woodpecker = Woodpecker(
-        values["WOODPECKER_PUBLIC_URL"], values["FORGEJO_PUBLIC_URL"]
-    )
-    wait_for("woodpecker", woodpecker.is_answering)
-
-    if woodpecker.token_is_valid(values.get("UNICON_WOODPECKER_TOKEN", "")):
-        summary.record("woodpecker api token", created=False)
-        return
-    values["UNICON_WOODPECKER_TOKEN"] = woodpecker.mint_token(
-        CI_ACCOUNT, values["FORGEJO_CI_PASSWORD"]
-    )
-    summary.record("woodpecker api token", created=True)
-
-
-def _enrol_dev_agent(values: dict[str, str], summary: Summary) -> None:
-    """The one CI agent the dev overlay runs on this machine, enrolled at the
-    CI as a global agent the way a platform machine is, with its token in
-    .env for compose.dev.yaml to hand it. Every other agent that would take a
-    grading run and has gone silent is deleted, so a development stack's
-    gradings land on the laptop's agent and nowhere else.
-    """
-    woodpecker = Woodpecker(
-        values["WOODPECKER_PUBLIC_URL"], values["FORGEJO_PUBLIC_URL"]
-    )
-    admin = values["UNICON_WOODPECKER_TOKEN"]
-    token, created = woodpecker.ensure_agent(
-        admin, DEV_AGENT, values.get("WOODPECKER_DEV_AGENT_TOKEN", "")
-    )
-    values["WOODPECKER_DEV_AGENT_TOKEN"] = token
-    summary.record(f"woodpecker agent {DEV_AGENT}", created)
-
-    others = woodpecker.remove_other_agents(admin, token, DEV_AGENT, GRADING_LABEL)
-    for name in others.removed:
-        print(f"removed woodpecker agent {name}, silent for over an hour")
-    for name in others.reporting:
-        print(
-            f"note: woodpecker agent {name} also takes grading runs and is still "
-            "reporting to the CI; it is left as it is"
+    """The development stack's two runners, each registered at Forgejo once
+    and again when Forgejo no longer knows the one in .env."""
+    forgejo = Forgejo(compose, "forgejo")
+    token = values["UNICON_FORGE_ADMIN_TOKEN"]
+    known = runners.registered(forgejo, token)
+    for name in runners.DEV_RUNNERS:
+        key = f"DEV_RUNNER_{name.upper()}"
+        if values.get(f"{key}_UUID") in known:
+            summary.record(f"runner {name}", created=False)
+            continue
+        values[f"{key}_UUID"], values[f"{key}_TOKEN"] = runners.register(
+            forgejo, token, f"dev-{name}"
         )
-    for name in others.refused:
-        print(f"note: the CI would not delete the silent woodpecker agent {name}")
+        summary.record(f"runner {name}", created=True)
 
 
 def recreate_changed(compose: Compose, *services: str) -> None:
@@ -904,9 +668,9 @@ def recreate_changed(compose: Compose, *services: str) -> None:
     the compose files and .env, interpolated values included, differs from
     the one the container was made with, and leaves it alone otherwise; so
     every running service gets an `up` and compose decides. A service that is
-    not running is left as it is, since the dev overlay's agent runs only
-    when someone started the `agent` profile; whatever starts it with `up`
-    gives it the new values.
+    not running is left as it is, since the app and the dev overlay's
+    runners run only when someone started the `app` profile; whatever starts
+    them with `up` gives them the new values.
     """
     for service in services:
         if not compose.is_running(service):

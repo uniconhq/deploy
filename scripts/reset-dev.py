@@ -8,17 +8,17 @@ and email addresses in `.env` (`DEV_<NAME>_PASSWORD`, `DEV_<NAME>_EMAIL`),
 each signed in to the app once so the app knows them; alice's org
 `riverside` and dan's `judgekit`; and every submission graded.
 
-It throws the stack's data away (`down -v`: the database, Forgejo, the object
-store, Woodpecker), bootstraps an empty stack and starts both profiles, with
-the images already built: `--build` rebuilds the backend and the frontend
-from their checkouts first. The grading images stay in the local registry,
-outside the stack. The keys are kept in `.env`; bootstrap keeps a key it
-does not know at the end of the file. Then it makes the accounts with
-Forgejo's own command, signs each in through Forgejo's pages, and makes the
-rest through the API, with the steps the end-to-end tests take
-(`tests/e2e/api.py`), so a change there is mended once for both. Run it
-from the deploy directory, once `uv run playwright install chromium` has
-been run:
+It throws the stack's data away (`down -v`: the database, Forgejo and the
+object store), bootstraps an empty stack and starts the app profile, its
+runners among it, with the images already built: `--build` rebuilds the
+backend and the frontend from their checkouts first, before bootstrap. The
+grading images stay in the local registry, outside the stack. The keys are
+kept in `.env`; bootstrap keeps a key it does not know at the end of the
+file. Then it makes the accounts with Forgejo's own command, signs each in
+through Forgejo's pages, and makes the rest through the API, with the steps
+the end-to-end tests take (`tests/e2e/api.py`), so a change there is mended
+once for both. Run it from the deploy directory, once `uv run playwright
+install chromium` has been run:
 
     uv run scripts/reset-dev.py
 """
@@ -45,7 +45,7 @@ from bootstrap.main import main as bootstrap  # noqa: E402
 from devseed import PEOPLE, seed  # noqa: E402
 
 FILES = ("compose.yaml", "compose.dev.yaml")
-PROFILES = ("--profile", "app", "--profile", "agent")
+PROFILES = ("--profile", "app")
 APP_SERVICES = ("backend-migrate", "backend", "frontend")
 READY_TIMEOUT_S = 300
 
@@ -69,13 +69,14 @@ def main(argv: list[str] | None = None) -> int:
         compose = Compose(DEPLOY, FILES)
         step("throwing the stack's data away")
         docker_compose(*PROFILES, "down", "--volumes", "--remove-orphans")
+        if options.build:
+            step("building the backend and the frontend")
+            docker_compose(*PROFILES, "build", *APP_SERVICES)
         step("bootstrapping an empty stack")
         if bootstrap(["--directory", str(DEPLOY)]) != 0:
             raise ResetFailed("bootstrap did not finish; its output says why")
-        step("starting the app and the grading machine")
-        build = ["--build"] if options.build else []
-        docker_compose("--profile", "app", "up", "-d", *build, *APP_SERVICES)
-        docker_compose("--profile", "agent", "up", "-d")
+        step("starting the app and its runners")
+        docker_compose(*PROFILES, "up", "-d")
         wait_until_ready(compose)
         step(f"making {', '.join(PEOPLE)}")
         forgejo = Forgejo(compose, "forgejo")

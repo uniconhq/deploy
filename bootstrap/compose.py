@@ -2,8 +2,7 @@
 
 Bootstrap starts services itself rather than telling the reader to run compose
 between steps, because the order matters: Garage has to hold the Forgejo access
-key before Forgejo starts using it for LFS, and Woodpecker has to hold its OAuth
-client before it starts at all.
+key before Forgejo starts using it for LFS.
 
 Nothing here ever puts the command line in an error or a log. Some of these
 calls carry a password as an argument, and an exception that quoted the command
@@ -79,6 +78,14 @@ class Compose:
             self._compose_command(["exec", *options, service, *arguments]),
             stdin=stdin,
         )
+
+    def project(self) -> str:
+        """The compose project's name, which prefixes its volumes."""
+        document = self._run(
+            "compose config",
+            self._compose_command(["config", "--no-interpolate", "--format", "json"]),
+        )
+        return str(json.loads(document)["name"])
 
     def is_healthy(self, service: str) -> bool:
         """Whether the healthcheck declared in compose.yaml is passing."""

@@ -7,12 +7,17 @@ Five people:
   contests and writes `riverside/standard` and `riverside/coins`;
 - dan, a manager of `riverside` and admin of `judgekit`, an org that
   publishes judging workflows anyone may build on, who also keeps
-  `dan/round-trip` of his own, shared with alice alone;
+  `dan/round-trip` of his own;
 - bob, carol and erin, entrants: each alone in Spring Open 2026, and in
   Summer Relay 2026 bob and carol as the team "Bob & Carol" and erin alone.
 
 The workflows use each other's versions as steps:
 
+- `judgekit/classic@v1`, an entrant's program compiled and run on one
+  input by `unicon/exec@v4`, its output compared word by word with the
+  answer by a diff script of its own;
+- `judgekit/interactive@v1`, an entrant's program run beside the task's
+  judge by `unicon/exec@v4`, and a verdict script of its own;
 - `judgekit/check@v1`, a checker the task brings, compiled and run by
   `unicon/exec@v4`;
 - `judgekit/special@v1`, a run judged by a checker: the solution run by
@@ -21,32 +26,32 @@ The workflows use each other's versions as steps:
   file by a compare program of its own, run by `unicon/exec@v4`;
 - `alice/two-sum@v1`, alice's own: the solution run by `unicon/exec@v4`,
   and `judgekit/compare@v1` as a box;
-- `riverside/standard@v1`, private to the club: `unicon/classic@v6`
+- `riverside/standard@v1`: `judgekit/classic@v1`
   under the club's limits;
-- `riverside/coins@v1`, private to the club: the solution run by
+- `riverside/coins@v1`: the solution run by
   `unicon/exec@v4`, and `judgekit/check@v1` as a box, with a checker of
   its own given a 2 MB table, `data/fewest.bin`, uploaded into the draft,
   as its answer; its draft is ahead of v1 by a changed checker;
-- `dan/round-trip@v1`: `unicon/classic@v6` twice, once each way;
-- `bob/practice@v1`: `unicon/classic@v6` under bob's own limits, used by
+- `dan/round-trip@v1`: `judgekit/classic@v1` twice, once each way;
+- `bob/practice@v1`: `judgekit/classic@v1` under bob's own limits, used by
   no task.
 
 Three contests, all riverside's:
 
 - Spring Open 2026, which started three hours before the seed and is
-  closed by it, with results released: Sum of Two on unicon/classic@v6,
+  closed by it, with results released: Sum of Two on judgekit/classic@v1,
   Grid Islands on riverside/standard@v1 with two subtasks and its points
   on release,
   Making Change on riverside/coins@v1, due once bob's submission is in,
   so carol's and erin's a minute later are late, and Guess the Number on
-  unicon/interactive@v4. Two
+  judgekit/interactive@v1. Two
   leaderboards: ICPC standings and points. A question bob asked, answered
   in public, and an announcement.
 - Summer Relay 2026, running: Closest Pair on judgekit/special@v1, whose
   checker gives part of a test's points to a pair that is close but not
   closest, Two Sum on alice/two-sum@v1, where erin's solution misses a
   pair of equal numbers, Round Trip on dan/round-trip@v1, and four sums on
-  unicon/classic@v6, each naming its toolchain or its packages: Array Sum
+  judgekit/classic@v1, each naming its toolchain or its packages: Array Sum
   with numpy, Java Sum on Java 25, Kotlin Sum with JUnit 5 from Maven
   Central and TypeScript Sum with chai from npm. A relay points board, two
   more days on Round Trip for erin, and a question from her not yet
@@ -55,7 +60,8 @@ Three contests, all riverside's:
 
 The seed's files are beside this module: `workflows/<owner>/<name>/v<n>/`
 for each version and `draft/` for what a draft changes after its last
-version; `contests/<contest>/tasks/<task>/` for each task's files; and
+version; `contests/<contest>/tasks/<task>/` for each task's files; each
+version's and task's request in its `request.yaml`; and
 `programs/<contest>/<task>/<person>-<n>.<ext>` for each submission, sent
 in that order.
 """
@@ -68,7 +74,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
-from typing import Any
 
 from devseed import contests
 from tests.e2e import api
@@ -77,7 +82,6 @@ HERE = Path(__file__).resolve().parent
 PEOPLE = ("alice", "bob", "carol", "dan", "erin")
 CLUB = "riverside"
 KIT = "judgekit"
-WORKFLOW_FILE = "workflow.yaml"
 LANGUAGES = {
     ".c": "c",
     ".cpp": "cpp",
@@ -101,15 +105,13 @@ LATE_BY = timedelta(minutes=1)
 @dataclass(frozen=True)
 class Workflow:
     """A workflow made by `maker` and owned by `owner`, its versions
-    published in order, what its draft changes after them, who reads it,
-    and any file `made` adds to the draft by an upload before v1."""
+    published in order, what its draft changes after them, and any file
+    `made` adds to the draft by an upload before v1."""
 
     maker: str
     owner: str
     name: str
     versions: tuple[str, ...] = ("v1",)
-    visibility: str = "private"
-    readers: tuple[str, ...] = ()
     made: dict[str, Callable[[], bytes]] = field(default_factory=dict)
 
 
@@ -125,13 +127,15 @@ def fewest_coins() -> bytes:
 
 
 WORKFLOWS = (
-    Workflow("dan", KIT, "check", visibility="public"),
-    Workflow("dan", KIT, "special", visibility="public"),
-    Workflow("dan", KIT, "compare", visibility="public"),
+    Workflow("dan", KIT, "classic"),
+    Workflow("dan", KIT, "interactive"),
+    Workflow("dan", KIT, "check"),
+    Workflow("dan", KIT, "special"),
+    Workflow("dan", KIT, "compare"),
     Workflow("alice", "alice", "two-sum"),
     Workflow("alice", CLUB, "standard"),
     Workflow("alice", CLUB, "coins", made={"data/fewest.bin": fewest_coins}),
-    Workflow("dan", "dan", "round-trip", visibility="shared", readers=("alice",)),
+    Workflow("dan", "dan", "round-trip"),
     Workflow("bob", "bob", "practice"),
 )
 """In the order they must be published: a box's version before the
@@ -165,7 +169,12 @@ def hold_contests(callers: dict[str, api.Caller], say: Callable[[str], None]) ->
         (contests.RELAY, contests.RELAY_TASKS),
     ):
         for task in tasks:
-            api.save_task(alice, task_path(contest, task), task_files(contest, task))
+            api.save_task(
+                alice,
+                task_path(contest, task),
+                task_request(contest, task),
+                task_files(contest, task),
+            )
     say("opening Spring Open and Summer Relay once their tasks are published")
     api.open_once_published(
         alice,
@@ -253,8 +262,8 @@ def make_orgs(alice: api.Caller, dan: api.Caller) -> None:
 
 
 def publish(maker: api.Caller, workflow: Workflow) -> None:
-    """Make the workflow, publish each version from its folder, save what
-    its draft changes after them, and let its readers in."""
+    """Make the workflow, publish each version from its folder, and save
+    what its draft changes after them."""
     path = f"/workflows/{workflow.owner}/{workflow.name}"
     folder = HERE / "workflows" / workflow.owner / workflow.name
     maker.send("POST", "/workflows", {"owner": workflow.owner, "name": workflow.name})
@@ -262,49 +271,10 @@ def publish(maker: api.Caller, workflow: Workflow) -> None:
         name: upload(maker, path, name, make()) for name, make in workflow.made.items()
     }
     for number, version in enumerate(workflow.versions):
-        save_draft(maker, path, folder / version, uploads if number == 0 else {})
+        api.save_draft(maker, path, folder / version, uploads if number == 0 else {})
         maker.send("POST", f"{path}/versions", {"version": version})
     if (folder / "draft").is_dir():
-        save_draft(maker, path, folder / "draft", {})
-    if workflow.visibility != "private":
-        maker.send("PUT", f"{path}/visibility", {"visibility": workflow.visibility})
-    for reader in workflow.readers:
-        maker.send("PUT", f"{path}/readers/{reader}", {})
-
-
-def save_draft(
-    maker: api.Caller, path: str, folder: Path, uploads: dict[str, str]
-) -> None:
-    """Save the folder's files over the draft, `workflow.yaml` as its
-    definition, and each of `uploads` by its upload."""
-    draft = maker.get(f"{path}/draft")
-    changes: list[dict[str, Any]] = [
-        {
-            "path": name,
-            "token": api.token_of(maker, f"{path}/files/{name}"),
-            "encoding": "utf-8",
-            "content": file.read_text(encoding="utf-8"),
-        }
-        for name, file in files_of(folder).items()
-        if name != WORKFLOW_FILE
-    ]
-    changes += [
-        {
-            "path": name,
-            "token": api.token_of(maker, f"{path}/files/{name}"),
-            "upload": id_,
-        }
-        for name, id_ in uploads.items()
-    ]
-    definition = folder / WORKFLOW_FILE
-    body: dict[str, Any] = {"token": draft["token"], "changes": changes}
-    if definition.exists():
-        body["content"] = definition.read_text(encoding="utf-8")
-    elif draft["content"] is not None:
-        body["content"] = draft["content"]
-    else:
-        body["values"] = draft["values"]
-    maker.send("PUT", f"{path}/draft", body)
+        api.save_draft(maker, path, folder / "draft", {})
 
 
 def upload(maker: api.Caller, path: str, name: str, content: bytes) -> str:
@@ -427,20 +397,21 @@ def submit(
 
 
 def task_files(contest: str, task: str) -> dict[str, str]:
-    folder = HERE / "contests" / contest / "tasks" / task
+    """The task's files but its request."""
     return {
         name: file.read_text(encoding="utf-8")
-        for name, file in files_of(folder).items()
+        for name, file in api.files_of(task_folder(contest, task)).items()
+        if name != api.REQUEST_FILE
     }
 
 
-def files_of(folder: Path) -> dict[str, Path]:
-    """Every file under `folder`, by its path from there."""
-    return {
-        file.relative_to(folder).as_posix(): file
-        for file in sorted(folder.rglob("*"))
-        if file.is_file() and "__pycache__" not in file.parts
-    }
+def task_request(contest: str, task: str) -> str:
+    """The task's request, as YAML."""
+    return (task_folder(contest, task) / api.REQUEST_FILE).read_text(encoding="utf-8")
+
+
+def task_folder(contest: str, task: str) -> Path:
+    return HERE / "contests" / contest / "tasks" / task
 
 
 def contest_path(contest: str) -> str:

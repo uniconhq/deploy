@@ -40,8 +40,8 @@ manifest takes it under the same version, and bootstrap moves the version's
 tag to a commit of the release's files with the new image written in. A
 release that changes only a title, a description, what its outcomes mean or
 a comment moves the tag the same way. A task already published keeps
-grading with the digest its plan pinned until it is next saved, so the
-CI's privileged list holds every image a version of `exec` has named, read
+grading with the digest it pinned until it is next saved, so an image
+withdrawn by hand is matched against every image a version has named, read
 back from the repository's history. A change to the other files alone is no
 difference, because it changes nothing that grades: the program that runs is
 the one in the image. A rerun with nothing changed makes nothing. On a
@@ -60,7 +60,7 @@ from pathlib import PurePosixPath
 import httpx
 
 from bootstrap import core_yaml
-from bootstrap.images import GitHubSource, LocalSource, PrimitiveRelease, is_by_digest
+from bootstrap.images import GitHubSource, LocalSource, PrimitiveRelease
 from bootstrap.platform_repos import (
     PLATFORM_ORG,
     Outcome,
@@ -367,14 +367,6 @@ def images_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
             if image:
                 found.add(image)
     return sorted(found)
-
-
-def privileged_at_forge(repos: PlatformRepos, names: list[str]) -> list[str]:
-    """The images of `images_at_forge` named by digest, the list the CI
-    lets run privileged: a tag one of these declarations ever named could
-    since have been moved onto any image.
-    """
-    return [image for image in images_at_forge(repos, names) if is_by_digest(image)]
 
 
 def _key(line: str) -> str | None:

@@ -21,7 +21,6 @@ ROUTES = [
     ("/api/v1/auth/callback", "location = /api/v1/auth/callback"),
     ("/unicon-results/runs/1/log", "location ^~ /unicon-results/"),
     ("/unicon-uploads/123", "location ^~ /unicon-uploads/"),
-    ("/forgejo-lfs/lfs/ab/cd", "location ^~ /forgejo-lfs/"),
     ("/login/oauth/authorize", "location ^~ /login/oauth/"),
     ("/user/activate", "location ^~ /user/activate"),
     ("/user/recover_account", "location ^~ /user/recover_account"),

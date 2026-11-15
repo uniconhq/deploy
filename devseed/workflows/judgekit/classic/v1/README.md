@@ -1,6 +1,6 @@
-# unicon/classic@v6
+# judgekit/classic@v1
 
-One run of an entrant's program on one input. `workflow.yaml` compiles and
+One run of an entrant's program on one input. `request.yaml` compiles and
 runs the entrant's code with `unicon/exec@v4` on the run's `input` under
 the task's limits, and compiles and runs `diff/diff.py` with exec, given
 `diff/program.yaml` as its manifest and the program's output and the run's

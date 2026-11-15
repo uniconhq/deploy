@@ -1,12 +1,12 @@
 """The platform org `unicon` and the versioned repositories bootstrap keeps in it.
 
-The built-in workflows and the primitives live in the platform org, which is
-`limited` like every org, so a signed-in organiser from another org can read
-its public repositories, and whose only owner is the platform account, because
-bootstrap makes it with that account's token. The forge package finds each of
-them by its shape and not by a registry: a public repository named
-`<name>.workflow` or `<name>.primitive`, carrying its mark as a topic, with a
-git tag for each version, `v1`, `v2` and on.
+The primitives live in the platform org, which is public like every org, since
+Forgejo runs a called workflow only from a public repository of a public owner,
+and whose only owner is the platform account, because bootstrap makes it with
+that account's token. The forge package finds each of them by its shape and not
+by a registry: a public repository named `<name>.workflow` or
+`<name>.primitive`, carrying its mark as a topic, with a git tag for each
+version, `v1`, `v2` and on.
 
 A version is frozen. `publish` makes one named version out of a set of files:
 the default branch is brought to exactly those files in one commit, and the
@@ -44,7 +44,7 @@ from typing import Any
 from bootstrap.forgejo import Forgejo, ForgejoError
 
 PLATFORM_ORG = "unicon"
-PLATFORM_ORG_DESCRIPTION = "Unicon's own workflows and primitives"
+PLATFORM_ORG_DESCRIPTION = "Unicon's own primitives"
 DEFAULT_BRANCH = "main"
 
 PAGE_SIZE = 50
@@ -100,36 +100,38 @@ class PlatformRepos:
         """Returns True if this run created the platform org.
 
         Made with the admin token, so its Owners team holds the
-        platform account and nobody else. Limited, not private: Forgejo hides
-        every repository of a private organisation from non-members, public
-        ones included, and the built-in workflows and primitives are there to
-        be read from every org.
+        platform account and nobody else.
         """
-        if self._found("GET", f"/orgs/{PLATFORM_ORG}") is not None:
+        return self.ensure_org(PLATFORM_ORG, PLATFORM_ORG_DESCRIPTION)
+
+    def ensure_org(self, org: str, description: str) -> bool:
+        """Returns True if this run created the org."""
+        if self._found("GET", f"/orgs/{org}") is not None:
             return False
         _ok(
             self._call(
                 "POST",
                 "/orgs",
                 body={
-                    "username": PLATFORM_ORG,
-                    "description": PLATFORM_ORG_DESCRIPTION,
-                    "visibility": "limited",
+                    "username": org,
+                    "description": description,
+                    "visibility": "public",
                     "repo_admin_change_team_access": False,
                 },
             )
         )
         return True
 
-    def ensure_repository(self, org: str, repo: str, *, private: bool = False) -> bool:
-        """Create the repository, or enforce privacy when requested.
+    def ensure_repository(self, org: str, repo: str) -> bool:
+        """Create the repository public, or make it public.
 
         Writes use the default branch, with no first commit of Forgejo's own.
         """
         found = self._found("GET", f"/repos/{org}/{repo}")
         if found is not None:
-            if private and not found.get("private"):
-                _ok(self._call("PATCH", f"/repos/{org}/{repo}", body={"private": True}))
+            if found.get("private"):
+                body = {"private": False}
+                _ok(self._call("PATCH", f"/repos/{org}/{repo}", body=body))
                 return True
             return False
         _ok(
@@ -138,7 +140,7 @@ class PlatformRepos:
                 f"/orgs/{org}/repos",
                 body={
                     "name": repo,
-                    "private": private,
+                    "private": False,
                     "default_branch": DEFAULT_BRANCH,
                     "auto_init": False,
                 },
@@ -152,6 +154,14 @@ class PlatformRepos:
         if topic in (listed.get("topics") or []):
             return False
         _ok(self._call("PUT", f"/repos/{org}/{repo}/topics/{topic}"))
+        return True
+
+    def ensure_actions_off(self, org: str, repo: str) -> bool:
+        """Returns True if this run turned Actions off on the repository."""
+        found = _ok(self._call("GET", f"/repos/{org}/{repo}"))
+        if not found.get("has_actions"):
+            return False
+        _ok(self._call("PATCH", f"/repos/{org}/{repo}", body={"has_actions": False}))
         return True
 
     def ensure_description(self, org: str, repo: str, description: str) -> bool:

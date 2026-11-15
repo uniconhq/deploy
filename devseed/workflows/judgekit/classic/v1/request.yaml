@@ -1,4 +1,4 @@
-# unicon/classic@v6, workflow.yaml: one run of an entrant's program on one
+# judgekit/classic@v1, request.yaml: one run of an entrant's program on one
 # input, its output compared word by word with the answer by the diff
 # script beside this file. The format is SIMPLER-CORE.md 7.
 inputs:

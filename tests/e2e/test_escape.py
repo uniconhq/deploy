@@ -35,6 +35,7 @@ from tests.e2e.api import (
     graded,
     let_in,
     open_once_published,
+    request_of,
     save_task,
     submit,
     write_contest,
@@ -53,16 +54,16 @@ pytestmark = [
 ]
 
 
-def task_files(org: str) -> dict[str, str]:
-    """The task's files as the fixtures hold them, on the org's workflow,
-    with the checks `UNICON_E2E_ESCAPE_ALLOW` adds."""
+def task_files(org: str) -> tuple[str, dict[str, str]]:
+    """The task's request and files as the fixtures hold them, on the
+    org's workflow, with the checks `UNICON_E2E_ESCAPE_ALLOW` adds."""
     task = ESCAPE / "task"
     files = {
         str(path.relative_to(task)): path.read_text()
         for path in sorted(task.rglob("*"))
         if path.is_file() and "__pycache__" not in path.parts
     }
-    files["task.yaml"] = files["task.yaml"].replace("escape-org/", f"{org}/")
+    request = files.pop("request.yaml").replace("escape-org/", f"{org}/")
     added = [
         name
         for name in os.environ.get("UNICON_E2E_ESCAPE_ALLOW", "").split(",")
@@ -70,7 +71,7 @@ def task_files(org: str) -> dict[str, str]:
     ]
     files["check/allowed"] += "".join(f"{name}\n" for name in added)
     files["statement.md"] = "# Escape\n\nEvery attack is refused.\n"
-    return files
+    return request, files
 
 
 @pytest.mark.skipif(not ESCAPE.is_dir(), reason="no runner checkout with escape/")
@@ -86,13 +87,13 @@ def test_every_attack_from_a_box_is_refused(browser: Browser) -> None:
     organiser.send("POST", f"{contest}/tasks", {"name": "escape"})
     workflow = f"/workflows/{org}/escape"
     organiser.send("POST", "/workflows", {"owner": org, "name": "escape"})
-    token = (organiser.get(workflow).get("draft") or {}).get("token")
-    content = (ESCAPE / "workflow.yaml").read_text()
-    organiser.send("PUT", f"{workflow}/draft", {"content": content, "token": token})
+    token = organiser.get(f"{workflow}/draft")["token"]
+    request = request_of((ESCAPE / "request.yaml").read_text())
+    organiser.send("PUT", f"{workflow}/draft", {"request": request, "token": token})
     organiser.send("POST", f"{workflow}/versions", {"version": "v1"})
     write_contest(organiser, contest, contest_yaml("Escape", "escape", "draft"))
     task = f"{contest}/tasks/escape"
-    save_task(organiser, task, task_files(org))
+    save_task(organiser, task, *task_files(org))
     open_once_published(
         organiser, contest, contest_yaml("Escape", "escape", "published")
     )

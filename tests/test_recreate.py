@@ -33,19 +33,19 @@ class _Compose:
 
 
 def test_compose_decides_what_is_recreated(capsys: pytest.CaptureFixture[str]) -> None:
-    compose = _Compose({"backend": "b", "woodpecker-agent": "a"}, changed={"backend"})
+    compose = _Compose({"backend": "b", "runner-exec": "a"}, changed={"backend"})
 
     main.recreate_changed(compose, "backend")  # type: ignore[arg-type]
     main.recreate_changed(compose, *main.GRADING_SERVICES)  # type: ignore[arg-type]
 
-    assert compose.brought_up == ["backend", "woodpecker-agent"]
+    assert compose.brought_up == ["backend", "runner-exec"]
     assert capsys.readouterr().out.splitlines() == [
         "recreated backend, as its configuration changed"
     ]
 
 
 def test_a_service_that_is_not_running_is_left_alone() -> None:
-    compose = _Compose({}, changed={"backend", "woodpecker-agent"})
+    compose = _Compose({}, changed={"backend", "runner-exec"})
 
     main.recreate_changed(compose, "backend", *main.GRADING_SERVICES)  # type: ignore[arg-type]
 

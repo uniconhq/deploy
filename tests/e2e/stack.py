@@ -2,8 +2,8 @@
 making people with the operator's command, signing them in through
 Forgejo's pages, and driving the organiser's and the entrant's pages.
 
-The tests run against a stack that is already up with both profiles, `app`
-and `agent`, and are skipped unless `UNICON_E2E_URL` names the app, for
+The tests run against a stack that is already up with the `app` profile,
+and are skipped unless `UNICON_E2E_URL` names the app, for
 example `http://localhost:8080`. `UNICON_E2E_COMPOSE` is the compose command
 the accounts are made with, run from this repository; it defaults to the dev
 stack's own files.
@@ -162,20 +162,25 @@ def sign_in(page: Page, username: str, password: str) -> None:
 
 
 def create(
-    page: Page, name: str, button: str, start: str, kind: str | None = None
+    page: Page, name: str, button: str, start: str, workflow: str | None = None
 ) -> None:
     """Make `name` with the dialog the button `start` opens on the page, and
     open its page. A new org's page comes up by itself; a new contest or task
     is a row of the list it was made from, a task's row named with its
-    letter. `kind`, for a task, is the kind it starts from. The new page is
-    known by its title: the router swaps pages in a transition, so for a
-    moment the address is the new page's while the old one is still shown.
+    letter. `workflow`, for a task, is the one it runs, `owner/name@version`,
+    chosen at its newest version. The new page is known by its title: the
+    router swaps pages in a transition, so for a moment the address is the
+    new page's while the old one is still shown.
     """
     page.get_by_role("button", name=start, exact=True).click()
     dialog = page.get_by_role("dialog", name=start)
     dialog.get_by_role("textbox", name="Name", exact=True).fill(name)
-    if kind is not None:
-        dialog.get_by_role("radio", name=kind).check()
+    if workflow is not None:
+        dialog.get_by_role("button", name="Choose a workflow").click()
+        page.get_by_role("dialog", name="Find a workflow").get_by_role(
+            "button", name=f"Choose {workflow.partition('@')[0]}"
+        ).click()
+        expect(dialog.get_by_text(workflow, exact=True)).to_be_visible()
     dialog.get_by_role("button", name=button, exact=True).click()
     expect(dialog).to_be_hidden(timeout=CREATE_TIMEOUT_MS)
     if start != "New org":
@@ -231,9 +236,10 @@ def _wait_checked(page: Page, task_page: str) -> None:
     that publishes stops the checks of the publication before it, so until
     the new one passes the contest refuses to open with the task as not
     published. The task page does not read its state again by itself, so it
-    is loaded again until its chip says Published.
+    is loaded again until its chip says Published. The check is a grading,
+    so it gets a grading's time.
     """
-    deadline = time.monotonic() + CREATE_TIMEOUT_MS / 1000
+    deadline = time.monotonic() + VERDICT_TIMEOUT_MS / 1000
     while True:
         open_page(page, task_page)
         checked = page.get_by_text("Published", exact=True)
@@ -246,19 +252,24 @@ def _wait_checked(page: Page, task_page: str) -> None:
 
 
 def submission_rate(page: Page, count: int, per: int) -> None:
-    """The task's submission rate, in its Submission rules, before a save."""
-    rules = page.get_by_role("region", name="Submission rules")
+    """The task's submission rate, on its Submissions card, before a save."""
+    rules = page.get_by_role("region", name="Submissions")
     rules.get_by_role("textbox", name="Submissions in a window").fill(str(count))
     rules.get_by_role("textbox", name="Length of the window (seconds)").fill(str(per))
 
 
-def upload_run_file(page: Page, row: int, field: str, content: bytes) -> None:
-    """Give one cell of the Runs card `content`. `row` is the row's place on
-    the page, starting at 1, and the editor stores the file at
-    `runs/0/<row - 1>/<field>`. A cell that already holds a file, as a new
-    task's first row does, takes a new one through its Replace."""
-    held = Path(f"/tmp/unicon-e2e-{row}-{field}")
-    held.write_bytes(content)
+def upload_run_file(
+    page: Page, row: int, field: str, name: str, content: bytes
+) -> None:
+    """Give one cell of the Runs card `content`, as a file called `name`,
+    which is where the editor stores it. `row` is the row's place on the
+    page, starting at 1. A cell that already holds a file, as `SUM`'s first
+    row does, takes a new one through its Replace."""
+    file: FilePayload = {
+        "name": name,
+        "mimeType": "application/octet-stream",
+        "buffer": content,
+    }
     runs = page.get_by_role("region", name="Runs")
     label = f"File for row {row} {field}"
     actions = runs.get_by_role("button", name=f"Actions for row {row} {field}")
@@ -268,16 +279,21 @@ def upload_run_file(page: Page, row: int, field: str, content: bytes) -> None:
         actions.click()
         page.get_by_role("menuitem", name="Replace").click()
         drop = page.get_by_role("dialog", name=label).locator("input[type=file]")
-    drop.set_input_files(str(held))
+    drop.set_input_files(files=[file])
 
 
-def contest_settings(page: Page, org: str, contest: str, **fields: str) -> None:
-    """Fill the contest's Settings form, each field by its label, and save."""
+def contest_settings(
+    page: Page, org: str, contest: str, *, seen: str | None = None, **fields: str
+) -> None:
+    """Fill the contest's Settings form, each field by its label, and who
+    sees it by its choice `seen`, and save."""
     open_page(page, f"{APP}/orgs/{org}/contests/{contest}/settings")
     form = page.get_by_role("form", name="Contest settings")
     expect(form.get_by_role("textbox", name="Name", exact=True)).not_to_have_value("")
     for label, value in fields.items():
         form.get_by_role("textbox", name=label, exact=True).fill(value)
+    if seen is not None:
+        form.get_by_role("radio", name=seen, exact=True).check()
     save_until(
         page,
         form.get_by_role("button", name="Save settings"),
@@ -360,8 +376,8 @@ def local(moment: datetime) -> str:
 
 def submit(page: Page, number: int, source: str) -> None:
     """Send `source` as the task's Python solution from the submit panel. The
-    starter task offers one language, so the panel names it rather than
-    asking for it.
+    task offers one language, so the panel names it rather than asking for
+    it.
     """
     form = page.get_by_role("form", name="Submit")
     solution: FilePayload = {
