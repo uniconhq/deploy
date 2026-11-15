@@ -1,0 +1,23 @@
+name: TypeScript Sum
+workflow: judgekit/classic@v1
+environment:
+  typescript:
+    packages: [chai@6, "@types/chai@5", "@types/node@26"]
+inputs:
+  code: entrant
+  language: {entrant: {options: [typescript], default: typescript}}
+  time_limit: 2
+  memory_limit: 256
+runs:
+  - {input: tests/1.in, answer: tests/1.ans}
+  - {input: tests/2.in, answer: tests/2.ans}
+scoring:
+  values:
+    points: {block: mul, of: [50, {block: sum, over: {runs: all}, of: {run: [all, score]}}]}
+  show:
+    always:
+      values: [points]
+      outputs: [log, compiled]
+      runs:
+        - {of: all, fields: [verdict, passed, score, time_ms, memory_kb, label, message]}
+submissions: {rate: {count: 10, per: 60}}

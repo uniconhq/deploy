@@ -1,16 +1,16 @@
 """`machine/grading-machine.py` writes what the settings say: the wall on the
-throwaway user's uid alone, every step's hosts file, the names pinned in
-the machine's own, each slot's disk in the machine's fstab, each slot's
-rootless daemon's daemon.json and their unit, the cache's cap, the cgroup
-option that keeps a box's memory kill off its step, the agent's
-environment and units, and the low-disk check's; it refuses settings that
-would leave a machine unfit to grade, makes each disk once and keeps it
-after, reads a self-test target as held, got through or not tested, and a
-slot's disk and the shared cache as the self-test sees them; it sets a
-machine up closed, the agent disabled before anything else and enabled
-only once the self-test passes, and its low-disk check stops a nearly
-full slot's agent only once it is idle, with what each runs stubbed. What
-it does to a real machine ran on a stand-in and on a real Ubuntu, by hand.
+throwaway user's uid alone, the names pinned in the machine's own hosts
+file, each slot's disk in the machine's fstab, each slot's rootless
+daemon's daemon.json and their unit, the cache's cap, the cgroup option
+that keeps a box's memory kill off its step, each slot's runner's config,
+the base runner's, the runners' units, and the low-disk check's; it
+refuses settings that would leave a machine unfit to grade, makes each
+disk once and keeps it after, reads a self-test target as held, got
+through or not tested, and a slot's disk and the shared cache as the
+self-test sees them; it sets a machine up closed, the runners disabled
+before anything else and enabled only once the self-test passes, registers
+each runner once, and its low-disk check stops a nearly full slot's runner
+only once it is idle, with what each runs stubbed.
 """
 
 from __future__ import annotations
@@ -30,26 +30,23 @@ from typing import Any
 
 import pytest
 
-from bootstrap import main
+from bootstrap import images, main
 
 SCRIPT = Path(__file__).resolve().parents[1] / "machine" / "grading-machine.py"
-AGENT = (
-    "woodpeckerci/woodpecker-agent:v3.18.1@sha256:"
-    "73ee7cc63161b40bfefa4a26eae45c518a09124ab34f7e3c5e781df85e1ba4ac"
-)
+RUNNER = "data.forgejo.org/forgejo/runner:13.2.1@sha256:" + "d" * 64
+HELPER = "ghcr.io/uniconhq/helper@sha256:" + "e" * 64
 CGROUP_LINE = (
     "35 24 0:30 / /sys/fs/cgroup rw,nosuid,nodev,noexec,relatime shared:9 "
     "- cgroup2 cgroup2 rw,nsdelegate,memory_recursiveprot"
 )
 SETTINGS: dict[str, Any] = {
-    "server": "ci.example.org:9000",
-    "agent_secret_file": "/etc/unicon/agent-secret",
-    "agent_image": AGENT,
-    "agent_binary_sha256": {"aarch64": "b" * 64, "x86_64": "c" * 64},
-    "step_hosts": {"forge.example.org": "203.0.113.10"},
-    "machine_hosts": {"ghcr.io": "140.82.112.34", "ci.example.org": "203.0.113.12"},
+    "server": "https://forge.example.org",
+    "runner_token_file": "/etc/unicon/runner-token",
+    "runner_image": RUNNER,
+    "runner_binary_sha256": {"aarch64": "b" * 64, "x86_64": "c" * 64},
+    "machine_hosts": {"ghcr.io": "140.82.112.34", "forge.example.org": "203.0.113.12"},
     "wall_allow": ["203.0.113.10:443", "[2001:db8::10]:443", "140.82.112.34:443"],
-    "test_image": "ghcr.io/uniconhq/primitive-base@sha256:" + "a" * 64,
+    "test_image": "ghcr.io/uniconhq/primitive-exec@sha256:" + "a" * 64,
 }
 
 
@@ -112,14 +109,6 @@ def test_the_wall_holds_the_throwaway_users_traffic_alone(machine: ModuleType) -
     lines = table.splitlines()
     assert lines.index("    reject") > max(
         i for i, line in enumerate(lines) if "accept" in line
-    )
-
-
-def test_a_step_sees_the_forges_names_and_no_others(machine: ModuleType) -> None:
-    assert machine.step_hosts({"proxy": "172.31.41.5"}) == (
-        "127.0.0.1 localhost\n"
-        "::1 localhost ip6-localhost ip6-loopback\n"
-        "172.31.41.5 proxy\n"
     )
 
 
@@ -209,8 +198,8 @@ def slots_of(
     )
 
 
-def laid_out(slots: Any) -> list[tuple[str, str, int]]:
-    return [(slot.name, slot.cpus, slot.port) for slot in slots]
+def laid_out(slots: Any) -> list[tuple[str, str, str]]:
+    return [(slot.name, slot.cpus, slot.box_users) for slot in slots]
 
 
 def test_the_slot_table_is_deploys_one_table_of_sizes(machine: ModuleType) -> None:
@@ -247,10 +236,10 @@ def test_a_machine_gets_small_slots_and_a_big_one_only_beside_two_small(
     slot for its daemon, a big slot, since three small ones still fit
     beside it, then those three."""
     assert laid_out(slots_of(machine, 8, 16)) == [
-        ("small-1", "1", 3000),
-        ("small-2", "2", 3001),
-        ("small-3", "3", 3002),
-        ("big-1", "4-5", 3003),
+        ("small-1", "1", "10000-10099"),
+        ("small-2", "2", "10100-10199"),
+        ("small-3", "3", "10200-10299"),
+        ("big-1", "4-5", "10300-10399"),
     ]
     # A big slot would leave one small one: small ones alone.
     assert [slot.name for slot in slots_of(machine, 4, 16)] == [
@@ -265,7 +254,7 @@ def test_a_machine_gets_small_slots_and_a_big_one_only_beside_two_small(
         "small-3",
     ]
     # The smallest machine: one small slot.
-    assert laid_out(slots_of(machine, 2, 4)) == [("small-1", "1", 3000)]
+    assert laid_out(slots_of(machine, 2, 4)) == [("small-1", "1", "10000-10099")]
     # The memory a 4 GB machine reports is less than 4 GB.
     disk = 40 * 2**30
     assert (
@@ -283,8 +272,8 @@ def test_the_slot_counts_are_the_settings_when_given_and_must_fit(
     machine: ModuleType,
 ) -> None:
     assert laid_out(slots_of(machine, 16, 64, slots={"big": 2})) == [
-        ("big-1", "1-2", 3000),
-        ("big-2", "3-4", 3001),
+        ("big-1", "1-2", "10000-10099"),
+        ("big-2", "3-4", "10100-10199"),
     ]
     with pytest.raises(
         machine.MachineError, match="need 16 cores, 67584 MB and 320 GiB of disk"
@@ -338,44 +327,107 @@ def test_cpus_read_and_written_as_the_kernel_lists_them(machine: ModuleType) -> 
     assert machine.cpu_list([5]) == "5"
 
 
-def test_each_slots_agent_takes_one_workflow_under_its_labels_and_limits(
+def test_each_slots_runner_takes_one_job_under_its_label_with_its_box_users(
     machine: ModuleType,
 ) -> None:
     small, *_, big = slots_of(machine, 16, 64)
-    changed = {"agent_environment": {"WOODPECKER_LOG_LEVEL": "debug"}}
-    text = machine.agent_environment(settings(machine, **changed), "the-token", big)
-    values = dict(line.split("=", 1) for line in text.splitlines())
-
-    assert values["WOODPECKER_AGENT_LABELS"] == "pool=platform,shape=rootless,size=*"
-    assert values["WOODPECKER_MAX_WORKFLOWS"] == "1"
-    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_CPU_SET"] == "14-15"
-    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM"] == str(8192 * 2**20)
-    assert values["WOODPECKER_BACKEND_DOCKER_LIMIT_MEM_SWAP"] == str(8192 * 2**20)
-    assert values["WOODPECKER_HOSTNAME"].endswith("-big-1")
-    assert values["WOODPECKER_AGENT_CONFIG_FILE"] == (
-        "/var/lib/unicon-agent/big-1/agent.conf"
+    changed = {"runner_envs": {"TZ": "UTC"}}
+    config = json.loads(
+        machine.runner_config(settings(machine, **changed), HELPER, big, 9 * 2**30)
     )
-    assert values["WOODPECKER_HEALTHCHECK_ADDR"] == "127.0.0.1:3013"
-    assert values["WOODPECKER_BACKEND_DOCKER_VOLUMES"] == (
-        "/etc/unicon/hosts:/etc/hosts:ro,/etc/unicon/cache-cap:/etc/unicon/cache-cap:ro"
-    )
-    # Its own daemon's socket.
-    assert values["DOCKER_HOST"] == "unix:///run/unicon-docker/big-1.sock"
-    assert values["WOODPECKER_AGENT_SECRET"] == "the-token"
-    assert values["WOODPECKER_LOG_LEVEL"] == "debug"
-    # Every slot takes any grading, first come, first served: its labels
-    # name its size and nothing else.
-    assert small.labels(settings(machine)) == "pool=platform,shape=rootless,size=small"
-    with pytest.raises(machine.MachineError, match="line break"):
-        machine.agent_environment(settings(machine), "a\nb", small)
+
+    assert config == {
+        "log": {"level": "info"},
+        "runner": {
+            "file": "/var/lib/unicon-runner/big-1/.runner",
+            "capacity": 1,
+            "timeout": "3600s",
+            "envs": {
+                "TZ": "UTC",
+                "UNICON_BOX_USERS": "11300-11399",
+                "UNICON_CACHE_CAP_BYTES": str(9 * 2**30),
+            },
+            "labels": [f"unicon-exec-big:docker://{HELPER}"],
+        },
+        "cache": {"enabled": False},
+        "container": {
+            "network": "",
+            "privileged": True,
+            "options": "",
+            "valid_volumes": ["unicon-cache"],
+            "force_pull": False,
+            "docker_host": "-",
+        },
+    }
+    assert small.label(HELPER) == f"unicon-exec-small:docker://{HELPER}"
 
 
-def test_every_slots_agent_runs_as_its_own_user_beside_the_daemons(
+def test_the_base_runner_takes_jobs_unprivileged_with_no_box_users_or_cache(
     machine: ModuleType,
 ) -> None:
-    unit = machine.agent_unit(settings(machine), 1001)
+    changed = {"runner_envs": {"TZ": "UTC"}}
+    config = json.loads(machine.base_config(settings(machine, **changed), HELPER))
 
-    assert "User=unicon-agent\n" in unit
+    assert config == {
+        "log": {"level": "info"},
+        "runner": {
+            "file": "/var/lib/unicon-runner/base/.runner",
+            "capacity": 4,
+            "timeout": "3600s",
+            "envs": {"TZ": "UTC"},
+            "labels": [f"unicon-base:docker://{HELPER}"],
+        },
+        "cache": {"enabled": False},
+        "container": {
+            "network": "",
+            "privileged": False,
+            "options": "",
+            "valid_volumes": [],
+            "force_pull": False,
+            "docker_host": "-",
+        },
+    }
+
+
+def test_the_labels_name_the_step_helper_bootstrap_reads(
+    machine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """One pin, under the key bootstrap's labels read; a tag is refused."""
+    assert machine.IMAGE_MANIFEST.name == images.RELEASE_MANIFEST
+    assert machine.STEP_HELPER == images.STEP_HELPER
+    manifest = tmp_path / "images.json"
+    monkeypatch.setattr(machine, "IMAGE_MANIFEST", manifest)
+    manifest.write_text(json.dumps({"images": {"step-helper": HELPER}}))
+
+    assert machine.machine_helper() == HELPER
+
+    for pinned in ({}, {"step-helper": "ghcr.io/uniconhq/step-helper:v1"}):
+        manifest.write_text(json.dumps({"images": pinned}))
+        with pytest.raises(machine.MachineError, match="pins no step-helper"):
+            machine.machine_helper()
+
+
+def test_no_two_slots_share_a_box_user_and_all_lie_where_exec_takes_them(
+    machine: ModuleType,
+) -> None:
+    slots = slots_of(machine, 64, 512)
+    ranges = [
+        range(int(first), int(last) + 1)
+        for first, last in (slot.box_users.split("-") for slot in slots)
+    ]
+
+    assert len(slots) > 50
+    assert all(len(users) == 100 for users in ranges)
+    assert len({user for users in ranges for user in users}) == 100 * len(slots)
+    assert min(ranges[0]) >= 10_000 and max(ranges[-1]) <= 65_000
+
+
+def test_every_slots_runner_runs_as_its_own_user_against_its_daemon(
+    machine: ModuleType,
+) -> None:
+    unit = machine.runner_unit(settings(machine), 1001)
+
+    assert "User=unicon-runner\n" in unit
     assert "SupplementaryGroups=unicon-grader\n" in unit
     assert "Requires=unicon-wall.service unicon-cgroup.service\n" in unit
     # It starts only while the wall's table is loaded, checked as root.
@@ -384,27 +436,24 @@ def test_every_slots_agent_runs_as_its_own_user_beside_the_daemons(
     # daemon does not start.
     assert "ConditionPathIsMountPoint=/var/lib/unicon/slots/%i\n" in unit
     assert "ConditionPathIsMountPoint=/var/lib/unicon/cache\n" in unit
-    # Each instance, by its slot's name, has its own environment and state.
-    assert "EnvironmentFile=/etc/unicon/agent-%i.env\n" in unit
-    assert "ReadWritePaths=/var/lib/unicon-agent/%i\n" in unit
+    # Each instance, by its slot's name, has its own daemon, config and state.
+    assert "Environment=DOCKER_HOST=unix:///run/unicon-docker/%i.sock\n" in unit
+    assert (
+        "ExecStart=/usr/local/bin/forgejo-runner daemon "
+        "--config /var/lib/unicon-runner/%i/config.yml\n"
+    ) in unit
+    assert "ReadWritePaths=/var/lib/unicon-runner/%i\n" in unit
     assert "NoNewPrivileges=yes\n" in unit and "ProtectSystem=strict\n" in unit
+    # The base runner's own unit, on the first slot's daemon.
+    base = machine.runner_unit(settings(machine), 1001, "base", "small-1")
+    assert "ConditionPathIsMountPoint=/var/lib/unicon/slots/small-1\n" in base
+    assert "Environment=DOCKER_HOST=unix:///run/unicon-docker/small-1.sock\n" in base
+    assert "ReadWritePaths=/var/lib/unicon-runner/base\n" in base
 
 
-def test_the_self_test_reads_each_slots_limits_from_inside_a_container(
+def test_the_self_test_reads_the_slices_cap(
     machine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """A container of a slot's own daemon made with its limits shows its
-    cores, its memory and no swap; one the daemon did not hold to them
-    fails, and so does a slice not capped."""
-    slots = slots_of(machine, 16, 64)[-2:]
-    made: list[tuple[str, ...]] = []
-    seen = {"13": "13 2147483648 0", "14-15": "0-15 max max"}
-
-    def docker(slot: str, *arguments: str, **_: object) -> str:
-        made.append((slot, *arguments))
-        return seen[arguments[arguments.index("--cpuset-cpus") + 1]] + "\n"
-
-    monkeypatch.setattr(machine, "docker", docker)
     monkeypatch.setattr(machine, "memory_total", lambda: 2**36)
     monkeypatch.setattr(machine, "CGROUP", tmp_path)
     held = tmp_path / "user.slice" / "user-1001.slice" / "memory.max"
@@ -412,25 +461,10 @@ def test_the_self_test_reads_each_slots_limits_from_inside_a_container(
     held.write_text(f"{machine.slice_memory(65536)}\n")
     report = machine.Report()
 
-    machine.check_slots(settings(machine), SimpleNamespace(pw_uid=1001), slots, report)
-
-    assert report.failed == [
-        "slot big-1's containers have cores 14-15, 8192 MB and no swap"
-    ]
-    assert [each[0] for each in made] == ["small-13", "big-1"]
-    assert made[1][1:10] == (
-        "run",
-        "--rm",
-        "--cpuset-cpus",
-        "14-15",
-        "--memory",
-        str(8192 * 2**20),
-        "--memory-swap",
-        str(8192 * 2**20),
-        "--entrypoint",
-    )
+    machine.check_slice(SimpleNamespace(pw_uid=1001), report)
+    assert report.failed == []
     held.write_text("max\n")
-    machine.check_slots(settings(machine), SimpleNamespace(pw_uid=1001), [], report)
+    machine.check_slice(SimpleNamespace(pw_uid=1001), report)
     assert report.failed[-1].startswith("the throwaway user's slice is capped at")
 
 
@@ -566,16 +600,16 @@ def test_a_file_is_written_new_with_its_mode_from_the_start(
 ) -> None:
     elsewhere = tmp_path / "elsewhere"
     elsewhere.write_text("kept")
-    path = tmp_path / "agent.env"
+    path = tmp_path / "config.yml"
     # A link left where the new file is made is replaced, not followed.
-    (tmp_path / "agent.env.new").symlink_to(elsewhere)
+    (tmp_path / "config.yml.new").symlink_to(elsewhere)
 
     machine.write(path, "TOKEN=x\n", mode=0o600)
 
     assert path.read_text() == "TOKEN=x\n"
     assert path.stat().st_mode & 0o777 == 0o600
     assert elsewhere.read_text() == "kept"
-    assert not (tmp_path / "agent.env.new").exists()
+    assert not (tmp_path / "config.yml.new").exists()
 
 
 @pytest.mark.parametrize(
@@ -608,24 +642,21 @@ def test_a_target_is_held_got_through_or_not_tested(
 @pytest.mark.parametrize(
     ("changed", "refusal"),
     [
-        ({"shape": "root"}, "is not built"),
+        ({"shape": "rootless"}, "unknown settings: shape"),
         ({"wall_allow": []}, "wall_allow is empty"),
-        ({"agent_user": "unicon-grader"}, "grader_user and agent_user must differ"),
+        ({"runner_user": "unicon-grader"}, "grader_user and runner_user must differ"),
         ({"grader_user": "root"}, "is root, a user setup did not make"),
-        ({"agent_user": "root"}, "is root, a user setup did not make"),
+        ({"runner_user": "root"}, "is root, a user setup did not make"),
         ({"grader_user": "Not A User"}, "not a user name"),
         ({"test_image": "ubuntu:24.04"}, "test_image is pinned by its digest"),
-        ({"agent_binary_sha256": {}}, "for x86_64 or aarch64"),
-        ({"agent_binary_sha256": {"arm64": "b" * 64}}, "for x86_64 or aarch64"),
-        ({"agent_binary_sha256": ["b" * 64]}, "an object of texts"),
-        ({"step_hosts": ["forge.example.org"]}, "step_hosts is an object of texts"),
-        ({"agent_environment": {"X": 1}}, "agent_environment is an object of texts"),
-        ({"agent_environment": {"A B": "1"}}, "agent_environment names 'A B'"),
-        ({"pool": "platform,shape=root"}, "not a label's value"),
-        ({"pool": "a=b"}, "not a label's value"),
-        ({"pool": ""}, "not a label's value"),
+        ({"helper_image": HELPER}, "unknown settings: helper_image"),
+        ({"runner_binary_sha256": {}}, "for x86_64 or aarch64"),
+        ({"runner_binary_sha256": {"arm64": "b" * 64}}, "for x86_64 or aarch64"),
+        ({"runner_binary_sha256": ["b" * 64]}, "an object of texts"),
+        ({"runner_envs": {"X": 1}}, "runner_envs is an object of texts"),
+        ({"runner_envs": {"A B": "1"}}, "runner_envs names 'A B'"),
         ({"server": 9000}, "server is a text"),
-        ({"agent_secret_file": 1}, "agent_secret_file is a path"),
+        ({"runner_token_file": 1}, "runner_token_file is a path"),
         ({"data_root": "/var/lib/unicon-docker"}, "unknown settings: data_root"),
         ({"cache_gb": 0}, "cache_gb is a whole number of GiB"),
         ({"cache_gb": 2.5}, "cache_gb is a whole number of GiB"),
@@ -634,20 +665,18 @@ def test_a_target_is_held_got_through_or_not_tested(
         ({"wall_allow": "203.0.113.10:443"}, "wall_allow is a list of texts"),
         ({"slots": {"small": -1}}, "slots gives each size a whole number"),
         ({"slots": {"small": 1.5}}, "slots gives each size a whole number"),
-        (
-            {"agent_environment": {"WOODPECKER_BACKEND_DOCKER_LIMIT_MEM": "1"}},
-            "which the agent's slot sets",
-        ),
-        ({"limit_mem": 1}, "unknown settings: limit_mem"),
+        ({"runner_envs": {"UNICON_BOX_USERS": "1-2"}}, "which the slot sets"),
+        ({"runner_envs": {"UNICON_CACHE_CAP_BYTES": "1"}}, "which the slot sets"),
+        ({"step_hosts": {}}, "unknown settings: step_hosts"),
         ({"early_share": 0.25}, "unknown settings: early_share"),
-        ({"agent_image": "woodpeckerci/woodpecker-agent:v3.18.1"}, "its digest"),
-        ({"step_hosts": {"forge": "forge.example.org"}}, "not an address"),
+        ({"runner_image": "data.forgejo.org/forgejo/runner:13.2.1"}, "its digest"),
+        ({"machine_hosts": {"forge": "forge.example.org"}}, "not an address"),
         (
-            {"step_hosts": {"forge\n203.0.113.9 evil": "203.0.113.10"}},
+            {"machine_hosts": {"forge\n203.0.113.9 evil": "203.0.113.10"}},
             "not a host name",
         ),
         ({"machine_hosts": {"-ghcr.io": "140.82.112.34"}}, "not a host name"),
-        ({"agent_binary_sha256": {"x86_64": "abc"}}, "SHA-256 in hex"),
+        ({"runner_binary_sha256": {"x86_64": "abc"}}, "SHA-256 in hex"),
         ({"cache_cap": 1024}, "at least 1 GiB"),
         ({"outside": ["2606:4700:4700::1111:443"]}, "in brackets"),
         ({"colour": "blue"}, "unknown settings: colour"),
@@ -665,12 +694,12 @@ def test_a_user_who_can_log_in_is_refused_as_either_user(
 ) -> None:
     person = pwd.getpwuid(os.getuid()).pw_name
 
-    for name in ("grader_user", "agent_user"):
+    for name in ("grader_user", "runner_user"):
         with pytest.raises(machine.MachineError, match="a user setup did not make"):
             settings(machine, **{name: person})
 
 
-@pytest.mark.parametrize("name", ["grader_user", "agent_user"])
+@pytest.mark.parametrize("name", ["grader_user", "runner_user"])
 def test_a_system_user_is_refused_as_either_user(
     machine: ModuleType, monkeypatch: pytest.MonkeyPatch, name: str
 ) -> None:
@@ -689,7 +718,7 @@ def test_a_system_user_is_refused_as_either_user(
     ("name", "user", "uid", "home"),
     [
         ("grader_user", "unicon-grader", 991, "/home/unicon-grader"),
-        ("agent_user", "unicon-agent", 1001, None),
+        ("runner_user", "unicon-runner", 1001, None),
     ],
 )
 def test_a_user_of_the_other_kind_is_refused_whatever_its_home(
@@ -701,13 +730,13 @@ def test_a_user_of_the_other_kind_is_refused_whatever_its_home(
     home: str | None,
 ) -> None:
     """A system user whose home happens to be the throwaway user's, or a
-    person's whose home happens to be the agent's, is not one setup made:
-    setup makes the throwaway user a person's uid and the agent's a system
+    person's whose home happens to be the runner's, is not one setup made:
+    setup makes the throwaway user a person's uid and the runner's a system
     one."""
     found = SimpleNamespace(
         pw_uid=uid,
         pw_shell="/usr/sbin/nologin",
-        pw_dir=home or str(machine.AGENT_STATE),
+        pw_dir=home or str(machine.RUNNER_STATE),
     )
     monkeypatch.setattr(machine.pwd, "getpwnam", lambda _: found)
 
@@ -720,7 +749,7 @@ def test_the_users_setup_made_are_taken_again(
 ) -> None:
     made = {
         "unicon-grader": (1001, "/home/unicon-grader"),
-        "unicon-agent": (998, str(machine.AGENT_STATE)),
+        "unicon-runner": (998, str(machine.RUNNER_STATE)),
     }
     monkeypatch.setattr(
         machine.pwd,
@@ -792,8 +821,9 @@ def stubbed(
         "allow_rootlesskit",
         "count_kills_locally",
         "start_daemons",
+        "make_cache_volume",
         "pull",
-        "install_agent",
+        "install_runner",
     ):
         monkeypatch.setattr(machine, name, step(name))
     monkeypatch.setattr(machine, "make_disks", step("make_disks", 20 * 2**30))
@@ -807,9 +837,9 @@ def stubbed(
 
     def getpwnam(name: str) -> SimpleNamespace:
         """Each user as setup makes it, by the home and the kind of uid it
-        gives: the throwaway user a person's, the agent's a system one."""
+        gives: the throwaway user a person's, the runner's a system one."""
         grader = name == "unicon-grader"
-        home = f"/home/{name}" if grader else str(machine.AGENT_STATE)
+        home = f"/home/{name}" if grader else str(machine.RUNNER_STATE)
         uid = 1001 if grader else 999
         return SimpleNamespace(
             pw_uid=uid, pw_gid=uid, pw_shell="/usr/sbin/nologin", pw_dir=home
@@ -818,12 +848,9 @@ def stubbed(
     monkeypatch.setattr(machine.pwd, "getpwnam", getpwnam)
     for name in (
         "UNITS",
-        "STEP_HOSTS",
-        "CACHE_CAP",
         "WALL_FILE",
         "UNICON",
-        "OLD_AGENT_ENV",
-        "AGENT_STATE",
+        "RUNNER_STATE",
         "SOCKET_TMPFILES",
         "SOCKET_DIRECTORY",
         "ROOM_SCRIPT",
@@ -832,6 +859,10 @@ def stubbed(
         monkeypatch.setattr(machine, name, tmp_path / name.lower())
     (tmp_path / "hosts").write_text("127.0.0.1 localhost\n")
     monkeypatch.setattr(machine, "HOSTS", tmp_path / "hosts")
+    (tmp_path / "images.json").write_text(
+        json.dumps({"images": {"step-helper": HELPER}})
+    )
+    monkeypatch.setattr(machine, "IMAGE_MANIFEST", tmp_path / "images.json")
     # One daemon of an earlier setup, found by its socket.
     (tmp_path / "socket_directory").mkdir()
     (tmp_path / "socket_directory" / "small-1.sock").touch()
@@ -839,12 +870,12 @@ def stubbed(
 
 
 def setup_settings(machine: ModuleType, tmp_path: Path) -> Any:
-    (tmp_path / "secret").write_text("agent-secret\n")
-    return settings(machine, agent_secret_file=str(tmp_path / "secret"))
+    (tmp_path / "token").write_text("the-token\n")
+    return settings(machine, runner_token_file=str(tmp_path / "token"))
 
 
 DISABLE_ROOM = ("systemctl", "disable", "--now", "unicon-slot-room.timer")
-DISABLE_AGENT = ("systemctl", "disable", "--now", "unicon-agent.service")
+STOP_RUNNERS = ("systemctl", "stop", "unicon-runner@*.service")
 KILL = ("docker", "small-1", "kill", "c1", "c2")
 STOP_DAEMON = (
     "as unicon-grader",
@@ -855,17 +886,18 @@ STOP_DAEMON = (
 )
 WALL_DOWN = ("systemctl", "stop", "unicon-wall.service")
 WALL_UP = ("systemctl", "restart", "unicon-wall.service")
-ENABLE_AGENT = (
+ENABLE_RUNNERS = (
     "systemctl",
     "enable",
     "--now",
-    *(f"unicon-agent@small-{number}.service" for number in range(1, 14)),
-    "unicon-agent@big-1.service",
+    *(f"unicon-runner@small-{number}.service" for number in range(1, 14)),
+    "unicon-runner@big-1.service",
+    "unicon-runner@base.service",
 )
 ENABLE_ROOM = ("systemctl", "enable", "--now", "unicon-slot-room.timer")
 
 
-def test_setup_enables_the_agent_last_once_the_self_test_passes(
+def test_setup_enables_the_runners_last_once_the_self_test_passes(
     machine: ModuleType,
     stubbed: list[tuple[str, ...]],
     tmp_path: Path,
@@ -879,11 +911,11 @@ def test_setup_enables_the_agent_last_once_the_self_test_passes(
 
     assert machine.setup(setup_settings(machine, tmp_path)) == 0
 
-    # The low-disk check first, since it starts an agent it stopped.
+    # The low-disk check first, since it starts a runner it stopped.
     assert stubbed[0] == DISABLE_ROOM
     order = [
         stubbed.index(each)
-        for each in (DISABLE_AGENT, KILL, STOP_DAEMON, WALL_DOWN, ("make_disks",))
+        for each in (STOP_RUNNERS, KILL, STOP_DAEMON, WALL_DOWN, ("make_disks",))
     ]
     assert order == sorted(order)
     # The disks are made before any daemon starts, and every daemon starts
@@ -891,56 +923,83 @@ def test_setup_enables_the_agent_last_once_the_self_test_passes(
     assert stubbed.index(("make_disks",)) < stubbed.index(("start_daemons",))
     assert stubbed.index(("start_daemons",)) < stubbed.index(WALL_UP)
     assert stubbed.index(WALL_DOWN) < stubbed.index(WALL_UP)
-    assert stubbed[-3:] == [("self_test",), ENABLE_AGENT, ENABLE_ROOM]
+    assert stubbed[-3:] == [("self_test",), ENABLE_RUNNERS, ENABLE_ROOM]
 
 
-def test_setup_runs_one_agent_per_slot_and_clears_away_those_gone(
+def test_setup_runs_one_runner_per_slot_and_clears_away_those_gone(
     machine: ModuleType,
     stubbed: list[tuple[str, ...]],
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Every agent, the one before slots and each slot's of the last setup,
-    is disabled first; the environments of those gone, which hold the
-    token, are removed; each slot gets its own, readable by root alone,
-    and its state folder; and the slice is capped."""
-    unicon, units = tmp_path / "unicon", tmp_path / "units"
+    """Every runner of the last setup is disabled first; the state of a
+    slot gone, which holds its runner's token, is removed; each slot gets
+    its own config and is registered once; and the slice is capped."""
+    units, state = tmp_path / "units", tmp_path / "runner_state"
     (units / "multi-user.target.wants").mkdir(parents=True)
-    (units / "multi-user.target.wants" / "unicon-agent@old-1.service").touch()
-    (units / "unicon-agent.service").touch()
-    unicon.mkdir()
-    (unicon / "agent-old-1.env").write_text("WOODPECKER_AGENT_SECRET=x\n")
+    (units / "multi-user.target.wants" / "unicon-runner@old-1.service").touch()
+    (state / "old-1").mkdir(parents=True)
+    (state / "old-1" / ".runner").write_text("{}\n")
+    (state / "small-2").mkdir()
+    (state / "small-2" / ".runner").write_text("{}\n")
     (tmp_path / ".config/docker").mkdir(parents=True)
     for name in ("old-1", "small-1"):
         (tmp_path / ".config/docker" / f"daemon-{name}.json").write_text("{}\n")
-    (tmp_path / "old_agent_env").write_text("WOODPECKER_AGENT_SECRET=x\n")
     monkeypatch.setattr(machine, "self_test", lambda _: 0)
 
     assert machine.setup(setup_settings(machine, tmp_path)) == 0
 
-    assert stubbed[:5] == [
+    assert stubbed[:4] == [
         DISABLE_ROOM,
         ("systemctl", "stop", "unicon-slot-room.service"),
-        DISABLE_AGENT,
-        ("systemctl", "disable", "--now", "unicon-agent@old-1.service"),
-        ("systemctl", "stop", "unicon-agent@*.service"),
+        ("systemctl", "disable", "--now", "unicon-runner@old-1.service"),
+        STOP_RUNNERS,
     ]
-    assert stubbed[-2:] == [ENABLE_AGENT, ENABLE_ROOM]
-    names = [*(f"small-{number}" for number in range(1, 14)), "big-1"]
-    assert sorted(path.name for path in unicon.glob("agent-*.env")) == sorted(
-        f"agent-{name}.env" for name in names
+    assert stubbed[-2:] == [ENABLE_RUNNERS, ENABLE_ROOM]
+    names = [*(f"small-{number}" for number in range(1, 14)), "big-1", "base"]
+    assert sorted(path.name for path in state.iterdir()) == sorted(names)
+    slots = {
+        slot.name: slot
+        for slot in machine.machine_slots(setup_settings(machine, tmp_path))
+    }
+    for name in names[:-1]:
+        # The cache's cap from its disk.
+        assert (state / name / "config.yml").read_text() == machine.runner_config(
+            setup_settings(machine, tmp_path), HELPER, slots[name], 18 * 2**30
+        )
+    assert (state / "base" / "config.yml").read_text() == machine.base_config(
+        setup_settings(machine, tmp_path), HELPER
     )
-    for name in names:
-        assert (unicon / f"agent-{name}.env").stat().st_mode & 0o777 == 0o600
-        assert (tmp_path / "agent_state" / name).is_dir()
-    assert not (tmp_path / "old_agent_env").exists()
-    assert not (units / "unicon-agent.service").exists()
-    assert (units / "unicon-agent@.service").is_file()
+    # Each runner without its `.runner` registered, as its own user.
+    registered = [
+        command
+        for command in stubbed
+        if command[5:7] == ("register", "--no-interactive")
+    ]
+    assert [command[-1] for command in registered] == [
+        f"{state}/{name}/config.yml" for name in names if name != "small-2"
+    ]
+    assert registered[0][:5] == (
+        "runuser",
+        "-u",
+        "unicon-runner",
+        "--",
+        "/usr/local/bin/forgejo-runner",
+    )
+    assert registered[0][7:11] == (
+        "--instance",
+        "https://forge.example.org",
+        "--token",
+        "the-token",
+    )
+    assert registered[0][11:13] == ("--name", f"{machine.socket.gethostname()}-small-1")
+    assert (units / "unicon-runner@.service").is_file()
+    assert (units / "unicon-runner@base.service").read_text() == machine.runner_unit(
+        setup_settings(machine, tmp_path), 1001, "base", "small-1"
+    )
     assert (units / "user-1001.slice.d" / "unicon-memory.conf").read_text() == (
         machine.slice_drop_in(65536)
     )
-    # The cache's cap from its disk.
-    assert (tmp_path / "cache_cap").read_text() == f"{18 * 2**30}\n"
     # Each slot's daemon.json, and the daemons' unit, as the throwaway user.
     written = [
         command[-1]
@@ -948,7 +1007,7 @@ def test_setup_runs_one_agent_per_slot_and_clears_away_those_gone(
         if command[:3] == ("as unicon-grader", "sh", "-c")
     ]
     assert written == [
-        *(f"daemon-{name}.json" for name in names),
+        *(f"daemon-{name}.json" for name in slots),
         "unicon-docker@.service",
     ]
     # The daemon of the slot gone is disabled, and its daemon.json removed.
@@ -986,7 +1045,7 @@ def test_setup_changes_nothing_on_a_machine_no_slot_fits(
     assert stubbed == []
 
 
-def test_setup_leaves_the_agent_disabled_when_the_self_test_fails(
+def test_setup_leaves_the_runners_disabled_when_the_self_test_fails(
     machine: ModuleType,
     stubbed: list[tuple[str, ...]],
     tmp_path: Path,
@@ -997,11 +1056,11 @@ def test_setup_leaves_the_agent_disabled_when_the_self_test_fails(
     assert machine.setup(setup_settings(machine, tmp_path)) == 1
 
     assert stubbed[0] == DISABLE_ROOM
-    assert ENABLE_AGENT not in stubbed
+    assert ENABLE_RUNNERS not in stubbed
     assert ENABLE_ROOM not in stubbed
 
 
-def test_setup_stopped_midway_leaves_the_agent_disabled(
+def test_setup_stopped_midway_leaves_the_runners_disabled(
     machine: ModuleType,
     stubbed: list[tuple[str, ...]],
     tmp_path: Path,
@@ -1017,7 +1076,7 @@ def test_setup_stopped_midway_leaves_the_agent_disabled(
         machine.setup(setup_settings(machine, tmp_path))
 
     assert stubbed[0] == DISABLE_ROOM
-    assert ENABLE_AGENT not in stubbed
+    assert ENABLE_RUNNERS not in stubbed
     assert ENABLE_ROOM not in stubbed
 
 
@@ -1033,10 +1092,10 @@ def test_setup_keeps_the_wall_up_when_the_daemon_will_not_stop(
         machine.setup(setup_settings(machine, tmp_path))
 
     assert WALL_DOWN not in stubbed
-    assert ENABLE_AGENT not in stubbed
+    assert ENABLE_RUNNERS not in stubbed
 
 
-def test_setup_changes_nothing_on_a_machine_the_agent_binary_is_not_pinned_for(
+def test_setup_changes_nothing_on_a_machine_the_runner_is_not_pinned_for(
     machine: ModuleType,
     stubbed: list[tuple[str, ...]],
     tmp_path: Path,
@@ -1284,11 +1343,11 @@ def test_the_disks_are_every_slots_and_the_caches(machine: ModuleType) -> None:
 
 
 def running(listed: str) -> Any:
-    """systemctl, asked which agents are active, listing `listed`."""
+    """systemctl, asked which runners are active, listing `listed`."""
 
     def run(*command: str, **_: object) -> subprocess.CompletedProcess[str]:
         assert command[:2] == ("systemctl", "list-units")
-        assert command[-1] == "unicon-agent@*.service"
+        assert command[-1] == "unicon-runner@*.service"
         return subprocess.CompletedProcess(command, 0, listed, "")
 
     return run
@@ -1337,13 +1396,13 @@ def test_the_self_test_fills_each_slots_disk_and_watches_the_others(
     ]
 
 
-def test_the_self_test_fills_no_disk_while_an_agent_takes_gradings(
+def test_the_self_test_fills_no_disk_while_a_runner_takes_gradings(
     machine: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """Run by hand on a machine that grades: a full disk would fail the
-    gradings its agent takes, so the fill is not tested, not failed."""
+    gradings its runner takes, so the fill is not tested, not failed."""
 
     def docker(*_: object, **__: object) -> str:
         raise AssertionError("a disk was filled")
@@ -1352,7 +1411,7 @@ def test_the_self_test_fills_no_disk_while_an_agent_takes_gradings(
     monkeypatch.setattr(
         machine,
         "run",
-        running("unicon-agent@small-1.service loaded active running Unicon grading\n"),
+        running("unicon-runner@small-1.service loaded active running Unicon grading\n"),
     )
     monkeypatch.setattr(machine.Path, "is_file", lambda _: True)
     monkeypatch.setattr(machine, "allocated", lambda _: 40 * 2**30)
@@ -1363,8 +1422,8 @@ def test_the_self_test_fills_no_disk_while_an_agent_takes_gradings(
     assert report.failed == []
     assert (
         "--   a container of each slot writing past its disk gets ENOSPC (not "
-        "tested: an agent takes gradings, unicon-agent@small-1.service; stop the "
-        "agents first)"
+        "tested: a runner takes gradings, unicon-runner@small-1.service; stop the "
+        "runners first)"
     ) in capsys.readouterr().out
 
 
@@ -1374,21 +1433,20 @@ def test_the_self_test_reads_from_another_slot_what_one_wrote_to_the_cache(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """The first slot's daemon makes the folder on first use, as Docker does
-    for an org's; every other slot reads its file, owned by root inside as
-    it was written; and the folder is removed after."""
+    """The first slot writes through its cache volume; every other slot
+    reads the file through its own, owned by root inside as it was
+    written; and the file is removed after."""
     cache = tmp_path / "cache"
     cache.mkdir()
     monkeypatch.setattr(machine, "CACHE_DISK", cache)
-    monkeypatch.setattr(machine, "CACHE_FOLDER_TEST", cache / ".self-test")
     monkeypatch.setattr(machine.os.path, "ismount", lambda _: True)
     written: list[str] = []
 
     def docker_done(slot: str, *arguments: str, **_: object) -> Any:
         assert slot == "small-1"
-        assert arguments[3] == f"{cache / '.self-test'}:/cache"
-        (cache / ".self-test").mkdir(mode=0o755)
+        assert arguments[3] == "unicon-cache:/cache"
         written.append(arguments[-1].split("'")[-2])
+        (cache / ".self-test").write_text(written[-1])
         return subprocess.CompletedProcess([], 0, "", "")
 
     def docker(slot: str, *arguments: str, **_: object) -> str:
@@ -1409,6 +1467,46 @@ def test_the_self_test_reads_from_another_slot_what_one_wrote_to_the_cache(
     assert "--   a write to /cache from one slot is read from another" in (
         capsys.readouterr().out
     )
+
+
+def test_each_slots_daemon_binds_the_cache_volume_to_the_caches_disk_once(
+    machine: ModuleType, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    made: list[tuple[str, ...]] = []
+    found = {"small-1": 1, "small-2": 0}
+
+    def docker_done(slot: str, *arguments: str, **_: object) -> Any:
+        assert arguments == ("volume", "inspect", "unicon-cache")
+        return subprocess.CompletedProcess([], found[slot], "", "")
+
+    def docker(slot: str, *arguments: str, **_: object) -> str:
+        made.append((slot, *arguments))
+        return ""
+
+    monkeypatch.setattr(machine, "docker_done", docker_done)
+    monkeypatch.setattr(machine, "docker", docker)
+
+    machine.make_cache_volume("small-1")
+    machine.make_cache_volume("small-2")
+
+    assert made == [
+        (
+            "small-1",
+            "volume",
+            "create",
+            "--driver",
+            "local",
+            "--opt",
+            "type=none",
+            "--opt",
+            "o=bind",
+            "--opt",
+            "device=/var/lib/unicon/cache",
+            "--label",
+            "unicon-cache",
+            "unicon-cache",
+        )
+    ]
 
 
 # The low-disk check, with what it runs stubbed.
@@ -1439,7 +1537,7 @@ def test_the_low_disk_check_runs_every_minute_over_every_slot(
 def room(
     machine: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> SimpleNamespace:
-    """A slot `small-1` of a 20 GiB disk, mounted, its agent enabled, at
+    """A slot `small-1` of a 20 GiB disk, mounted, its runner enabled, at
     `NOW`; the free space each look at the disk sees, in turn, and the
     names of the containers its daemon runs and the networks it has,
     which root never asks it for."""
@@ -1496,12 +1594,21 @@ LISTED = [
         "container",
         "ls",
         "--filter",
-        "name=^wp_",
+        "name=^FORGEJO-ACTIONS-TASK-",
         "--format",
         "{{.Names}}",
     ),
-    ("docker", "small-1", "network", "ls", "--quiet", "--filter", "name=^wp_"),
+    (
+        "docker",
+        "small-1",
+        "network",
+        "ls",
+        "--quiet",
+        "--filter",
+        "name=^FORGEJO-ACTIONS-TASK-",
+    ),
 ]
+JOB = "FORGEJO-ACTIONS-TASK-7-WORKFLOW-3f2a-JOB-grade"
 
 
 def network(name: str, created: str) -> dict[str, Any]:
@@ -1515,31 +1622,40 @@ def network(name: str, created: str) -> dict[str, Any]:
     }
 
 
-STOP = ("systemctl", "stop", "unicon-agent@small-1.service")
-START = ("systemctl", "start", "unicon-agent@small-1.service")
+STOP = ("systemctl", "stop", "unicon-runner@small-1.service")
+START = ("systemctl", "start", "unicon-runner@small-1.service")
 PRUNED = [
     ("docker", "small-1", "container", "prune", "--force"),
     ("docker", "small-1", "network", "prune", "--force"),
     ("docker", "small-1", "image", "prune", "--force"),
-    ("docker", "small-1", "volume", "prune", "--all", "--force"),
+    (
+        "docker",
+        "small-1",
+        "volume",
+        "prune",
+        "--all",
+        "--force",
+        "--filter",
+        "label!=unicon-cache",
+    ),
 ]
 
 
-def test_a_nearly_full_slot_waits_while_a_workflow_runs(
+def test_a_nearly_full_slot_waits_while_a_job_runs(
     machine: ModuleType, room: SimpleNamespace
 ) -> None:
-    """Stopping the agent would kill the workflow and leave its container,
-    network and volume behind. A workflow between its steps runs no
-    container, but its network lives until it ends."""
+    """Stopping the runner would kill the job and leave its containers,
+    network and volumes behind. A job pulling an image runs no container,
+    but its network lives until it ends."""
     room.free = [2**30]
-    room.containers = "wp_01m6kz212ajjvw814mj62edns\n"
+    room.containers = f"{JOB}\n"
 
     machine.check_room(GRADER, "small-1")
 
     assert STOP not in room.done
     assert not [c for c in room.done if "prune" in c]
     assert [c for c in room.done if c[0] == "docker"] == LISTED
-    young = network("wp_01m6kz212ajjvw814mj62edns_0_default", "2026-11-04T18:20:00Z")
+    young = network(f"{JOB}-network", "2026-11-04T18:20:00Z")
     room.free, room.containers, room.networks = [2**30], "", [young]
     machine.check_room(GRADER, "small-1")
     assert STOP not in room.done
@@ -1550,41 +1666,36 @@ def test_a_nearly_full_slot_waits_while_a_workflow_runs(
     assert not [c for c in room.done if "prune" in c]
 
 
-def test_a_workflow_network_older_than_any_workflow_is_a_leftover(
+def test_a_job_network_older_than_any_job_is_a_leftover(
     machine: ModuleType, room: SimpleNamespace
 ) -> None:
-    """An agent stopped mid-workflow cannot remove its workflow's network,
-    which then has no container: past the longest a workflow runs, it no
-    longer keeps the slot busy, and is removed with the rest."""
+    """A runner stopped mid-job cannot remove its job's network, which then
+    has no container: past the longest a job runs, it no longer keeps the
+    slot busy, and is removed with the rest."""
     room.free = [2**30, 10 * 2**30]
-    room.networks = [
-        network("wp_01m6kwqeb2echhsc92g71pzs06_0_default", "2026-11-04T17:59:59Z")
-    ]
+    room.networks = [network(f"{JOB}-network", "2026-11-04T17:59:59Z")]
 
     machine.check_room(GRADER, "small-1")
 
     assert room.done.index(STOP) < room.done.index(PRUNED[1]) < room.done.index(START)
 
 
-def test_a_workflow_is_told_by_its_names_and_its_networks_age(
+def test_a_job_is_told_by_its_names_and_its_networks_age(
     machine: ModuleType,
 ) -> None:
     """The names are matched again here, whatever the daemon's filter
     matched, as Docker writes them; and its times, to the nanosecond,
     read."""
-    assert machine.workflow_running("wp_01m6kz212ajjvw814mj62edns\n", [], NOW)
-    assert not machine.workflow_running("my_wp_box\nother\n", [], NOW)
-    assert machine.workflow_running(
-        "", [network("wp_x_0_default", "2026-11-05T02:59:59.123456789+08:00")], NOW
+    young = "2026-11-05T02:59:59.123456789+08:00"
+    assert machine.job_running(f"{JOB}\n", [], NOW)
+    assert not machine.job_running(f"my-{JOB}\nother\n", [], NOW)
+    assert machine.job_running("", [network(f"{JOB}-network", young)], NOW)
+    assert not machine.job_running("", [network(f"a-{JOB}-network", young)], NOW)
+    assert not machine.job_running(
+        "", [network(f"{JOB}-network", "2026-11-05T01:59:59.5+08:00")], NOW
     )
-    assert not machine.workflow_running(
-        "", [network("a_wp_x_0_default", "2026-11-05T02:59:59.123456789+08:00")], NOW
-    )
-    assert not machine.workflow_running(
-        "", [network("wp_x_0_default", "2026-11-05T01:59:59.5+08:00")], NOW
-    )
-    assert machine.workflow_running(
-        "", [network("wp_x_0_default", "2026-11-04T18:00:01Z")], NOW
+    assert machine.job_running(
+        "", [network(f"{JOB}-network", "2026-11-04T18:00:01Z")], NOW
     )
     assert machine.created_at("2026-11-05T02:59:59.999999999+08:00") == pytest.approx(
         NOW - 1e-6, abs=1e-5
@@ -1596,8 +1707,9 @@ def test_a_workflow_is_told_by_its_names_and_its_networks_age(
 def test_an_idle_nearly_full_slot_stops_until_its_disk_has_room(
     machine: ModuleType, room: SimpleNamespace
 ) -> None:
-    """Its agent stopped and its daemon cleaned up; still below the mark,
-    the agent stays stopped, and a later look that finds room starts it."""
+    """Its runner stopped and its daemon cleaned up but for the cache's
+    volume; still below the mark, the runner stays stopped, and a later
+    look that finds room starts it."""
     room.free = [2**30, 2**30 + 2**20]
 
     machine.check_room(GRADER, "small-1")
@@ -1626,7 +1738,7 @@ def test_a_slot_cleaned_up_to_room_takes_gradings_again_at_once(
 def test_the_low_disk_check_leaves_alone_a_slot_set_up_or_not_mounted(
     machine: ModuleType, room: SimpleNamespace
 ) -> None:
-    """An agent not enabled is one setup disabled, or whose self-test
+    """A runner not enabled is one setup disabled, or whose self-test
     failed: starting it would take gradings on a machine not checked."""
     room.free = [2**30]
     room.enabled = "disabled"

@@ -1,0 +1,43 @@
+# riverside/coins@v1: one run of a Making Change solution on one amount.
+# The solution is compiled and run here, then the checker beside this file
+# is run on its output, given as its answer data/fewest.bin, the fewest
+# coins for every amount up to 1,000,000, so a run needs no answer file.
+description: >-
+  Judges a Making Change solution on one amount. It compiles and runs the
+  solution, then the checker beside this file checks the coins add up
+  and are as few as can be, using data/fewest.bin, the fewest coins for
+  every amount up to 1,000,000. So a run is only an amount, with no
+  answer file.
+inputs:
+  code: {type: file, title: Solution}
+  language: {type: enum, options: [c, cpp, java, kotlin, python, javascript, typescript, csharp, rust, r, ruby], title: Language}
+  input: {type: file, title: Amount}
+  time_limit: {type: number, title: Time limit, unit: seconds}
+  memory_limit: {type: number, title: Memory limit, unit: MB}
+
+steps:
+  - id: solution
+    use: unicon/exec@v4
+    with:
+      source: ${{ inputs.code }}
+      language: ${{ inputs.language }}
+      stdin: ${{ inputs.input }}
+      time_limit: ${{ inputs.time_limit }}
+      memory_limit: ${{ inputs.memory_limit }}
+  - id: check
+    use: unicon/exec@v4
+    with:
+      source: ${{ workflow.checker/ }}
+      language: python
+      manifest: ${{ workflow.program.yaml }}
+      time_limit: 5
+      memory_limit: 256
+      files:
+        input: ${{ inputs.input }}
+        output: ${{ steps.solution.output }}
+        answer: ${{ workflow.data/fewest.bin }}
+
+outputs:
+  score: ${{ steps.check.score }}
+  time_ms: {from: "${{ steps.solution.time_ms }}", title: Run time, unit: ms}
+  log: ${{ steps.solution.log }}

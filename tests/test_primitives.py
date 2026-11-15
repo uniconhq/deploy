@@ -93,7 +93,7 @@ def _manifest(*versions: tuple[str, Path, str]) -> Manifest:
     """
     return Manifest(
         path=DEPLOY / "images.local.json",
-        images={"plugin-git": f"docker.io/woodpeckerci/plugin-git{RUNNER}"},
+        images={"step-helper": f"localhost:5000/uniconhq/step-helper{RUNNER}"},
         primitives=tuple(
             PrimitiveRelease("exec", version, image, LocalSource(checkout))
             for version, checkout, image in versions
@@ -106,7 +106,7 @@ def _seed(
 ) -> tuple[Summary, dict[str, str]]:
     summary = Summary()
     values = {"UNICON_FORGE_ADMIN_TOKEN": TOKEN}
-    main._seed_platform(forge, DEPLOY, manifest, values, summary, rewrite)
+    main._seed_platform(forge, manifest, values, summary, rewrite)
     return summary, values
 
 
@@ -640,18 +640,6 @@ def test_a_port_named_description_is_a_port_and_its_change_stops_the_run(
     assert forge.writes() == []
 
 
-def test_a_withdrawn_image_is_not_on_the_privileged_list(tmp_path: Path) -> None:
-    manifest = _manifest(
-        ("v1", _exec(tmp_path), FIRST), ("v3", _exec_v3(tmp_path), SECOND)
-    )
-    values = {"UNICON_FORGE_ADMIN_TOKEN": TOKEN, "UNICON_WITHDRAWN_IMAGES": SECOND}
-
-    main._seed_platform(FakeForgejo(), DEPLOY, manifest, values, Summary(), False)
-
-    assert values["UNICON_PRIVILEGED_IMAGES"] == FIRST
-    assert values["UNICON_WITHDRAWN_IMAGES"] == SECOND
-
-
 def test_a_withdrawn_image_is_matched_by_its_digest_and_one_matching_nothing_is_said(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
@@ -668,9 +656,8 @@ def test_a_withdrawn_image_is_matched_by_its_digest_and_one_matching_nothing_is_
         "UNICON_WITHDRAWN_IMAGES": f"{renamed},{nothing}",
     }
 
-    main._seed_platform(FakeForgejo(), DEPLOY, manifest, values, Summary(), False)
+    main._seed_platform(FakeForgejo(), manifest, values, Summary(), False)
 
-    assert values["UNICON_PRIVILEGED_IMAGES"] == FIRST
     said = capsys.readouterr().out
     assert nothing in said
     assert renamed not in said
@@ -701,7 +688,7 @@ forms:
     assert primitives.compiled(base) != primitives.compiled(slower)
 
 
-def test_only_an_image_named_by_digest_may_run_privileged() -> None:
+def test_every_image_a_version_has_named_is_found() -> None:
     exec_image = "ghcr.io/uniconhq/primitive-exec@sha256:" + "4" * 64
     forge = FakeForgejo()
     released = f"image: {exec_image}\nschema_version: 6\n"
@@ -715,4 +702,3 @@ def test_only_an_image_named_by_digest_may_run_privileged() -> None:
         exec_image,
         "unicon-exec:lab",
     ]
-    assert primitives.privileged_at_forge(repos, ["exec"]) == [exec_image]

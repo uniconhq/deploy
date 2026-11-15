@@ -5,8 +5,8 @@ no image of its own.
 
 `forge` holds the rules and the database, `backend` is a thin API over it,
 and `frontend` is the web app. `runner` and `primitive-exec` make the images
-a grading runs. This repo runs them with Forgejo, Woodpecker, Garage and
-Postgres behind one nginx proxy (`proxy/`). `bootstrap/` makes the secrets,
+a grading runs. This repo runs them with Forgejo and its Actions runners,
+Garage and Postgres behind one nginx proxy (`proxy/`). `bootstrap/` makes the secrets,
 writes `.env`, starts the services and seeds the forge; it is safe to rerun.
 `images.json` pins the grading images by digest.
 
@@ -16,16 +16,17 @@ You need Docker with Compose v2, [uv](https://docs.astral.sh/uv/), and the
 other five repos checked out beside this one.
 
 ```sh
-uv run scripts/build-images.py
-uv run bootstrap
 COMPOSE="docker compose -f compose.yaml -f compose.dev.yaml"
-$COMPOSE --profile app up -d --build
-$COMPOSE --profile agent up -d
+uv run scripts/build-images.py
+$COMPOSE --profile app build
+uv run bootstrap
+$COMPOSE --profile app up -d
 ```
 
-`build-images.py` builds the grading images from the sibling repos into
-`images.local.json`, which bootstrap prefers over `images.json`. The `agent`
-profile is a grading machine on your laptop.
+`build-images.py` builds the step helper and the primitives from the
+sibling repos into `images.local.json`, which bootstrap prefers over
+`images.json`. The `app` profile includes two runners that grade
+on your laptop's Docker.
 
 The app is at http://localhost:8080, Forgejo at http://forge.localhost:8080,
 and dev mail at http://localhost:8025.
@@ -47,7 +48,7 @@ uv run ruff check . && uv run ruff format --check .
 uv run mypy
 uv run pytest
 uv run yamllint .
-UNICON_E2E_URL=http://localhost:8080 uv run pytest tests/e2e   # both profiles up
+UNICON_E2E_URL=http://localhost:8080 uv run pytest tests/e2e   # app profile up
 ```
 
 [CI](.github/workflows/ci.yaml) runs these, then boots and tests the whole
@@ -55,8 +56,8 @@ stack.
 
 ## Production
 
-1. Set `UNICON_PUBLIC_URL`, `FORGEJO_PUBLIC_URL` and `WOODPECKER_PUBLIC_URL`
-   in `.env` ([.env.example](.env.example) lists every key).
+1. Set `UNICON_PUBLIC_URL` and `FORGEJO_PUBLIC_URL` in `.env`
+   ([.env.example](.env.example) lists every key).
 2. `uv run bootstrap -f compose.yaml` (without `-f` it adds the dev overlay).
 3. `docker compose -f compose.yaml --profile app up -d`
 
@@ -71,16 +72,18 @@ $COMPOSE exec -T backend unicon-forge reconcile
 ```
 
 A grading machine is a separate Ubuntu 24.04 host. Copy
-[machine/grading-machine.py](machine/grading-machine.py) and `slots.json` to
-it, write its settings (see `Settings` in the script), and run as root:
+[machine/grading-machine.py](machine/grading-machine.py), `slots.json` and
+`images.json` into one folder on it, write its settings (see `Settings` in
+the script), and run as root:
 
 ```sh
 python3 grading-machine.py setup /etc/unicon/machine.json
 python3 grading-machine.py self-test /etc/unicon/machine.json
 ```
 
-This sets up rootless Docker, a network wall and one Woodpecker agent per
-slot. The agents start only if the self-test passes.
+This sets up rootless Docker, a network wall, one Forgejo runner per slot
+and one unprivileged `unicon-base` runner. The runners start only if the
+self-test passes.
 
 ## Releases
 
@@ -94,5 +97,4 @@ commit `chore: cut X.Y.Z`, merge, and tag `vX.Y.Z` on `main`.
   bootstrap stops: restore the backup, or `down -v` and start empty.
 - Change Forgejo only in `forgejo/app.ini` and `forgejo/custom/`. Web UI
   changes are lost on restart.
-- Woodpecker runs on Postgres, never SQLite, which loses pipelines under load.
 - Nothing reads Forgejo's database. Use its API.

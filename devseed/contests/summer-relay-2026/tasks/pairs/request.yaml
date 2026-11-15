@@ -1,0 +1,28 @@
+name: Closest Pair
+workflow: judgekit/special@v1
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: {entrant: {options: [python, cpp], default: python}}
+  checker: checker/
+  time_limit: 1
+  memory_limit: 256
+runs:
+  - {input: samples/1.in, answer: samples/1.ans}
+  - {input: tests/1.in, answer: tests/1.ans}
+  - {input: tests/2.in, answer: tests/2.ans}
+  - {input: tests/3.in, answer: tests/3.ans}
+  - {input: tests/4.in, answer: tests/4.ans}
+scoring:
+  groups:
+    sample: {input: [samples/1.in]}
+  values:
+    points: {block: mul, of: [20, {block: sum, over: {runs: all}, of: {run: [all, score]}}]}
+    solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
+  show:
+    always:
+      values: [points, solved]
+      outputs: [log, compiled]
+      runs:
+        - {of: all, fields: [verdict, passed, score, time_ms, label, message]}
+        - {of: sample, fields: [input, answer]}
+submissions: {rate: {count: 10, per: 60}}

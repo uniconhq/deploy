@@ -1,13 +1,13 @@
 """Download one of a task's own files through the real proxy on the running
 compose stack, as the organiser who made it, and not as anyone else.
 
-The organiser creates an org, a contest and a task, and on the Runs card
-replaces the first row's input with bytes that are not text and past what
-the page saves inline (256 KiB), so the file goes into the forge's
-large-file store through the upload door, writes the task's statement and
-opens the contest. The page's
-own read of the file names the version it was read at, and the download
-address is the one the organiser's page builds from it,
+The organiser creates an org, a contest and a task saved as `api.SUM`, and
+on the Runs card replaces the first row's input with bytes that are not text
+and past what the page saves inline (256 KiB), so the file goes into the
+forge's large-file store through the upload door, writes the task's
+statement and opens the contest. The page's own read of the file names the
+version it was read at, and the download address is the one the organiser's
+page builds from it,
 `/-/downloads/<org>/<contest>/<task>/versions/<commit>/<path>`. Through the
 proxy, with the organiser's session, it answers the bytes as uploaded, not
 the pointer the repository holds, as an attachment named after the file,
@@ -30,6 +30,7 @@ from urllib.parse import quote
 
 from playwright.sync_api import APIResponse, Browser, Page, ViewportSize
 
+from tests.e2e import api
 from tests.e2e.stack import (
     APP,
     STATEMENT,
@@ -42,6 +43,7 @@ from tests.e2e.stack import (
     needs_stack,
     open_contest,
     register,
+    reload_page,
     save_task,
     sign_in,
     submission_rate,
@@ -55,7 +57,7 @@ pytestmark = [needs_stack]
 # not text, which the download must carry unchanged, and long enough that
 # the page sends it through the upload door rather than inline.
 INPUT = b"2 1\r\n" + bytes(range(256)) * 1100
-FILE = "runs/0/0/input"
+FILE = "input"
 # What Forgejo's media endpoint answers with of its own that the door keeps
 # from the browser: its cookie, and the names it gives the object and the
 # headers its own pages' scripts read.
@@ -120,10 +122,18 @@ def test_an_organiser_downloads_a_tasks_file_and_an_entrant_does_not(
     sign_in(organiser, organiser_name, organiser_password)
     create_org(organiser, org)
     create(organiser, "spring", "Create contest", "New contest")
-    create(organiser, "sum", "Create task", "New task")
+    workflow = api.publish_classic(api.Caller.of(organiser), org)
+    create(organiser, "sum", "Create task", "New task", workflow)
+    api.save_task(
+        api.Caller.of(organiser),
+        f"/orgs/{org}/contests/spring/tasks/sum",
+        f"name: sum\nworkflow: {workflow}\n{api.SUM}",
+        api.SUM_FILES,
+    )
+    reload_page(organiser)
     task_page = organiser.url
     submission_rate(organiser, 10, 60)
-    upload_run_file(organiser, 1, "input", INPUT)
+    upload_run_file(organiser, 1, "input", FILE, INPUT)
     save_task(organiser)
 
     stored = _read(organiser, org, FILE)

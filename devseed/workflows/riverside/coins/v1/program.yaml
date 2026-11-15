@@ -1,0 +1,4 @@
+# What the checker beside this file reports: a score from 0 to 1, with
+# verdict 0 for coins it takes and 1 for coins it does not.
+reports:
+  score: {better: higher, at_least: 0, at_most: 1}

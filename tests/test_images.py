@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from bootstrap import images, main
+from bootstrap import images
 from bootstrap.images import GitHubSource, LocalSource, ManifestError
 
 DEPLOY = Path(__file__).resolve().parent.parent
@@ -28,17 +28,16 @@ def _write(path: Path, document: Any) -> Path:
 
 
 def _runner(registry: str = "ghcr.io/uniconhq") -> dict[str, str]:
-    return {
-        "worker": f"{registry}/worker{DIGEST}",
-        "plugin-git": f"docker.io/woodpeckerci/plugin-git{DIGEST}",
-    }
+    return {"step-helper": f"{registry}/step-helper{DIGEST}"}
 
 
-def test_the_release_manifest_in_this_repo_loads() -> None:
+def test_the_release_manifest_loads_with_no_step_helper_yet() -> None:
+    """No step helper is released, so the release manifest loads, and only
+    writing labels from it is refused."""
     manifest = images.load(DEPLOY / images.RELEASE_MANIFEST)
 
-    assert manifest.plugin_git.startswith("docker.io/woodpeckerci/plugin-git@sha256:")
-    assert set(manifest.images) == {"worker", "plugin-git"}
+    with pytest.raises(ManifestError, match="has no step-helper"):
+        _ = manifest.step_helper
     assert manifest.primitive_names == ["exec"]
     for release in manifest.primitives:
         assert isinstance(release.source, GitHubSource)
@@ -175,9 +174,9 @@ def test_a_primitive_with_no_version_is_refused(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     "reference",
     [
-        "ghcr.io/uniconhq/worker:v0.1.0",
-        "ghcr.io/uniconhq/worker@sha256:abc",
-        "worker@sha256:" + "a" * 64,
+        "ghcr.io/uniconhq/step-helper:v0.1.0",
+        "ghcr.io/uniconhq/step-helper@sha256:abc",
+        "step-helper@sha256:" + "a" * 64,
         "",
         None,
     ],
@@ -187,20 +186,17 @@ def test_an_image_not_named_by_digest_is_refused(
 ) -> None:
     path = _write(
         tmp_path / "images.json",
-        {"images": {**_runner(), "worker": reference}, "primitives": {}},
+        {"images": {"step-helper": reference}, "primitives": {}},
     )
 
-    with pytest.raises(ManifestError, match=r"images\.worker is not an image"):
+    with pytest.raises(ManifestError, match=r"images\.step-helper is not an image"):
         images.load(path)
 
 
-def test_a_manifest_without_the_git_plugin_is_refused(tmp_path: Path) -> None:
-    runner = _runner()
-    del runner["plugin-git"]
-    path = _write(tmp_path / "images.json", {"images": runner, "primitives": {}})
+def test_a_manifest_names_its_step_helper(tmp_path: Path) -> None:
+    path = _write(tmp_path / "images.json", {"images": _runner(), "primitives": {}})
 
-    with pytest.raises(ManifestError, match="has no plugin-git"):
-        images.load(path)
+    assert images.load(path).step_helper == f"ghcr.io/uniconhq/step-helper{DIGEST}"
 
 
 def test_a_primitive_source_of_another_shape_is_refused(tmp_path: Path) -> None:
@@ -233,17 +229,3 @@ def test_the_local_manifest_is_read_when_a_build_wrote_one(tmp_path: Path) -> No
     (tmp_path / "images.local.json").write_text("{}")
     assert images.choose(tmp_path, None) == tmp_path / "images.local.json"
     assert images.choose(tmp_path, Path("other.json")) == tmp_path / "other.json"
-
-
-def test_env_gets_the_manifest_images() -> None:
-    manifest = images.load(DEPLOY / images.RELEASE_MANIFEST)
-    values = {
-        "UNICON_DB_PASSWORD": "x",
-        "FORGEJO_PUBLIC_URL": "http://f.localhost",
-        "UNICON_SESSION_HARD_TTL": "2592000",
-    }
-
-    main._derive_values(values, manifest, development=False)
-
-    assert values["UNICON_PLUGIN_GIT_IMAGE"] == manifest.plugin_git
-    assert values["UNICON_PRIMITIVE_BASE_IMAGE"] == ""

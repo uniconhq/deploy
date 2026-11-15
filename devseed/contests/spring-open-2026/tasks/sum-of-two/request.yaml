@@ -1,0 +1,31 @@
+name: Sum of Two
+workflow: judgekit/classic@v1
+environment:
+  cpp: {version: "16"}
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: {entrant: {options: [python, cpp], default: python}}
+  time_limit: 1
+  memory_limit: 256
+runs:
+  - {input: samples/1.in, answer: samples/1.ans}
+  - {input: tests/1.in, answer: tests/1.ans}
+  - {input: tests/2.in, answer: tests/2.ans}
+  - {input: tests/3.in, answer: tests/3.ans}
+  - {input: tests/4.in, answer: tests/4.ans}
+scoring:
+  groups:
+    sample: {input: [samples/1.in]}
+  values:
+    solved: {block: min, over: {runs: all}, of: {run: [all, score]}}
+  show:
+    always:
+      values: [solved]
+      outputs: [log, compiled]
+      runs:
+        - {of: sample, fields: [input, answer, verdict, passed, score, time_ms, memory_kb, label, message]}
+        - {of: all, fields: [verdict, passed, score, time_ms, memory_kb, label, message]}
+    after_deadline:
+      runs:
+        - {of: all, fields: [input, answer]}
+submissions: {rate: {count: 10, per: 60}}

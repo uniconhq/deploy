@@ -206,14 +206,13 @@ jobs:
           expect 200 "$app/orgs/acme/contests/spring/tasks/sum"
           expect 404 "$app/orgsx"
           expect 200 "$app/workflows"
-          expect 200 "$app/workflows/unicon/classic"
+          expect 200 "$app/workflows/acme/classic"
           expect 404 "$app/workflowsx"
           expect 200 "$app/contests/acme/spring"
           expect 200 "$app/contests/acme/spring/tasks/sum"
           expect 404 "$app/contests"
           expect 404 "$app/contestsx"
           expect 404 "$app/api/v1/events/forge/acme"
-          expect 404 "$app/api/v1/ci/config"
           expect 404 "$app/unicon-results/logs/x"
           expect 404 "$app/-/uploads/door"
           expect 404 "$app/-/uploads/not-a-slot"
@@ -224,7 +223,6 @@ jobs:
           expect 404 "$app/-/downloads/acme/spring/sum/versions/main/task.yaml"
           expect 404 "$app/-/downloads/workflows/bob/tuned/versions/v1/scorer/main.py"
           expect 404 "$app/-/downloads/workflows/bob/tuned/draft/scorer/main.py"
-          expect 404 "$app/forgejo-lfs/lfs/x"
           expect 404 "$app/some/unlisted/path"
           expect 404 "$app/.env"
           expect 404 "$app/index.html"
@@ -271,9 +269,7 @@ jobs:
           curl -fsS http://localhost:8080/api/v1/auth/forge-url | grep -q '"url":"http://forge.localhost:8080"'
           curl -fsS "${resolve[@]}" http://forge.localhost:8080/user/sign_up | grep -q 'name="user_name"'
 
-      # The extension refuses every method from outside, and object storage
-      # takes only the writes it is routed for. A write with no signature
-      # reaches Garage and is refused there with 403.
+      # Object storage takes only the reads and writes it is routed for.
       - name: the machine paths take only what they are for
         working-directory: deploy
         run: |
@@ -283,18 +279,14 @@ jobs:
             if [ "$got" != "$1" ]; then echo "$2 $3 answered $got, expected $1"; exit 1; fi
             echo "$1 $2 $3"
           }
-          expect 404 POST "$app/api/v1/ci/config"
-          expect 403 PUT "$app/unicon-results/logs/x"
+          expect 404 PUT "$app/unicon-results/logs/x"
+          expect 404 PUT "$app/unicon-results/logs/x?X-Amz-Signature=0"
           expect 404 POST "$app/unicon-results/logs/x"
-          # A read of either bucket is routed only with a presigned query,
-          # which Garage then checks, and forgejo-lfs takes no write.
+          # A read is routed only with a presigned query, which Garage then
+          # checks.
           expect 404 GET "$app/unicon-results/logs/x"
           expect 403 GET "$app/unicon-results/logs/x?X-Amz-Signature=0"
           expect 404 GET "$app/unicon-results/?X-Amz-Signature=0"
-          expect 404 GET "$app/forgejo-lfs/lfs/00/00/0"
-          expect 403 GET "$app/forgejo-lfs/lfs/00/00/0?X-Amz-Signature=0"
-          expect 404 PUT "$app/forgejo-lfs/lfs/00/00/0?X-Amz-Signature=0"
-          expect 404 GET "$app/forgejo-lfs/?X-Amz-Signature=0"
           # The upload door: the one shape it takes needs a session it has
           # not got, so it refuses; everything else is not routed at all. The
           # question the proxy asks the backend is never routed from outside,
@@ -324,74 +316,39 @@ jobs:
           expect 404 GET "$app/-/downloads/acme/spring/sum/1/runs/first_not_passed/1/inputs/input"
           expect 404 GET "$app/-/downloads/door"
 
-      # The development git listener every grading step has as its HTTP
-      # proxy. A checkout's reads of the forge's host reach Forgejo, which
-      # asks for the credential; a push, the API, a path that only turns into
-      # a checkout path once nginx resolves it, and every other host are 404.
-      - name: a step's HTTP proxy passes checkout reads and nothing else
+      # The dev overlay's two runners, which bootstrap registered and the app
+      # profile started, are online at Forgejo.
+      - name: the dev runners connect
         working-directory: deploy
         run: |
-          forge="http://forge.localhost:8080"
-          repo="$forge/unicon/classic.workflow.git"
-          expect() {
-            want="$1"; shift
-            got="$(docker compose -f compose.yaml -f compose.dev.yaml exec -T proxy \
-              curl -s -o /dev/null -w '%{http_code}' --path-as-is -x http://127.0.0.1:3128 "$@")"
-            if [ "$got" != "$want" ]; then echo "$* answered $got, expected $want"; exit 1; fi
-            echo "$want $*"
-          }
-          expect 401 "$repo/info/refs?service=git-upload-pack"
-          expect 404 "$repo/info/refs?service=git-receive-pack"
-          expect 404 -X POST "$repo/git-receive-pack"
-          expect 404 -X PUT "$repo/info/lfs/objects/$(printf '0%.0s' $(seq 64))"
-          expect 404 "$forge/api/v1/version"
-          expect 404 "$forge/api/v1/users/../../../unicon/classic.workflow.git/info/refs?service=git-upload-pack"
-          expect 404 "$forge/unicon/x.git/info/lfs/objects/batch/../../../../api/v1/version"
-          expect 404 "http://forgejo:3000/api/v1/version"
-          expect 404 -X POST "http://backend:8000/api/v1/ci/config"
-          expect 404 "http://woodpecker-server:8000/api/agents"
-
-      # The grading machine of the dev overlay: the agent bootstrap enrolled
-      # connects with the token it wrote, as a global agent that takes
-      # pool=platform runs.
-      - name: the dev agent connects
-        working-directory: deploy
-        run: |
-          docker compose -f compose.yaml -f compose.dev.yaml --profile agent up -d woodpecker-agent
-          token="$(grep '^UNICON_WOODPECKER_TOKEN=' .env | cut -d= -f2-)"
-          connected='
+          token="$(grep '^UNICON_FORGE_ADMIN_TOKEN=' .env | cut -d= -f2-)"
+          online='
           import json, sys
-          laptop = [a for a in json.load(open("agents.json")) if a["name"] == "laptop"]
-          ok = bool(laptop) and laptop[0]["last_contact"] > 0 and laptop[0]["org_id"] == -1
-          sys.exit(0 if ok and laptop[0]["custom_labels"].get("pool") == "platform" else 1)
+          runners = json.load(sys.stdin)
+          sys.exit(0 if sum(r["status"] != "offline" for r in runners) == 2 else 1)
           '
           for _ in $(seq 1 30); do
-            curl -fsS -H "Authorization: Bearer $token" http://localhost:8000/api/agents > agents.json
-            if python3 -c "$connected"; then echo "laptop connected"; exit 0; fi
+            if printf 'header = "Authorization: token %s"\n' "$token" \
+              | docker compose -f compose.yaml -f compose.dev.yaml exec -T forgejo \
+                curl -fsS --config - http://localhost:3000/api/v1/admin/actions/runners \
+              | python3 -c "$online"; then echo "both runners online"; exit 0; fi
             sleep 2
           done
-          echo "the dev agent never connected"; exit 1
+          echo "the dev runners never connected"; exit 1
 
-      # forge's live tests, which check what only a real Forgejo and
-      # Woodpecker can, against this stack: Forgejo, Garage and the CI on the
-      # ports compose.dev.yaml publishes on loopback, with the platform's
-      # admin token and the CI account's, and the stack's Postgres for the
-      # databases the tests make and drop. The one that stands in for the
-      # backend through a whole grading run skips here, since the CI and its
-      # step containers would reach the test at host.docker.internal, which
-      # Docker on Linux does not name; the browser test grades on this stack
-      # instead. -rs lists every skip with its reason.
+      # forge's live tests, which check what only a real Forgejo can, against
+      # this stack: Forgejo and Garage on the ports compose.dev.yaml publishes
+      # on loopback, with the platform's admin token, and the stack's
+      # Postgres for the databases the tests make and drop. -rs lists every
+      # skip with its reason.
       #
       # They run beside the browser test, in the background, and the step
       # after it waits for them. Each makes its own people, orgs and
-      # repositories under a random suffix at Forgejo and the CI, and its own
-      # databases on the stack's Postgres, reaches Forgejo, the CI and Garage
-      # on their loopback ports rather than through the proxy, and reads
-      # nothing the browser test makes, nor the browser test anything of
-      # theirs. The one run they start at the CI asks the backend for its
-      # configuration, and the backend, which holds no such grading, refuses
-      # it, so it never reaches the dev agent. Their output and exit code go
-      # to files.
+      # repositories under a random suffix at Forgejo, and its own databases
+      # on the stack's Postgres, reaches Forgejo and Garage on their loopback
+      # ports rather than through the proxy, and reads nothing the browser
+      # test makes, nor the browser test anything of theirs. Their output and
+      # exit code go to files.
       - name: start forge's live tests against this stack
         working-directory: forge
         run: |
@@ -403,17 +360,12 @@ jobs:
           }
           forge_token="$(env_value UNICON_FORGE_ADMIN_TOKEN)"
           forge_public_url="$(env_value FORGEJO_PUBLIC_URL)"
-          ci_public_url="$(env_value WOODPECKER_PUBLIC_URL)"
-          ci_token="$(env_value UNICON_WOODPECKER_TOKEN)"
           s3_access_key="$(env_value UNICON_S3_ACCESS_KEY)"
           s3_secret_key="$(env_value UNICON_S3_SECRET_KEY)"
           postgres_password="$(env_value POSTGRES_SUPERUSER_PASSWORD)"
           export UNICON_LIVE_FORGE_URL=http://127.0.0.1:3300
           export UNICON_LIVE_FORGE_ADMIN_TOKEN="$forge_token"
           export UNICON_LIVE_FORGE_PUBLIC_URL="$forge_public_url"
-          export UNICON_LIVE_CI_URL=http://127.0.0.1:8000
-          export UNICON_LIVE_CI_PUBLIC_URL="$ci_public_url"
-          export UNICON_LIVE_CI_ADMIN_TOKEN="$ci_token"
           export UNICON_LIVE_S3_ENDPOINT=http://127.0.0.1:3900
           export UNICON_LIVE_S3_ACCESS_KEY="$s3_access_key"
           export UNICON_LIVE_S3_SECRET_KEY="$s3_secret_key"
@@ -426,7 +378,7 @@ jobs:
           ) < /dev/null > "$RUNNER_TEMP/live-tests.log" 2>&1 &
 
       # tests/e2e from a browser: among them real grading runs on the dev
-      # agent, read on a contest's leaderboards, and a task's file downloaded
+      # runners, read on a contest's leaderboards, and a task's file downloaded
       # through the download door with an organiser's session, which the
       # checks above, made with none, cannot reach.
       - name: submit and grade from the browser
@@ -451,11 +403,9 @@ jobs:
         working-directory: deploy
         run: uv run scripts/check-lfs.py --exact
 
-      # Nothing is made the second time: no secret, no version, no agent.
-      # Its summary lists what was already there, unicon/exec at v4,
-      # unicon/classic at v6 and unicon/interactive at v4 among them, and no
-      # unicon/compile, unicon/exec at v1, unicon/classic at v1 to v5 or
-      # unicon/interactive at v1 to v3.
+      # Nothing is made the second time: no secret, no version, no runner.
+      # It lists what was already there, unicon/exec at v4 among them, and no
+      # unicon/compile or unicon/exec at v1.
       - name: a second bootstrap changes nothing
         working-directory: deploy
         run: |
@@ -464,36 +414,8 @@ jobs:
           diff .env.first .env
           grep -q '^created: 0,' second-run.txt
           grep -q "present  primitive unicon/exec version v4\$" second-run.txt
-          grep -q "present  workflow unicon/classic version v6\$" second-run.txt
-          grep -q "present  workflow unicon/interactive version v4\$" second-run.txt
           if grep -q "primitive unicon/compile" second-run.txt; then exit 1; fi
           if grep -q "primitive unicon/exec version v1" second-run.txt; then exit 1; fi
-          if grep -Eq "workflow unicon/classic version v(1|2|3|4|5)" second-run.txt; then exit 1; fi
-          if grep -Eq "workflow unicon/interactive version v(1|2|3)" second-run.txt; then exit 1; fi
-
-      # A version folder that no longer matches its tag at the forge stops
-      # bootstrap before it seeds anything, naming the version.
-      # A version that differs in how it grades stops the run; one that
-      # differs only in words (its README, its inputs' form text) moves.
-      - name: a changed version stops bootstrap
-        working-directory: deploy
-        run: |
-          cp workflows/classic/v6/workflow.yaml workflow.saved
-          sed -i '0,/time_limit: 3$/s//time_limit: 4/' workflows/classic/v6/workflow.yaml
-          if uv run bootstrap > changed-run.txt; then
-            cat changed-run.txt
-            echo "bootstrap seeded over a version that differs"
-            exit 1
-          fi
-          cp workflow.saved workflows/classic/v6/workflow.yaml
-          cat changed-run.txt
-          grep -q 'unicon/classic@v6, against workflows/classic/v6/' changed-run.txt
-          cp workflows/classic/v6/README.md readme.saved
-          echo "Reworded." >> workflows/classic/v6/README.md
-          uv run bootstrap > reworded-run.txt
-          cat reworded-run.txt
-          grep -q 'workflow unicon/classic version v6.*moved' reworded-run.txt
-          cp readme.saved workflows/classic/v6/README.md
 
       # After the browser test, which signs in from this machine too. A burst
       # of 300 sign-in posts from one address: 240 over the rate pass at once,
@@ -537,12 +459,12 @@ jobs:
           # tail before that log is reached. So the backend's whole log comes
           # first, then its grading lines picked out, then the tail of all.
           echo "== backend"
-          docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color backend || true
+          docker compose -f compose.yaml -f compose.dev.yaml --profile app logs --no-color backend || true
           echo "== backend grading lines"
-          docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color backend \
+          docker compose -f compose.yaml -f compose.dev.yaml --profile app logs --no-color backend \
             | grep -E 'steps\.(faulted|concluded)' || true
           echo "== every service, last 120 lines"
-          docker compose -f compose.yaml -f compose.dev.yaml --profile app --profile agent logs --no-color | tail -120
+          docker compose -f compose.yaml -f compose.dev.yaml --profile app logs --no-color | tail -120
 
   workflows:
     runs-on: ubuntu-latest

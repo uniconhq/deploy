@@ -1,5 +1,5 @@
-"""The verdict script unicon/interactive@v4 ships,
-workflows/interactive/v4/verdict/: every rule on hand-written facts, as
+"""The verdict script judgekit/interactive@v1 ships, in the dev seed's
+verdict/: every rule on hand-written facts, as
 exec's programs form gives them, and the report it writes for exec's one
 form.
 
@@ -20,7 +20,9 @@ from typing import Any
 import pytest
 from ruamel.yaml import YAML
 
-WORKFLOW = Path(__file__).resolve().parent.parent / "workflows/interactive/v4"
+WORKFLOW = (
+    Path(__file__).resolve().parent.parent / "devseed/workflows/judgekit/interactive/v1"
+)
 VERDICT = WORKFLOW / "verdict"
 SIBLINGS = Path(__file__).resolve().parents[2]
 """Where the primitives' checkouts sit beside deploy's."""
@@ -350,7 +352,7 @@ def test_the_manifest_declares_no_report() -> None:
 
 
 def test_the_workflow_links_an_entrant_and_a_judge_and_hands_on_the_facts() -> None:
-    workflow = YAML(typ="safe").load(WORKFLOW / "workflow.yaml")
+    workflow = YAML(typ="safe").load(WORKFLOW / "request.yaml")
     assert "test" not in workflow
     steps = {step["id"]: step for step in workflow["steps"]}
     assert list(steps) == ["game", "decide"]

@@ -27,6 +27,7 @@ that is the person's own OAuth token.
 
 from __future__ import annotations
 
+import base64
 import json
 from dataclasses import dataclass
 from typing import Any
@@ -36,6 +37,17 @@ from bootstrap.compose import Compose
 PROVISIONING_TOKEN_NAME = "unicon-provisioning"
 CONTAINER_USER = "git"
 API_INSIDE_THE_CONTAINER = "http://localhost:3000/api/v1"
+GIT_INSIDE_THE_CONTAINER = "http://localhost:3000"
+# Clones $1 and pushes commit $2 to $3's main, forced. The header with the
+# credential comes on standard input and goes into git's environment.
+PUSH_COMMIT = """set -eu
+IFS= read -r header
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+git clone --quiet --bare "$1" "$work"
+GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=http.extraHeader GIT_CONFIG_VALUE_0="$header" \\
+  git -C "$work" push --quiet --force "$3" "$2:refs/heads/main"
+"""
 
 
 class ForgejoError(Exception):
@@ -187,6 +199,25 @@ class Forgejo:
             )
         )
         return OAuthApplication(created["client_id"], created["client_secret"]), True
+
+    def push_commit(
+        self, upstream: str, commit: str, repo: str, account: tuple[str, str]
+    ) -> None:
+        """Push `commit` of the repository at `upstream`, with its history, to
+        `repo`'s main branch here, as `account`, a name and its token."""
+        basic = base64.b64encode(f"{account[0]}:{account[1]}".encode()).decode()
+        self._compose.execute(
+            self._service,
+            "sh",
+            "-c",
+            PUSH_COMMIT,
+            "push",
+            upstream,
+            commit,
+            f"{GIT_INSIDE_THE_CONTAINER}/{repo}.git",
+            user=CONTAINER_USER,
+            stdin=f"Authorization: Basic {basic}\n",
+        )
 
     def api(
         self,

@@ -5,10 +5,11 @@
 # It does four things: builds backend and frontend from the sibling checkouts
 # instead of pulling images, publishes the internal services so tools on this
 # machine can reach them, catches Forgejo's mail in Mailpit, so a person can
-# make an account and confirm its address from http://localhost:8025, and can
-# run one grading machine on this laptop under the `agent` profile: a CI
-# agent. Sign-up is open on a stack started with this file unless .env says
-# SIGN_UP_OPEN=false; bootstrap decides it, not this file.
+# make an account and confirm its address from http://localhost:8025, and
+# runs the grading on this laptop with the app: one `unicon-base` runner and
+# one `unicon-exec-<slot>` runner taking every slot size. Sign-up is open on a
+# stack started with this file unless .env says SIGN_UP_OPEN=false;
+# bootstrap decides it, not this file.
 #
 # Every port opened here is bound to 127.0.0.1. A published port with no host
 # address listens on every interface, so on a laptop joined to a conference
@@ -70,45 +71,32 @@ services:
       - "127.0.0.1:8025:8025"
 
   proxy:
-    # The development git listener on 3128, unpublished: see
-    # proxy/dev-git-door.conf and WOODPECKER_BACKEND_HTTP_PROXY below.
-    volumes:
-      - ./proxy/dev-git-door.conf:/etc/nginx/templates/dev-git-door.conf.template:ro
-    # The one service on the grading network, where the dev agent's step
-    # containers are: they reach the platform and the git listener here and
-    # nothing else of the stack.
+    # On the grading network too, where the runners' jobs reach the platform
+    # at http://proxy.
     networks:
       - default
       - grading
 
-  woodpecker-server:
-    # The operator interface, and the URL bootstrap drives to mint the CI token.
-    ports:
-      - "127.0.0.1:8000:8000"
-    # Woodpecker uses the public Forgejo URL for the whole OAuth exchange, the
-    # server-side token request included, so forge.localhost has to mean
-    # something inside this container too: the host, whose port 8080 is the
-    # proxy. A deployment where Forgejo has a real name does not need this.
-    extra_hosts:
-      - "forge.localhost:host-gateway"
-    environment:
-      # How the laptop's grading machine clones. A run's checkout uses the
-      # URL Forgejo reports, on forge.localhost, and the CI lends its
-      # credential for that name only; inside a step container the name is
-      # the container itself, because curl sends every .localhost name to
-      # loopback. So every step gets the proxy's development git listener,
-      # proxy/dev-git-door.conf, as its HTTP proxy, which passes a
-      # checkout's reads to Forgejo and nothing else. Every other address a
-      # step calls goes direct: a step reaches the platform at http://proxy,
-      # and at the Docker host when the forge's live tests run the platform
-      # there.
-      WOODPECKER_BACKEND_HTTP_PROXY: http://proxy:3128
-      WOODPECKER_BACKEND_NO_PROXY: proxy,host.docker.internal
-      # Every step on the laptop is told it may run under root Docker, which
-      # is all Docker Desktop has: exec refuses root Docker's identity map
-      # without this, and says on every step that it is set. Only this file
-      # sets it; a grading machine is rootless and never does.
-      WOODPECKER_ENVIRONMENT: UNICON_DEV_ROOT_DOCKER:1
+  # Forgejo at its ROOT_URL for the runners and their jobs. Every job fetches
+  # actions and checks out at the URL Forgejo knows itself by,
+  # FORGEJO_PUBLIC_URL, which on a laptop is a .localhost name the proxy
+  # serves only sign-in pages under. On the grading network that name is
+  # this forwarder, which passes the port of that URL to Forgejo whole.
+  # curl, and so git, answers every .localhost name with loopback without
+  # asking DNS, so the runners also give git this forwarder as its HTTP
+  # proxy; Forgejo answers a request for a whole URL as it would the path.
+  forge-host:
+    image: alpine/socat:1.8.0.3
+    profiles: [app]
+    restart: unless-stopped
+    command:
+      - TCP-LISTEN:${FORGEJO_PUBLIC_PORT},fork,reuseaddr
+      - TCP:forgejo:3000
+    networks:
+      default:
+      grading:
+        aliases:
+          - ${FORGEJO_DOMAIN}
 
   # Same build and same tag as backend, so the image is built once and both
   # services run it. The forge checkout beside it is handed to the build as
@@ -129,11 +117,9 @@ services:
         forge: ../forge
     image: unicon/backend:dev
     environment:
-      # The dev agent's steps join the grading network, where the proxy is,
-      # so a step reaches the platform at the proxy's name on it: its door
-      # under /api/, the uploads of its files and logs under
-      # /unicon-results/, signed for this host. localhost would be the step
-      # container itself.
+      # The runners' jobs join the grading network, where the proxy is, so a
+      # job reaches the platform at the proxy's name on it. localhost would
+      # be the job's container itself.
       UNICON_MACHINE_URL: http://proxy
       # Invite mail goes to Mailpit too, the way Forgejo's does above.
       UNICON_MAIL_SMTP_ADDR: mailpit
@@ -148,61 +134,108 @@ services:
       context: ../frontend
     image: unicon/frontend:dev
 
-  # One grading machine on the laptop, beside the stack: the CI agent, off
-  # unless started with --profile agent. This is the only place an agent and
-  # the databases share a Docker daemon; a real grading machine is a separate
-  # host. The agent dials out to the server like any
-  # other machine, with a token the server issued for it: bootstrap enrols it
-  # as the global agent `laptop` and writes WOODPECKER_DEV_AGENT_TOKEN, so run
-  # bootstrap before starting the profile.
-  woodpecker-agent:
-    image: woodpeckerci/woodpecker-agent:v3.18.1
-    profiles: [agent]
+  # The laptop's runners, registered at Forgejo by bootstrap, which writes
+  # their tokens and labels to .env. They start the jobs on this machine's
+  # Docker, on the grading network, which holds the proxy and the forwarder
+  # and no other service of the stack. This is the only place runners and
+  # the databases share a Docker daemon; a grading machine is a separate host
+  # (machine/grading-machine.py). Dev only: a job reaches Forgejo's whole web
+  # UI and API through forge-host, and on Docker Desktop also
+  # host.docker.internal and every port this machine publishes.
+  runner-base:
+    image: data.forgejo.org/forgejo/runner:13.2.1
+    profiles: [app]
     restart: unless-stopped
-    depends_on:
-      woodpecker-server:
-        condition: service_healthy
-    environment:
-      WOODPECKER_SERVER: woodpecker-server:9000
-      WOODPECKER_AGENT_SECRET: ${WOODPECKER_DEV_AGENT_TOKEN}
-      WOODPECKER_HOSTNAME: laptop
-      # A grading run carries the label pool=platform, which only the
-      # platform's own machines declare. A pipeline that runs exec asks for
-      # shape=rootless too. Docker Desktop runs Docker as root, so this agent
-      # is not that shape, but it says it is, so the laptop grades every task:
-      # the server's UNICON_DEV_ROOT_DOCKER above lets exec run here. A real
-      # machine's shape is left to its setup, machine/grading-machine.py. A
-      # run task's pipeline asks for a slot size too; this one agent takes any.
-      WOODPECKER_AGENT_LABELS: pool=platform,shape=rootless,size=*
-      # Onto the volume below. The default path is /etc/woodpecker, which this
-      # image does not create, so the agent cannot save the identity the server
-      # gave it: every restart registers a new agent and leaves the old row
-      # behind reporting nothing.
-      WOODPECKER_AGENT_CONFIG_FILE: /var/lib/woodpecker/agent.conf
-      WOODPECKER_MAX_WORKFLOWS: "4"
-      WOODPECKER_BACKEND: docker
-      # Every step container joins the grading network as well as its own,
-      # which holds the proxy and no other service of the stack: the checkout
-      # reaches Forgejo through its git listener and the other steps reach
-      # the platform at http://proxy, and none can reach the database, the
-      # object store's admin API, the CI's API or anything else inside.
-      WOODPECKER_BACKEND_DOCKER_NETWORK: unicon-grading
-      # Bytes. The most memory any step's container may use: the platform
-      # machine's 16 GB, since Woodpecker sets no limit per step and a step's
-      # own limits are kept inside it.
-      WOODPECKER_BACKEND_DOCKER_LIMIT_MEM: "17179869184"
-      WOODPECKER_LOG_LEVEL: info
+    user: "0"
+    command: [forgejo-runner, daemon, --config, /etc/runner.yaml]
+    # The runner clones the actions with git too.
+    environment: &git-proxy
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: http.proxy
+      GIT_CONFIG_VALUE_0: http://forge-host:${FORGEJO_PUBLIC_PORT}
+    configs:
+      - source: runner-base
+        target: /etc/runner.yaml
+    networks: [grading]
     volumes:
-      - woodpecker-agent-data:/var/lib/woodpecker
-      # The agent starts the step containers on the host daemon. Anything that
-      # can reach this socket is root on the host, and no step is given it.
+      - /var/run/docker.sock:/var/run/docker.sock
+
+  runner-exec:
+    image: data.forgejo.org/forgejo/runner:13.2.1
+    profiles: [app]
+    restart: unless-stopped
+    user: "0"
+    command: [forgejo-runner, daemon, --config, /etc/runner.yaml]
+    environment: *git-proxy
+    configs:
+      - source: runner-exec
+        target: /etc/runner.yaml
+    networks: [grading]
+    volumes:
       - /var/run/docker.sock:/var/run/docker.sock
 
 networks:
-  # Where the dev agent's step containers are, beside the proxy. A fixed
-  # name, since the agent's setting above names it.
   grading:
-    name: unicon-grading
 
-volumes:
-  woodpecker-agent-data:
+# The two runners' settings. A runner's timeout is below Forgejo's
+# ENDLESS_TASK_TIMEOUT (3 h) and forge's wait for a machine (2 h). The cache
+# server is off and a job gets no container options. Docker Desktop runs
+# Docker as root, so exec is told it may run there (UNICON_DEV_ROOT_DOCKER);
+# a grading machine is rootless and never is.
+configs:
+  runner-base:
+    content: |
+      log: {level: info, job_level: info}
+      runner:
+        capacity: 4
+        timeout: 1h
+        fetch_interval: 2s
+        report_interval: 1s
+        envs:
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: http.proxy
+          GIT_CONFIG_VALUE_0: http://forge-host:${FORGEJO_PUBLIC_PORT}
+      cache: {enabled: false}
+      container:
+        network: ${COMPOSE_PROJECT_NAME}_grading
+        privileged: false
+        options: ""
+        force_pull: false
+        docker_host: "-"
+      server:
+        connections:
+          forgejo:
+            url: ${FORGEJO_PUBLIC_URL}/
+            uuid: ${DEV_RUNNER_BASE_UUID}
+            token: ${DEV_RUNNER_BASE_TOKEN}
+            labels: ${DEV_RUNNER_BASE_LABELS:?set by bootstrap}
+  runner-exec:
+    content: |
+      log: {level: info, job_level: info}
+      runner:
+        capacity: 1
+        timeout: 1h
+        fetch_interval: 2s
+        report_interval: 1s
+        envs:
+          UNICON_BOX_USERS: "10000-10099"
+          UNICON_CACHE_CAP_BYTES: "10737418240"
+          UNICON_DEV_ROOT_DOCKER: "1"
+          GIT_CONFIG_COUNT: "1"
+          GIT_CONFIG_KEY_0: http.proxy
+          GIT_CONFIG_VALUE_0: http://forge-host:${FORGEJO_PUBLIC_PORT}
+      cache: {enabled: false}
+      container:
+        network: ${COMPOSE_PROJECT_NAME}_grading
+        privileged: true
+        options: ""
+        valid_volumes: [unicon-cache]
+        force_pull: false
+        docker_host: "-"
+      server:
+        connections:
+          forgejo:
+            url: ${FORGEJO_PUBLIC_URL}/
+            uuid: ${DEV_RUNNER_EXEC_UUID}
+            token: ${DEV_RUNNER_EXEC_TOKEN}
+            labels: ${DEV_RUNNER_EXEC_LABELS:?set by bootstrap}

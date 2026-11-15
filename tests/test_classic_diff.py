@@ -1,4 +1,4 @@
-"""The diff script unicon/classic@v6 ships, workflows/classic/v6/diff/:
+"""The diff script judgekit/classic@v1 ships, in the dev seed's diff/:
 words compared as testlib's wcmp compares them, every case of
 unicon/diff-check@v2's tests judged by that rule, the report it writes
 for exec, and the workflow beside it that runs it on the solution's output.
@@ -21,7 +21,10 @@ import pytest
 
 from bootstrap import core_yaml
 
-DIFF = Path(__file__).resolve().parent.parent / "workflows/classic/v6/diff"
+DIFF = (
+    Path(__file__).resolve().parent.parent
+    / "devseed/workflows/judgekit/classic/v1/diff"
+)
 
 
 def load_diff() -> ModuleType:
@@ -263,7 +266,7 @@ def test_the_manifest_declares_the_score_with_its_bounds() -> None:
 
 
 def test_the_workflow_runs_the_solution_then_the_diff_script_on_its_output() -> None:
-    workflow = core_yaml.load((DIFF.parent / "workflow.yaml").read_bytes())
+    workflow = core_yaml.load((DIFF.parent / "request.yaml").read_bytes())
     assert "test" not in workflow
     steps = {step["id"]: step for step in workflow["steps"]}
     assert list(steps) == ["solution", "compare"]

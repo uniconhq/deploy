@@ -1,6 +1,6 @@
 #!/bin/sh
-# One Postgres server, three databases, three roles: forgejo, woodpecker,
-# unicon. Each role owns exactly its own database and can reach no other.
+# One Postgres server, two databases, two roles: forgejo and unicon. Each
+# role owns exactly its own database and can reach no other.
 #
 # Never one shared database. Forgejo runs its own migrations and already owns
 # tables called user, team, org and session, and its state is only half in the
@@ -22,7 +22,7 @@ create_database() {
     --set "role=$role" --set "password=$password" <<'SQL'
 CREATE ROLE :"role" LOGIN PASSWORD :'password';
 -- LC_COLLATE C is what Forgejo asks for, and the same collation everywhere
--- keeps index behaviour identical across the three databases.
+-- keeps index behaviour identical across the databases.
 CREATE DATABASE :"role"
   OWNER :"role"
   ENCODING 'UTF8'
@@ -35,5 +35,4 @@ SQL
 }
 
 create_database forgejo "${FORGEJO_DB_PASSWORD:-}"
-create_database woodpecker "${WOODPECKER_DB_PASSWORD:-}"
 create_database unicon "${UNICON_DB_PASSWORD:-}"

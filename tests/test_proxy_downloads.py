@@ -2,8 +2,8 @@
 nginx reads them: for each of its two kinds of address, the location a
 download is asked at, and the map that lets through only the forge's own
 answer for it. A submission's files sit under `files/<input>/`: a folder
-input's in folders of their own, and each part of an input given once per
-tuple under `<part>/`, its tuple's position from 1. The forge names each at
+input's in folders of their own, and each part of an input given in parts
+under `<part>/`, its number from 1. The forge names each at
 the submission's commit, so both patterns take every such path and nothing
 else. A task's own files are asked for at
 `versions/<commit>/<path>`, any file of the task at any depth, and the forge

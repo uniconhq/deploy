@@ -12,14 +12,8 @@ import pytest
 import yaml  # type: ignore[import-untyped]
 
 from bootstrap import main
-from bootstrap.images import Manifest
 
 DIGEST = "@sha256:" + "0" * 64
-MANIFEST = Manifest(
-    path=Path("images.json"),
-    images={"plugin-git": f"docker.io/woodpeckerci/plugin-git{DIGEST}"},
-    primitives=(),
-)
 BASE = {
     "MAIL_FROM": "Unicon <u@example.org>",
     "UNICON_DB_PASSWORD": "x",
@@ -36,8 +30,8 @@ def test_the_mailer_follows_the_mail_server() -> None:
         "MAIL_ENABLED": "false",
     }
 
-    main._derive_values(without, MANIFEST, development=False)
-    main._derive_values(with_server, MANIFEST, development=False)
+    main._derive_values(without, development=False)
+    main._derive_values(with_server, development=False)
 
     assert without["MAIL_ENABLED"] == "false"
     assert with_server["MAIL_ENABLED"] == "true"
@@ -50,29 +44,26 @@ def test_the_mailer_follows_the_mail_server() -> None:
 def test_mail_is_always_encrypted(port: str, protocol: str) -> None:
     values = {**BASE, "MAIL_SMTP_ADDR": "smtp.example.org", "MAIL_SMTP_PORT": port}
 
-    main._derive_values(values, MANIFEST, development=False)
+    main._derive_values(values, development=False)
 
     assert values["MAIL_PROTOCOL"] == protocol
 
 
 def test_open_sign_up_without_a_mail_server_is_refused() -> None:
     with pytest.raises(ValueError, match="MAIL_SMTP_ADDR is empty"):
-        main._derive_values(
-            {**BASE, "SIGN_UP_OPEN": "true"}, MANIFEST, development=False
-        )
+        main._derive_values({**BASE, "SIGN_UP_OPEN": "true"}, development=False)
 
     main._derive_values(
         {**BASE, "SIGN_UP_OPEN": "true", "MAIL_SMTP_ADDR": "smtp.example.org"},
-        MANIFEST,
         development=False,
     )
-    main._derive_values({**BASE, "SIGN_UP_OPEN": "false"}, MANIFEST, development=False)
+    main._derive_values({**BASE, "SIGN_UP_OPEN": "false"}, development=False)
 
 
 def test_a_development_stack_signs_up_through_mailpit() -> None:
     values = {**BASE, "SIGN_UP_OPEN": "true"}
 
-    main._derive_values(values, MANIFEST, development=True)
+    main._derive_values(values, development=True)
 
     assert values["FORGEJO_DISABLE_REGISTRATION"] == "false"
 

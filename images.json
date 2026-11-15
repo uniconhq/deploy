@@ -1,8 +1,5 @@
 {
-  "images": {
-    "worker": "ghcr.io/uniconhq/worker@sha256:081cc72a15afdb8b591e6cf2e32696257663a31946813058e82d38b5b829c76b",
-    "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:550075c844fcec0af41d9d28f9860aa5d8c43e1e9419be4b9266dc02c2f29804"
-  },
+  "images": {},
   "primitives": {
     "exec": {
       "v3": {

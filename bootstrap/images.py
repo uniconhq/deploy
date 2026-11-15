@@ -1,15 +1,15 @@
 """The image manifest: every image the stack grades with, by digest.
 
-`images.json` in this repo is the release manifest. It pins the runner's
-worker and Woodpecker's git plugin, and each version of each primitive: the
-image its steps run from, and where the primitive's own repository is at
-that release, since bootstrap mirrors that repository into the forge
-(primitives.py).
+`images.json` in this repo is the release manifest. It pins the step
+helper, which every job of a grading run runs in, and each version of each
+primitive: the image its steps run from, and where the primitive's own
+repository is at that release, since bootstrap mirrors that repository into
+the forge (primitives.py). A grading machine reads the same step helper
+from a copy kept beside its script (machine/grading-machine.py).
 
     {
       "images": {
-        "worker": "ghcr.io/uniconhq/worker@sha256:<64 hex>",
-        "plugin-git": "docker.io/woodpeckerci/plugin-git@sha256:<64 hex>"
+        "step-helper": "ghcr.io/uniconhq/step-helper@sha256:<64 hex>"
       },
       "primitives": {
         "exec": {
@@ -37,15 +37,11 @@ is there and the release manifest otherwise, unless told which with --images.
 
 Every image is a reference by digest and never by tag, because what a stack
 grades with must not change under it: a tag can be moved, a digest cannot.
-A manifest that names a tag, or lacks the image bootstrap hands the
-services, is refused before anything starts.
+A manifest that names a tag is refused before anything starts.
 
-A task's pipelines check a submission out with Woodpecker's own git plugin,
-`plugin-git`, which the release manifest pins and a local build copies from
-it, and which the CI lends a repository's credential to alone, so a
-manifest without it is refused. They end with a step on `primitive-base`,
-which a local build makes; the release manifest names no base image yet, so
-it is optional, and a stack without it grades nothing.
+Every runner label names the step helper by its digest here, so writing
+labels without it is refused. No step helper is released yet, so the
+release manifest names none and only a local build grades.
 """
 
 from __future__ import annotations
@@ -59,11 +55,7 @@ from typing import Any
 RELEASE_MANIFEST = "images.json"
 LOCAL_MANIFEST = "images.local.json"
 
-PLUGIN_GIT = "plugin-git"
-PRIMITIVE_BASE = "primitive-base"
-REQUIRED_IMAGES = (PLUGIN_GIT,)
-BOXED = ("exec",)
-"""The primitives whose steps make boxes of their own and run privileged."""
+STEP_HELPER = "step-helper"
 
 _BY_DIGEST = re.compile(
     r"^[a-z0-9]+(?:[.-][a-z0-9]+)*(?::[0-9]+)?"
@@ -112,14 +104,11 @@ class Manifest:
     primitives: tuple[PrimitiveRelease, ...]
 
     @property
-    def plugin_git(self) -> str:
-        """Woodpecker's git plugin, which every checkout runs."""
-        return self.images[PLUGIN_GIT]
-
-    @property
-    def primitive_base(self) -> str:
-        """The step wrapper's base image, empty when the manifest names none."""
-        return self.images.get(PRIMITIVE_BASE, "")
+    def step_helper(self) -> str:
+        """The image every job of a grading run runs in."""
+        if STEP_HELPER not in self.images:
+            raise ManifestError(f"{self.path}: `images` has no {STEP_HELPER}")
+        return self.images[STEP_HELPER]
 
     @property
     def primitive_names(self) -> list[str]:
@@ -180,9 +169,6 @@ def _images(path: Path, value: Any) -> dict[str, str]:
     images: dict[str, str] = {}
     for name, reference in value.items():
         images[str(name)] = _digest(path, f"images.{name}", reference)
-    missing = [name for name in REQUIRED_IMAGES if name not in images]
-    if missing:
-        raise ManifestError(f"{path}: `images` has no {', '.join(missing)}")
     return images
 
 

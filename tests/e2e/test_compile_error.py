@@ -1,9 +1,9 @@
 """A C++ solution that does not compile, graded on the running compose
-stack through a pipeline the forge builds, on the dev agent.
+stack through a pipeline the forge builds, on the dev runners.
 
-An organiser makes an org, a contest and a task on `unicon/classic@v6`
-through the API: two runs, every run and the compile log shown at once.
-An entrant submits C++ that names a variable it never declares. exec
+An organiser makes an org, a contest and a task on its own copy of
+`judgekit/classic@v1` through the API: two runs, every run and the compile
+log shown at once. An entrant submits C++ that names a variable it never declares. exec
 compiles it once for the step, in a box of its own, and runs nothing: every
 run ends `compile_error`, the grading says it did not compile, and the
 entrant's page says "Did not compile" on the submission's row and shows the
@@ -23,6 +23,7 @@ from tests.e2e.api import (
     graded,
     let_in,
     open_once_published,
+    publish_classic,
     save_task,
     submit,
     write_contest,
@@ -51,17 +52,14 @@ int main() {
 
 TASK = """\
 name: Sum
-workflow: unicon/classic@v6
 inputs:
   code: {entrant: {label: Your solution, max_size: 1MB}}
   language: cpp
   time_limit: 1
   memory_limit: 256
-repeat:
-  - inputs: [input, answer]
-    tuples:
-      - [tests/1.in, tests/1.ans]
-      - [tests/2.in, tests/2.ans]
+runs:
+  - {input: tests/1.in, answer: tests/1.ans}
+  - {input: tests/2.in, answer: tests/2.ans}
 scoring:
   values:
     passed: {block: sum, over: {runs: all}, of: {run: [all, passed]}}
@@ -77,7 +75,6 @@ submissions: {max: 50, rate: {count: 1, per: 5}}
 
 def task_files() -> dict[str, str]:
     return {
-        "task.yaml": TASK,
         "statement.md": "# Sum\n\nAdd two numbers.\n",
         "tests/1.in": "1 2\n",
         "tests/1.ans": "3\n",
@@ -101,7 +98,8 @@ def test_code_that_does_not_compile_says_so_with_its_log(browser: Browser) -> No
     organiser.send("POST", f"{contest}/tasks", {"name": "sum"})
     write_contest(organiser, contest, contest_yaml("Broken", "sum", "draft"))
     task = f"{contest}/tasks/sum"
-    save_task(organiser, task, task_files())
+    workflow = publish_classic(organiser, org)
+    save_task(organiser, task, f"workflow: {workflow}\n{TASK}", task_files())
     open_once_published(organiser, contest, contest_yaml("Broken", "sum", "published"))
     let_in(organiser, entrant, contest)
 

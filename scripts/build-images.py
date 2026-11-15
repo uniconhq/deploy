@@ -1,30 +1,25 @@
 """Build every image the stack grades with from the sibling checkouts, and
 write the local image manifest bootstrap reads.
 
-A plan names every image by digest, and a digest is what a registry says an
-image is, so a development machine needs a registry to get real ones. This
-starts one on this machine, `registry:2` on 127.0.0.1:5000, in a container of
-its own outside the compose stack, with its images in the volume
-`unicon-registry` so they survive a restart. Docker trusts a registry on
-localhost over plain HTTP without being told, and the daemon pulls from it by
-digest the same way it would from ghcr.io, which is what the CI agent does.
-Nothing is pushed anywhere else.
+Every runner label names the step helper by digest, and a digest is what a
+registry says an image is, so a development machine needs a registry to get
+real ones. This starts one on this machine, `registry:2` on 127.0.0.1:5000,
+in a container of its own outside the compose stack, with its images in the
+volume `unicon-registry` so they survive a restart. Docker trusts a registry
+on localhost over plain HTTP without being told, and the daemon pulls from
+it by digest the same way it would from ghcr.io, which is what a runner
+does. Nothing is pushed anywhere else.
 
-It builds the runner's two images from ../runner (images/<name>/Dockerfile,
-with the checkout as the context, the way the runner's own CI builds them),
-primitive-base first and then the worker, and each primitive from
-../primitive-<name> (its Dockerfile at the root) on that primitive-base,
-passed as the build argument BASE_IMAGE by its digest here, pushes each to
-the registry, reads back the digest the push gave it, and writes
-images.local.json: the same shape as images.json, with every runner
-image a localhost:5000 reference by digest, and every other image there,
-Woodpecker's git plugin, copied from images.json as released. Each
-primitive's checkout fills the version at the forge that is the major of
-the version in its pyproject.toml, `v3` for 3.0.0, with its source the
-sibling checkout; every other version of it is copied from images.json as
-released, the image by its digest at ghcr.io and the source its tag on
-GitHub. So a stack built this way seeds exec's v3 from the checkout, and
-any other version images.json pins from its release. images.local.json is
+It builds the step helper from ../runner (images/step-helper/Dockerfile,
+with the checkout as the context, the way the runner's own CI builds it),
+and each primitive from ../primitive-<name> (its Dockerfile at the root),
+pushes each to the registry, reads back the digest the push gave it, and
+writes images.local.json: the same shape as images.json, with every image
+built here a localhost:5000 reference by digest. Each primitive's checkout
+fills the version at the forge that is the major of the version in its
+pyproject.toml, `v4` for 4.0.0, with its source the sibling checkout; every
+other version of it is copied from images.json as released, the image by its
+digest at ghcr.io and the source its tag on GitHub. images.local.json is
 git-ignored, and bootstrap reads it instead of images.json whenever it is
 there. Run it from the deploy directory:
 
@@ -37,21 +32,18 @@ and writes them back, under a scope per image, so a layer whose inputs did
 not change since an earlier run is not built again. The image is loaded into
 Docker and pushed from there, as a laptop's build is, so its digest is read
 the same way and Docker holds the image, which bootstrap then finds without
-a pull. The primitives, on primitive-base, are built by Docker's own builder
-whatever the options, since a buildx builder of its own runs in a container
-of its own, which reaches neither the images Docker holds nor the registry
-on this machine's localhost.
+a pull.
 
 A checkout is built as it is on disk, committed or not, so a change in a
 sibling is one build and one bootstrap away from a grading. An image whose
-build did not change keeps its digest, and bootstrap then changes nothing at
-the forge. One that did change gets a new digest, and bootstrap moves the
-version at the forge to it when its declaration is otherwise the same, as
-for a patch release; a changed declaration stops bootstrap before it seeds
-anything, naming the version that differs, and `uv run bootstrap --rewrite`
-rewrites it in place on a development stack. That is why the build attaches
-no provenance or SBOM attestation: each carries the time of the build, so
-every build would be a new digest even when nothing changed.
+build did not change keeps its digest. A new step helper digest is a new
+label, which bootstrap writes and a runner restart takes. A new primitive
+digest moves the version at the forge when its declaration is otherwise the
+same, as for a patch release; a changed declaration stops bootstrap before
+it seeds anything, naming the version that differs, and `uv run bootstrap
+--rewrite` rewrites it in place on a development stack. That is why the
+build attaches no provenance or SBOM attestation: each carries the time of
+the build, so every build would be a new digest even when nothing changed.
 """
 
 from __future__ import annotations
@@ -72,11 +64,7 @@ import httpx
 
 from bootstrap import images
 
-RUNNER_IMAGES = ("worker",)
 PRIMITIVES = ("exec",)
-"""The primitives, each built on the runner's `images.PRIMITIVE_BASE`, which
-is built first.
-"""
 
 REGISTRY = "localhost:5000"
 REGISTRY_ASKED = "127.0.0.1:5000"
@@ -131,30 +119,23 @@ def main(argv: list[str] | None = None) -> int:
     try:
         released = _released_primitives(directory)
         _ensure_registry()
+        runner = siblings / "runner"
         built = {
-            name: build.image(
-                name,
-                context=siblings / "runner",
-                dockerfile=siblings / "runner" / "images" / name / "Dockerfile",
+            images.STEP_HELPER: build.image(
+                images.STEP_HELPER,
+                context=runner,
+                dockerfile=runner / "images" / images.STEP_HELPER / "Dockerfile",
             )
-            for name in (images.PRIMITIVE_BASE, *RUNNER_IMAGES)
         }
-        on_base = Build()
         primitives: dict[str, dict[str, Any]] = {}
         for name in PRIMITIVES:
             checkout = siblings / f"primitive-{name}"
-            version = _version_of(checkout)
-            versions = {
-                key: value
-                for key, value in released.get(name, {}).items()
-                if name != "exec" or key not in ("v1", "v2")
-            }
-            versions[version] = {
-                "image": on_base.image(
+            versions = dict(released.get(name, {}))
+            versions[_version_of(checkout)] = {
+                "image": build.image(
                     f"primitive-{name}",
                     context=checkout,
                     dockerfile=checkout / "Dockerfile",
-                    arguments={"BASE_IMAGE": built[images.PRIMITIVE_BASE]},
                 ),
                 "source": {"path": _relative(checkout, directory)},
             }
@@ -165,7 +146,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"build-images failed: {failure}")
         return 1
 
-    built = {**_released_images(directory, built), **built}
     manifest = directory / images.LOCAL_MANIFEST
     manifest.write_text(
         json.dumps({"images": built, "primitives": primitives}, indent=2) + "\n",
@@ -182,25 +162,11 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def _released_images(directory: Path, built: dict[str, str]) -> dict[str, str]:
-    """Every image the release manifest pins that this does not build, such
-    as Woodpecker's git plugin, by its digest there."""
-    document = json.loads(
-        (directory / images.RELEASE_MANIFEST).read_text(encoding="utf-8")
-    )
-    return {
-        str(name): str(reference)
-        for name, reference in document["images"].items()
-        if name not in built
-    }
-
-
 def _released_primitives(directory: Path) -> dict[str, dict[str, Any]]:
     """Every primitive version the release manifest pins, as its entries
     there: the image at ghcr.io by digest and the source its tag on GitHub.
     """
     path = directory / images.RELEASE_MANIFEST
-    images.load(path)
     document = json.loads(path.read_text(encoding="utf-8"))
     return {
         str(name): dict(versions) for name, versions in document["primitives"].items()
@@ -285,10 +251,8 @@ class Build:
         *,
         context: Path,
         dockerfile: Path,
-        arguments: dict[str, str] | None = None,
     ) -> str:
-        """Build, push and return the image as a reference by digest, with
-        `arguments` as its build arguments."""
+        """Build, push and return the image as a reference by digest."""
         if not dockerfile.is_file():
             raise BuildFailed(
                 f"{dockerfile} is missing; is the checkout beside deploy?"
@@ -300,11 +264,6 @@ class Build:
             *self.command(name),
             "--provenance=false",
             "--sbom=false",
-            *[
-                flag
-                for key, value in (arguments or {}).items()
-                for flag in ("--build-arg", f"{key}={value}")
-            ],
             "--file",
             str(dockerfile),
             "--tag",

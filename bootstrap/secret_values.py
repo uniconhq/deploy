@@ -26,8 +26,7 @@ def password() -> str:
 def opaque_token() -> str:
     """An opaque secret, 32 random bytes in hex.
 
-    Used for the Woodpecker server's gRPC secret, which signs the tokens it
-    hands its agents, the Garage admin token, and Forgejo's INTERNAL_TOKEN,
+    Used for the Garage admin token and Forgejo's INTERNAL_TOKEN,
     which Forgejo compares literally against the header its own git hooks
     send.
     """

@@ -1,0 +1,30 @@
+name: Guess the Number
+workflow: judgekit/interactive@v1
+inputs:
+  code: {entrant: {label: Your solution, max_size: 1MB}}
+  language: {entrant: {options: [python, cpp], default: python}}
+  judge: judge/
+  judge_language: python
+  judge_manifest: judge/program.yaml
+  time_limit: 1
+  memory_limit: 256
+  judge_time_limit: 3
+  judge_memory_limit: 256
+runs:
+  - {input: samples/1.in}
+  - {input: tests/1.in}
+  - {input: tests/2.in}
+  - {input: tests/3.in}
+  - {input: tests/4.in}
+scoring:
+  groups:
+    sample: {input: [samples/1.in]}
+  values:
+    solved: {block: min, over: {runs: all}, of: {run: [all, passed]}}
+  show:
+    always:
+      values: [solved]
+      outputs: [log, compiled]
+      runs:
+        - {of: all, fields: [verdict, passed, time_ms, memory_kb, label, message]}
+submissions: {rate: {count: 10, per: 60}}

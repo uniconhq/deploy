@@ -1,7 +1,7 @@
 """Keeping the database role passwords in step with .env.
 
 postgres/init only runs on the first start of an empty data directory. A stack
-whose .env was regenerated while the volume survived would then have three
+whose .env was regenerated while the volume survived would then have
 passwords nobody can use, and the only symptom is Forgejo failing to
 authenticate. Setting them on every run makes .env the truth instead.
 
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from bootstrap.compose import Compose
 
-ROLES = ("forgejo", "woodpecker", "unicon")
+ROLES = ("forgejo", "unicon")
 
 
 def sync_role_passwords(

@@ -34,11 +34,6 @@ x-backend-env: &backend-env
   UNICON_FORGE_PLATFORM_ACCOUNT: unicon-backend
   UNICON_FORGE_OAUTH_CLIENT_ID: ${UNICON_FORGE_OAUTH_CLIENT_ID}
   UNICON_FORGE_OAUTH_CLIENT_SECRET: ${UNICON_FORGE_OAUTH_CLIENT_SECRET}
-  UNICON_WOODPECKER_URL: http://woodpecker-server:8000
-  # The URL the CI knows itself by. It writes its webhooks under it, and the
-  # backend tells the CI's webhook from any other by it.
-  UNICON_WOODPECKER_PUBLIC_URL: ${WOODPECKER_PUBLIC_URL}
-  UNICON_WOODPECKER_TOKEN: ${UNICON_WOODPECKER_TOKEN}
   UNICON_SESSION_SIGNING_KEY: ${UNICON_SESSION_SIGNING_KEY}
   UNICON_TOKEN_ENCRYPTION_KEY: ${UNICON_TOKEN_ENCRYPTION_KEY}
   # Seconds. Forgejo's refresh token lives as long, from the same key: see
@@ -55,36 +50,28 @@ x-backend-env: &backend-env
   # the first upload, and nobody who never submits costs a repository.
   UNICON_PLACES_AHEAD: ${UNICON_PLACES_AHEAD:-true}
   # Object storage: Garage inside the network, in the region garage/garage.toml
-  # names, the access key bootstrap made for the backend, and the bucket
-  # bootstrap makes for the grading run logs, which a machine writes through a
-  # presigned URL the proxy passes to Garage untouched. What a browser
-  # uploads goes through the upload door into Forgejo's large-file store; a
-  # grading machine reads a task's large file from there by a URL signed
-  # with the key bootstrap made that may only read that bucket.
+  # names, the access key bootstrap made for the backend, and the buckets
+  # bootstrap makes: results holds the files forge reads out of a grading's
+  # runs, which a scoring run fetches through a presigned link the proxy
+  # passes to Garage untouched; uploads holds an organiser's resumable
+  # upload until it goes into Forgejo's large-file store.
   UNICON_S3_ENDPOINT: http://garage:3900
   UNICON_S3_REGION: garage
   UNICON_S3_ACCESS_KEY: ${UNICON_S3_ACCESS_KEY}
   UNICON_S3_SECRET_KEY: ${UNICON_S3_SECRET_KEY}
   UNICON_S3_RESULTS_BUCKET: unicon-results
   UNICON_S3_UPLOADS_BUCKET: unicon-uploads
-  UNICON_S3_LFS_ACCESS_KEY: ${UNICON_S3_LFS_ACCESS_KEY}
-  UNICON_S3_LFS_SECRET_KEY: ${UNICON_S3_LFS_SECRET_KEY}
-  UNICON_S3_LFS_BUCKET: forgejo-lfs
-  # Where a grading machine reaches the platform: each step's door and the
-  # uploads of its files and logs. The public URL unless .env says otherwise;
-  # compose.dev.yaml points it at the proxy's name on this network, which the
-  # dev agent's steps join.
+  # Where a grading machine reaches the platform: the results link a scoring
+  # run's fetch reads. The public URL unless .env says otherwise;
+  # compose.dev.yaml points it at the proxy's name on the network the dev
+  # runners' jobs join.
   UNICON_MACHINE_URL: ${UNICON_MACHINE_URL:-${UNICON_PUBLIC_URL}}
-  # A task's pipelines check the submission out with Woodpecker's git plugin
-  # and end with a step on the step wrapper's base image, both by digest from
-  # the image manifest (images.json), which may name no base image yet: a
-  # stack without one grades nothing.
-  UNICON_PLUGIN_GIT_IMAGE: ${UNICON_PLUGIN_GIT_IMAGE}
-  UNICON_PRIMITIVE_BASE_IMAGE: ${UNICON_PRIMITIVE_BASE_IMAGE:-}
-  # The grading machines' slot sizes, name:MB comma separated, which bootstrap
-  # writes from machine/slots.json: the forge fits each run task pipeline in
-  # the smallest that holds it.
+  # The grading machines' slot sizes, name:cores:MB comma separated, which
+  # bootstrap writes from machine/slots.json: the forge fits each run's exec
+  # job in the smallest that holds it.
   UNICON_SLOT_SIZES: ${UNICON_SLOT_SIZES}
+  # The most bytes one step's artifact may be (see .env.example).
+  UNICON_ARTIFACT_MAX: ${UNICON_ARTIFACT_MAX}
   # Step images withdrawn by hand, by digest, comma separated, which no
   # grading runs (see .env.example).
   UNICON_WITHDRAWN_IMAGES: ${UNICON_WITHDRAWN_IMAGES:-}
@@ -109,7 +96,6 @@ services:
       POSTGRES_DB: postgres
       # Read by postgres/init/10-create-databases.sh on the first start.
       FORGEJO_DB_PASSWORD: ${FORGEJO_DB_PASSWORD:?set by bootstrap}
-      WOODPECKER_DB_PASSWORD: ${WOODPECKER_DB_PASSWORD:?set by bootstrap}
       UNICON_DB_PASSWORD: ${UNICON_DB_PASSWORD:?set by bootstrap}
     volumes:
       - postgres-data:/var/lib/postgresql/data
@@ -117,7 +103,7 @@ services:
     healthcheck:
       # Over TCP, not the socket. The entrypoint runs a temporary server on the
       # socket only while it applies postgres/init, so a socket check reports
-      # healthy before the three roles exist and everything that waits on
+      # healthy before the roles exist and everything that waits on
       # service_healthy starts too early.
       test: ["CMD-SHELL", "pg_isready -h 127.0.0.1 -U postgres -d postgres"]
       interval: 3s
@@ -126,7 +112,7 @@ services:
       start_period: 20s
 
   forgejo:
-    image: codeberg.org/forgejo/forgejo:15.0.8
+    image: codeberg.org/forgejo/forgejo:17.0.1
     restart: unless-stopped
     depends_on:
       postgres:
@@ -204,94 +190,6 @@ services:
       timeout: 5s
       retries: 40
       start_period: 60s
-
-  woodpecker-server:
-    image: woodpeckerci/woodpecker-server:v3.18.1
-    restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
-      forgejo:
-        condition: service_healthy
-    environment:
-      WOODPECKER_HOST: ${WOODPECKER_PUBLIC_URL:?set by bootstrap}
-      WOODPECKER_FORGEJO: "true"
-      # API calls go over the compose network; the browser is sent to the public
-      # URL instead. Without the second variable Woodpecker would redirect
-      # people to http://forgejo:3000, which no browser can resolve. Note that
-      # the OAuth host is used for the token request as well, so it has to be
-      # reachable from this container too; see compose.dev.yaml.
-      WOODPECKER_FORGEJO_URL: http://forgejo:3000
-      WOODPECKER_EXPERT_FORGE_OAUTH_HOST: ${FORGEJO_PUBLIC_URL:?set by bootstrap}
-      # Empty until bootstrap has created the Forgejo OAuth application, which
-      # it does before it starts this service, for the same reason as the two
-      # Forgejo keys above.
-      WOODPECKER_FORGEJO_CLIENT: ${WOODPECKER_FORGEJO_CLIENT}
-      WOODPECKER_FORGEJO_SECRET: ${WOODPECKER_FORGEJO_SECRET}
-      # No WOODPECKER_AGENT_SECRET. Without a shared secret a machine becomes
-      # an agent only by presenting a token the server issued for it, so an
-      # agent exists only by enrolment. No agent runs in this file: a grading
-      # machine is a separate host, and compose.dev.yaml may run one on the
-      # laptop under its own token.
-      # Signs the tokens the server hands its agents. Left unset the server
-      # generates one at every start, logs a warning, and every agent has to
-      # re-register; a restart in the middle of a contest would then interrupt
-      # the grading in flight.
-      WOODPECKER_GRPC_SECRET: ${WOODPECKER_GRPC_SECRET:?set by bootstrap}
-      # Only accounts named here may sign in; WOODPECKER_OPEN stays off.
-      WOODPECKER_ADMIN: unicon-ci
-      WOODPECKER_OPEN: "false"
-      WOODPECKER_AUTHENTICATE_PUBLIC_REPOS: "true"
-      # Never sqlite3, which is the default. Under concurrent dispatch it
-      # returned HTTP 500 with an empty body and lost between 8 and 51 per cent
-      # of pipelines; Postgres lost none at every concurrency measured
-      # (stack-test-findings.md section 3.1). Serial development traffic never
-      # shows this, which is why it has to be right from the first deployment.
-      WOODPECKER_DATABASE_DRIVER: postgres
-      WOODPECKER_DATABASE_DATASOURCE: postgres://woodpecker:${WOODPECKER_DB_PASSWORD:?set by bootstrap}@postgres:5432/woodpecker?sslmode=disable
-      # Every run asks the backend what it is, and nothing else does: the
-      # configuration extension is exclusive, so Woodpecker never reads a
-      # pipeline file from a repository, and a repository with one in it runs
-      # nothing of it. The backend answers only for a grading it dispatched,
-      # checking the server's signature on the request. `private` lets the
-      # server call an address inside this network; the default refuses it
-      # and Woodpecker then answers the dispatch with an empty 204.
-      WOODPECKER_CONFIG_EXTENSION_ENDPOINT: http://backend:8000/api/v1/ci/config
-      WOODPECKER_CONFIG_EXTENSION_EXCLUSIVE: "true"
-      WOODPECKER_EXTENSIONS_ALLOWED_HOSTS: private
-      # The image a clone step may hand the repository credential to:
-      # Woodpecker's git plugin, by the digest bootstrap took from the image
-      # manifest. A step on this list gets the credential without the
-      # repository being trusted with it, which is how a grading's checkout
-      # clones with `security` trust off. An entry with a digest matches that
-      # digest alone. Setting the list replaces Woodpecker's own, so its git
-      # plugin at any other digest is lent nothing: a pipeline checks its
-      # submission out with the plugin at this digest, named in the
-      # extension's answer.
-      WOODPECKER_PLUGINS_TRUSTED_CLONE: ${UNICON_PLUGIN_GIT_IMAGE}
-      # The plugins a step may run privileged as: every image of `exec`
-      # at the forge, by digest, older ones a published plan
-      # still pins among them, since those steps make boxes of their own, but
-      # any in UNICON_WITHDRAWN_IMAGES. A plugin step has no commands,
-      # environment or entrypoint, so what runs is the image alone.
-      WOODPECKER_PLUGINS_PRIVILEGED: ${UNICON_PRIVILEGED_IMAGES:-}
-      # Minutes. The forge's clock is built on the default: a run gets 30
-      # minutes (RUN_TIMEOUT in the forge package), of which it allows the
-      # checkouts 4 and the reports 1, and plans a pipeline's steps into the
-      # 25 left. A grading run still going after that is stuck. Change the two
-      # together.
-      WOODPECKER_MAX_PIPELINE_TIMEOUT: "60"
-      WOODPECKER_DEFAULT_PIPELINE_TIMEOUT: "30"
-      WOODPECKER_LOG_LEVEL: info
-    # No healthcheck here: the image declares its own and has no shell to write
-    # a better one with.
-    # No published port here. Woodpecker is an operator's interface, not part of
-    # the app, and a deployment that wants it reachable puts it behind its own
-    # ingress under a name it controls. compose.dev.yaml publishes it on
-    # loopback, which is also what lets bootstrap finish the token dance against
-    # WOODPECKER_PUBLIC_URL from the machine it runs on.
-    volumes:
-      - woodpecker-data:/var/lib/woodpecker
 
   garage:
     image: dxflrs/garage:v2.4.1
@@ -424,6 +322,5 @@ volumes:
   resolve-cache:
   postgres-data:
   forgejo-data:
-  woodpecker-data:
   garage-meta:
   garage-data:
