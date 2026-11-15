@@ -1,13 +1,12 @@
 # riverside/coins@v1: one run of a Making Change solution on one amount.
-# The solution is compiled and run here, and judged by judgekit/check@v1
-# with the checker beside this file, given as its answer data/fewest.bin,
-# the fewest coins for every amount up to 1,000,000, so a test needs no
-# answer file.
+# The solution is compiled and run here, then the checker beside this file
+# is run on its output, given as its answer data/fewest.bin, the fewest
+# coins for every amount up to 1,000,000, so a run needs no answer file.
 description: >-
   Judges a Making Change solution on one amount. It compiles and runs the
   solution, then the checker beside this file checks the coins add up
   and are as few as can be, using data/fewest.bin, the fewest coins for
-  every amount up to 1,000,000. So a test is only an amount, with no
+  every amount up to 1,000,000. So a run is only an amount, with no
   answer file.
 inputs:
   code: {type: file, title: Solution}
@@ -26,12 +25,17 @@ steps:
       time_limit: ${{ inputs.time_limit }}
       memory_limit: ${{ inputs.memory_limit }}
   - id: check
-    use: judgekit/check@v1
+    use: unicon/exec@v4
     with:
-      checker: ${{ workflow.checker/ }}
-      input: ${{ inputs.input }}
-      output: ${{ steps.solution.output }}
-      answer: ${{ workflow.data/fewest.bin }}
+      source: ${{ workflow.checker/ }}
+      language: python
+      manifest: ${{ workflow.program.yaml }}
+      time_limit: 5
+      memory_limit: 256
+      files:
+        input: ${{ inputs.input }}
+        output: ${{ steps.solution.output }}
+        answer: ${{ workflow.data/fewest.bin }}
 
 outputs:
   score: ${{ steps.check.score }}

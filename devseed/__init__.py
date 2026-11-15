@@ -28,10 +28,10 @@ The workflows use each other's versions as steps:
   and `judgekit/compare@v1` as a box;
 - `riverside/standard@v1`: `judgekit/classic@v1`
   under the club's limits;
-- `riverside/coins@v1`: the solution run by
-  `unicon/exec@v4`, and `judgekit/check@v1` as a box, with a checker of
-  its own given a 2 MB table, `data/fewest.bin`, uploaded into the draft,
-  as its answer; its draft is ahead of v1 by a changed checker;
+- `riverside/coins@v1`: the solution and then a checker of its own, both
+  run by `unicon/exec@v4`, the checker given a 2 MB table,
+  `data/fewest.bin`, uploaded into the draft, as its answer; its draft is
+  ahead of v1 by a changed checker;
 - `dan/round-trip@v1`: `judgekit/classic@v1` twice, once each way;
 - `bob/practice@v1`: `judgekit/classic@v1` under bob's own limits, used by
   no task.
