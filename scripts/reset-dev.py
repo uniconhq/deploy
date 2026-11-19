@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import subprocess
 import sys
 import time
@@ -65,10 +66,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     options = parser.parse_args(argv)
     try:
-        people = accounts(envfile.load(DEPLOY / ".env"))
+        values = envfile.load(DEPLOY / ".env")
+        people = accounts(values)
         compose = Compose(DEPLOY, FILES)
         step("throwing the stack's data away")
-        docker_compose(*PROFILES, "down", "--volumes", "--remove-orphans")
+        docker_compose(
+            *PROFILES, "down", "--volumes", "--remove-orphans", env=placeholders(values)
+        )
         if options.build:
             step("building the backend and the frontend")
             docker_compose(*PROFILES, "build", *APP_SERVICES)
@@ -115,12 +119,31 @@ def accounts(values: dict[str, str]) -> dict[str, tuple[str, str]]:
     return found
 
 
-def docker_compose(*arguments: str) -> None:
-    """A compose command on the dev files, its output shown as it goes."""
+def placeholders(values: dict[str, str]) -> dict[str, str]:
+    """A stand-in for each key the compose files require that `.env` and the
+    environment leave empty, for a `down`, which reads every file but needs
+    none of the values. A `.env` from before a key was added lacks it until
+    bootstrap writes it, and bootstrap runs after the `down`.
+    """
+    text = "".join((DEPLOY / file).read_text(encoding="utf-8") for file in FILES)
+    required = sorted(set(re.findall(r"\$\{(\w+):\?", text)))
+    return {
+        key: "placeholder"
+        for key in required
+        if not values.get(key) and not os.environ.get(key)
+    }
+
+
+def docker_compose(*arguments: str, env: dict[str, str] | None = None) -> None:
+    """A compose command on the dev files, its output shown as it goes, with
+    `env` over the environment.
+    """
     command = ["docker", "compose"]
     for file in FILES:
         command += ["-f", file]
-    if subprocess.run([*command, *arguments], cwd=DEPLOY).returncode != 0:
+    environment = {**os.environ, **env} if env else None
+    finished = subprocess.run([*command, *arguments], cwd=DEPLOY, env=environment)
+    if finished.returncode != 0:
         raise ResetFailed(f"docker compose {' '.join(arguments)} did not succeed")
 
 

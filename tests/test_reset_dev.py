@@ -82,3 +82,30 @@ def test_a_missing_key_stops_the_reset_before_the_stack_is_touched(
 
     assert ran == []
     assert "DEV_BOB_PASSWORD, DEV_BOB_EMAIL" in capsys.readouterr().err
+
+
+def test_a_down_stands_in_for_each_required_key_the_env_leaves_empty(
+    reset_dev: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "compose.yaml").write_text(
+        "a: ${OLD_KEY:?set by bootstrap}\nb: ${EMPTY_KEY:?set by bootstrap}\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "compose.dev.yaml").write_text(
+        "c: ${NEW_KEY:?set by bootstrap}\nd: ${SHELL_KEY:?x}\ne: ${OPTIONAL:-}\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(reset_dev, "DEPLOY", tmp_path)
+    monkeypatch.setenv("SHELL_KEY", "set")
+
+    found = reset_dev.placeholders({"OLD_KEY": "kept", "EMPTY_KEY": ""})
+
+    assert found == {"EMPTY_KEY": "placeholder", "NEW_KEY": "placeholder"}
+
+
+def test_the_dev_files_need_only_bootstrap_written_keys_for_a_down(
+    reset_dev: ModuleType,
+) -> None:
+    found = reset_dev.placeholders({})
+
+    assert {"DEV_RUNNER_BASE_LABELS", "DEV_RUNNER_EXEC_LABELS"} <= found.keys()
